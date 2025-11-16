@@ -1,11 +1,12 @@
 use parserc::syntax::Syntax;
 
-use crate::input::PatternInput;
+use crate::{errors::CompileError, input::PatternInput};
 
 /// backslash token `\`
 #[derive(Debug, PartialEq, Eq, PartialOrd, Ord, Clone, Syntax)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 #[syntax(char = '\\')]
+#[syntax(map_err = CompileError::Token.map())]
 pub struct BackSlash<I>(pub I)
 where
     I: PatternInput;
@@ -14,6 +15,7 @@ where
 #[derive(Debug, PartialEq, Eq, PartialOrd, Ord, Clone, Syntax)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 #[syntax(char = '^')]
+#[syntax(map_err = CompileError::Token.map())]
 pub struct Caret<I>(pub I)
 where
     I: PatternInput;
@@ -22,6 +24,7 @@ where
 #[derive(Debug, PartialEq, Eq, PartialOrd, Ord, Clone, Syntax)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 #[syntax(char = '{')]
+#[syntax(map_err = CompileError::Token.map())]
 pub struct BraceStart<I>(pub I)
 where
     I: PatternInput;
@@ -30,6 +33,7 @@ where
 #[derive(Debug, PartialEq, Eq, PartialOrd, Ord, Clone, Syntax)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 #[syntax(char = '}')]
+#[syntax(map_err = CompileError::Token.map())]
 pub struct BraceEnd<I>(pub I)
 where
     I: PatternInput;
@@ -38,6 +42,7 @@ where
 #[derive(Debug, PartialEq, Eq, PartialOrd, Ord, Clone, Syntax)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 #[syntax(char = '[')]
+#[syntax(map_err = CompileError::Token.map())]
 pub struct BracketStart<I>(pub I)
 where
     I: PatternInput;
@@ -46,6 +51,7 @@ where
 #[derive(Debug, PartialEq, Eq, PartialOrd, Ord, Clone, Syntax)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 #[syntax(char = ']')]
+#[syntax(map_err = CompileError::Token.map())]
 pub struct BracketEnd<I>(pub I)
 where
     I: PatternInput;
@@ -54,6 +60,7 @@ where
 #[derive(Debug, PartialEq, Eq, PartialOrd, Ord, Clone, Syntax)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 #[syntax(char = '(')]
+#[syntax(map_err = CompileError::Token.map())]
 pub struct ParenStart<I>(pub I)
 where
     I: PatternInput;
@@ -62,6 +69,7 @@ where
 #[derive(Debug, PartialEq, Eq, PartialOrd, Ord, Clone, Syntax)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 #[syntax(char = ')')]
+#[syntax(map_err = CompileError::Token.map())]
 pub struct ParenEnd<I>(pub I)
 where
     I: PatternInput;
@@ -70,6 +78,7 @@ where
 #[derive(Debug, PartialEq, Eq, PartialOrd, Ord, Clone, Syntax)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 #[syntax(char = '|')]
+#[syntax(map_err = CompileError::Token.map())]
 pub struct Or<I>(pub I)
 where
     I: PatternInput;
@@ -78,6 +87,7 @@ where
 #[derive(Debug, PartialEq, Eq, PartialOrd, Ord, Clone, Syntax)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 #[syntax(char = '?')]
+#[syntax(map_err = CompileError::Token.map())]
 pub struct Question<I>(pub I)
 where
     I: PatternInput;
@@ -86,6 +96,7 @@ where
 #[derive(Debug, PartialEq, Eq, PartialOrd, Ord, Clone, Syntax)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 #[syntax(char = '.')]
+#[syntax(map_err = CompileError::Token.map())]
 pub struct Dot<I>(pub I)
 where
     I: PatternInput;
@@ -94,6 +105,7 @@ where
 #[derive(Debug, PartialEq, Eq, PartialOrd, Ord, Clone, Syntax)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 #[syntax(char = '+')]
+#[syntax(map_err = CompileError::Token.map())]
 pub struct Plus<I>(pub I)
 where
     I: PatternInput;
@@ -102,6 +114,7 @@ where
 #[derive(Debug, PartialEq, Eq, PartialOrd, Ord, Clone, Syntax)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 #[syntax(char = '-')]
+#[syntax(map_err = CompileError::Token.map())]
 pub struct Minus<I>(pub I)
 where
     I: PatternInput;
@@ -110,6 +123,7 @@ where
 #[derive(Debug, PartialEq, Eq, PartialOrd, Ord, Clone, Syntax)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 #[syntax(char = '*')]
+#[syntax(map_err = CompileError::Token.map())]
 pub struct Star<I>(pub I)
 where
     I: PatternInput;
@@ -118,6 +132,7 @@ where
 #[derive(Debug, PartialEq, Eq, PartialOrd, Ord, Clone, Syntax)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 #[syntax(char = '$')]
+#[syntax(map_err = CompileError::Token.map())]
 pub struct Dollar<I>(pub I)
 where
     I: PatternInput;
@@ -126,6 +141,7 @@ where
 #[derive(Debug, PartialEq, Eq, PartialOrd, Ord, Clone, Syntax)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 #[syntax(keyword = "(?:")]
+#[syntax(map_err = CompileError::Token.map())]
 pub struct BracketStartQeustionColon<I>(pub I)
 where
     I: PatternInput;
@@ -134,6 +150,7 @@ where
 #[derive(Debug, PartialEq, Eq, PartialOrd, Ord, Clone, Syntax)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 #[syntax(keyword = "(?=")]
+#[syntax(map_err = CompileError::Token.map())]
 pub struct BracketStartQeustionEq<I>(pub I)
 where
     I: PatternInput;
@@ -142,6 +159,7 @@ where
 #[derive(Debug, PartialEq, Eq, PartialOrd, Ord, Clone, Syntax)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 #[syntax(keyword = "(?!")]
+#[syntax(map_err = CompileError::Token.map())]
 pub struct BracketStartQeustionNot<I>(pub I)
 where
     I: PatternInput;
@@ -150,6 +168,7 @@ where
 #[derive(Debug, PartialEq, Eq, PartialOrd, Ord, Clone, Syntax)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 #[syntax(keyword = "(?<=")]
+#[syntax(map_err = CompileError::Token.map())]
 pub struct BracketStartQeustionLtEq<I>(pub I)
 where
     I: PatternInput;
@@ -158,6 +177,7 @@ where
 #[derive(Debug, PartialEq, Eq, PartialOrd, Ord, Clone, Syntax)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 #[syntax(keyword = "(?<!")]
+#[syntax(map_err = CompileError::Token.map())]
 pub struct BracketStartQeustionLtNot<I>(pub I)
 where
     I: PatternInput;

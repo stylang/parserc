@@ -1,6 +1,7 @@
 use parserc::syntax::{Char, Syntax};
 
 use crate::{
+    errors::CompileError,
     input::PatternInput,
     pattern::{
         BackSlash, BraceStart, BracketStart, Caret, Dollar, Dot, FixedDigits, FixedHexDigits,
@@ -11,6 +12,7 @@ use crate::{
 /// Escape token sequence.
 #[derive(Debug, PartialEq, Eq, PartialOrd, Ord, Clone, Syntax)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+#[syntax(map_err = CompileError::Escape.map())]
 pub enum Escape<I>
 where
     I: PatternInput,

@@ -1,16 +1,20 @@
-use parserc::syntax::{Delimiter, Syntax};
+use parserc::ControlFlow;
+use parserc::syntax::{Delimiter, InputSyntaxExt, Syntax};
 
-use crate::errors::CompileError;
+use crate::errors::{CompileError, RegexError};
 use crate::input::PatternInput;
 use crate::pattern::{
-    Caret, Class, Dollar, Escape, Or, ParenEnd, ParenStart, Plus, Question, Repeat, Star,
+    Caret, Class, Dollar, Dot, Escape, Or, ParenEnd, ParenStart, Plus, Question, Repeat, Star,
     is_token_char,
 };
 
 /// Pattern of a sequence of characters.
 #[derive(Debug, PartialEq, Eq, PartialOrd, Ord, Clone, Syntax)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
-#[syntax(token = |c:char| { c == '-' || !is_token_char(c) })]
+#[syntax(
+    token = |c:char| { c == '-' || !is_token_char(c) },
+    map_err = CompileError::PatternChars.map()
+)]
 pub struct PatternChars<I>(pub I)
 where
     I: PatternInput;
@@ -18,7 +22,6 @@ where
 /// A non-root pattern sequence.
 #[derive(Debug, PartialEq, Eq, PartialOrd, Ord, Clone, Syntax)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
-#[syntax(map_err = CompileError::SubPattern.map())]
 pub enum SubPattern<I>
 where
     I: PatternInput,
@@ -41,10 +44,12 @@ where
     Class(Class<I>),
     /// A '|' sub-pattern.
     Or(Or<I>),
+    /// A `.` sub-pattern.
+    Dot(Dot<I>),
 }
 
 /// Pattern sequence.
-#[derive(Debug, PartialEq, Eq, PartialOrd, Ord, Clone, Syntax)]
+#[derive(Debug, PartialEq, Eq, PartialOrd, Ord, Clone)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct Pattern<I>
 where
@@ -56,6 +61,39 @@ where
     pub patterns: Vec<SubPattern<I>>,
     /// Match the end of the input string.
     pub end: Option<Dollar<I>>,
+}
+
+impl<I> Syntax<I> for Pattern<I>
+where
+    I: PatternInput,
+{
+    #[inline]
+    fn parse(input: &mut I) -> Result<Self, <I as parserc::Input>::Error> {
+        let start = input.parse()?;
+
+        let patterns = input.parse()?;
+
+        let end = input.parse()?;
+
+        if !input.is_empty() {
+            return Err(RegexError::Compile(
+                CompileError::Unparsing,
+                ControlFlow::Fatal,
+                input.to_span(),
+            ));
+        }
+
+        Ok(Self {
+            start,
+            patterns,
+            end,
+        })
+    }
+
+    #[inline]
+    fn to_span(&self) -> parserc::Span {
+        self.start.to_span() + self.patterns.to_span() + self.end.to_span()
+    }
 }
 
 #[cfg(test)]

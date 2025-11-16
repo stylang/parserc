@@ -48,16 +48,30 @@ impl Default for Syntax {
 }
 
 fn parse_syntax_options(attrs: &[Attribute]) -> Result<Syntax> {
-    let Some(syntax) = attrs.iter().find(|attr| attr.path().is_ident("syntax")) else {
-        return Ok(Default::default());
-    };
+    let met_lists = attrs
+        .iter()
+        .filter_map(|syntax| {
+            if syntax.path().is_ident("syntax") {
+                match &syntax.meta {
+                    syn::Meta::Path(path) => {
+                        return Some(Err(Error::new(
+                            path.span(),
+                            "Empty body, expect `syntax(...)`",
+                        )));
+                    }
+                    syn::Meta::List(meta_list) => return Some(Ok(meta_list)),
+                    syn::Meta::NameValue(value) => {
+                        return Some(Err(Error::new(value.span(), "Unsupport syntax.")));
+                    }
+                };
+            }
 
-    let meta_list = match &syntax.meta {
-        syn::Meta::Path(path) => {
-            return Err(Error::new(path.span(), "Empty body, expect `syntax(...)`"));
-        }
-        syn::Meta::List(meta_list) => meta_list,
-        syn::Meta::NameValue(value) => return Err(Error::new(value.span(), "Unsupport syntax.")),
+            None
+        })
+        .collect::<Result<Vec<_>>>()?;
+
+    if met_lists.is_empty() {
+        return Ok(Default::default());
     };
 
     let mut ty_input: Option<Type> = None;
@@ -66,44 +80,46 @@ fn parse_syntax_options(attrs: &[Attribute]) -> Result<Syntax> {
     let mut c: Option<Lit> = None;
     let mut token: Option<ExprClosure> = None;
 
-    let parser = syn::meta::parser(|meta| {
-        macro_rules! error {
+    for meta_list in met_lists {
+        let parser = syn::meta::parser(|meta| {
+            macro_rules! error {
             ($($t:tt)+) => {
                 return Err(meta.error(format_args!($($t)+)))
             };
         }
 
-        let Some(ident) = meta.path.get_ident() else {
-            error!("Unsupport macro `syntax` option.");
-        };
+            let Some(ident) = meta.path.get_ident() else {
+                error!("Unsupport macro `syntax` option.");
+            };
 
-        if ident == "input" {
-            ty_input = Some(meta.value()?.parse()?);
-        } else if ident == "map_err" {
-            map_err = Some(meta.value()?.parse()?);
-        } else if ident == "keyword" {
-            if token.is_some() || c.is_some() {
-                error!("The syntax has been set as a `token` or `char`.");
+            if ident == "input" {
+                ty_input = Some(meta.value()?.parse()?);
+            } else if ident == "map_err" {
+                map_err = Some(meta.value()?.parse()?);
+            } else if ident == "keyword" {
+                if token.is_some() || c.is_some() {
+                    error!("The syntax has been set as a `token` or `char`.");
+                }
+                keyword = Some(meta.value()?.parse()?);
+            } else if ident == "token" {
+                if keyword.is_some() || c.is_some() {
+                    error!("The syntax has been set as a `keyword` or `char`.");
+                }
+                token = Some(meta.value()?.parse()?);
+            } else if ident == "char" {
+                if keyword.is_some() || token.is_some() {
+                    error!("The syntax has been set as a `keyword` or `token`.");
+                }
+                c = Some(meta.value()?.parse()?);
+            } else {
+                error!("Unsupport macro `syntax` option `{}`.", ident);
             }
-            keyword = Some(meta.value()?.parse()?);
-        } else if ident == "token" {
-            if keyword.is_some() || c.is_some() {
-                error!("The syntax has been set as a `keyword` or `char`.");
-            }
-            token = Some(meta.value()?.parse()?);
-        } else if ident == "char" {
-            if keyword.is_some() || token.is_some() {
-                error!("The syntax has been set as a `keyword` or `token`.");
-            }
-            c = Some(meta.value()?.parse()?);
-        } else {
-            error!("Unsupport macro `syntax` option `{}`.", ident);
-        }
 
-        Ok(())
-    });
+            Ok(())
+        });
 
-    parser.parse2(meta_list.tokens.to_token_stream())?;
+        parser.parse2(meta_list.tokens.to_token_stream())?;
+    }
 
     if let Some(ty_input) = ty_input {
         Ok(Syntax {
@@ -352,7 +368,7 @@ fn derive_syntax_for_struct(item: ItemStruct) -> Result<proc_macro2::TokenStream
                 #[inline]
                 fn parse(input: &mut #ty_input) -> Result<Self, <#ty_input as parserc::Input>::Error> {
                     use parserc::Parser;
-                    parserc::keyword(#keyword).map(|input| Self(input)).parse(input)
+                    parserc::keyword(#keyword).map(|input| Self(input)).parse(input)#map_err
                 }
 
                 #[inline]
@@ -367,7 +383,7 @@ fn derive_syntax_for_struct(item: ItemStruct) -> Result<proc_macro2::TokenStream
                 #[inline]
                 fn parse(input: &mut #ty_input) -> Result<Self, <#ty_input as parserc::Input>::Error> {
                     use parserc::Parser;
-                    parserc::take_while_range_from(1, #token).map(|input| Self(input)).parse(input)
+                    parserc::take_while_range_from(1, #token).map(|input| Self(input)).parse(input)#map_err
                 }
 
                 #[inline]
@@ -382,7 +398,7 @@ fn derive_syntax_for_struct(item: ItemStruct) -> Result<proc_macro2::TokenStream
                 #[inline]
                 fn parse(input: &mut #ty_input) -> Result<Self, <#ty_input as parserc::Input>::Error> {
                     use parserc::Parser;
-                    parserc::next(#c).map(|input| Self(input)).parse(input)
+                    parserc::next(#c).map(|input| Self(input)).parse(input)#map_err
                 }
 
                 #[inline]

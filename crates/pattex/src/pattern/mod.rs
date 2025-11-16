@@ -15,5 +15,5 @@ pub use class::*;
 mod repeat;
 pub use repeat::*;
 
-mod expr;
-pub use expr::*;
+mod pattern;
+pub use pattern::*;
