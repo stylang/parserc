@@ -9,9 +9,8 @@ version.workspace = true
 
 [dependencies]
 thiserror = "2.0.17"
-memchr = { version = "2.7.6" }
 serde = { version = "1.0.228", optional = true }
-parserc = { version = "^0.10", path = "../parserc", default-features=false, features=["syntax"] }
+parserc = { version = "^0.10", path = "../parserc" }
 
 [dev-dependencies]
 color-print = { version = "0.3.7"}

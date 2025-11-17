@@ -187,7 +187,6 @@ version = "0.10.11"
 dependencies = [
  "color-print",
  "divan",
- "memchr",
  "parserc",
  "regex",
  "serde",
