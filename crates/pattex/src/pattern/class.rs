@@ -97,6 +97,7 @@ where
 /// Character class.
 #[derive(Debug, PartialEq, Eq, PartialOrd, Ord, Clone, Syntax)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+#[parserc(map_err = CompileError::CharClass.map())]
 pub struct Class<I>(
     pub Delimiter<BracketStart<I>, BracketEnd<I>, (Option<Caret<I>>, Vec<ClassChars<I>>)>,
 )
@@ -204,5 +205,17 @@ mod tests {
                 )
             }))
         )
+    }
+
+    #[test]
+    fn invalid_class() {
+        assert_eq!(
+            TokenStream::from(r"[^").parse::<Class<_>>(),
+            Err(RegexError::Compile(
+                CompileError::CharClass,
+                ControlFlow::Fatal,
+                Span::Range(2..2)
+            ))
+        );
     }
 }

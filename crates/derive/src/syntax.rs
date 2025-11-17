@@ -422,7 +422,7 @@ fn derive_syntax_for_struct(item: ItemStruct) -> Result<proc_macro2::TokenStream
 
     let ident = &item.ident;
 
-    let map_err = if let Some(map_err) = map_err {
+    let map_err_global = if let Some(map_err) = map_err {
         quote! {
             .map_err(#map_err)
         }
@@ -445,7 +445,7 @@ fn derive_syntax_for_struct(item: ItemStruct) -> Result<proc_macro2::TokenStream
                     .map_err(#map_err)
                 }
             } else {
-                quote! {}
+                map_err_global.clone()
             };
 
             let result = match &field.ident {
@@ -500,7 +500,7 @@ fn derive_syntax_for_struct(item: ItemStruct) -> Result<proc_macro2::TokenStream
                 #[inline]
                 fn parse(input: &mut #ty_input) -> Result<Self, <#ty_input as parserc::Input>::Error> {
                     use parserc::Parser;
-                    parserc::keyword(#keyword).map(|input| Self(input)).parse(input)#map_err
+                    parserc::keyword(#keyword).map(|input| Self(input)).parse(input)#map_err_global
                 }
 
                 #[inline]
@@ -515,7 +515,7 @@ fn derive_syntax_for_struct(item: ItemStruct) -> Result<proc_macro2::TokenStream
                 #[inline]
                 fn parse(input: &mut #ty_input) -> Result<Self, <#ty_input as parserc::Input>::Error> {
                     use parserc::Parser;
-                    parserc::take_while_range_from(1, #token).map(|input| Self(input)).parse(input)#map_err
+                    parserc::take_while_range_from(1, #token).map(|input| Self(input)).parse(input)#map_err_global
                 }
 
                 #[inline]
@@ -530,7 +530,7 @@ fn derive_syntax_for_struct(item: ItemStruct) -> Result<proc_macro2::TokenStream
                 #[inline]
                 fn parse(input: &mut #ty_input) -> Result<Self, <#ty_input as parserc::Input>::Error> {
                     use parserc::Parser;
-                    parserc::next(#c).map(|input| Self(input)).parse(input)#map_err
+                    parserc::next(#c).map(|input| Self(input)).parse(input)#map_err_global
                 }
 
                 #[inline]

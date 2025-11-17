@@ -27,7 +27,7 @@ where
             ))
             .into())
         } else {
-            Err((Kind::Next(ControlFlow::Incomplete, Span::RangeFrom(input.start()..))).into())
+            Err((Kind::Next(ControlFlow::Incomplete, input.to_span())).into())
         }
     }
 }
