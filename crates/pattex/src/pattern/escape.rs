@@ -12,75 +12,95 @@ use crate::{
 /// Escape token sequence.
 #[derive(Debug, PartialEq, Eq, PartialOrd, Ord, Clone, Syntax)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
-#[syntax(map_err = CompileError::Escape.map())]
-pub enum Escape<I>
+pub struct Escape<I>
+where
+    I: PatternInput,
+{
+    /// prefix `\`
+    #[parserc(crucial)]
+    pub backslash: BackSlash<I>,
+    /// escape character sequence.
+    pub kind: EscapeKind<I>,
+}
+
+/// Escape token sequence.
+#[derive(Debug, PartialEq, Eq, PartialOrd, Ord, Clone, Syntax)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+#[parserc(map_err = CompileError::Escape.map())]
+pub enum EscapeKind<I>
 where
     I: PatternInput,
 {
     /// `\\`
-    BackSlash(BackSlash<I>, BackSlash<I>),
+    BackSlash(BackSlash<I>),
     /// `\^`
-    Caret(BackSlash<I>, Caret<I>),
+    Caret(Caret<I>),
     /// `\*`
-    Star(BackSlash<I>, Star<I>),
+    Star(Star<I>),
     /// `\$`
-    Dollar(BackSlash<I>, Dollar<I>),
+    Dollar(Dollar<I>),
     /// `\?`
-    Question(BackSlash<I>, Question<I>),
+    Question(Question<I>),
     /// `\+`
-    Plus(BackSlash<I>, Plus<I>),
+    Plus(Plus<I>),
     /// `\-`
-    Minus(BackSlash<I>, Minus<I>),
+    Minus(Minus<I>),
     /// `\.`
-    Dot(BackSlash<I>, Dot<I>),
+    Dot(Dot<I>),
     /// `\|`
-    Or(BackSlash<I>, Or<I>),
+    Or(Or<I>),
     /// `\{`
-    BraceStart(BackSlash<I>, BraceStart<I>),
+    BraceStart(BraceStart<I>),
     /// `\[`
-    BracketStart(BackSlash<I>, BracketStart<I>),
+    BracketStart(BracketStart<I>),
     /// `\(`
-    ParenStart(BackSlash<I>, ParenStart<I>),
+    ParenStart(ParenStart<I>),
     ///  \b
-    Boundery(BackSlash<I>, Char<I, 'b'>),
+    Boundery(Char<I, 'b'>),
     ///  \B
-    NonBoundery(BackSlash<I>, Char<I, 'B'>),
+    NonBoundery(Char<I, 'B'>),
     ///  \d
-    Digit(BackSlash<I>, Char<I, 'd'>),
+    Digit(Char<I, 'd'>),
     ///  \D
-    NonDigit(BackSlash<I>, Char<I, 'D'>),
+    NonDigit(Char<I, 'D'>),
     /// \f
-    FF(BackSlash<I>, Char<I, 'f'>),
+    FF(Char<I, 'f'>),
     /// \n
-    LF(BackSlash<I>, Char<I, 'n'>),
+    LF(Char<I, 'n'>),
     /// \r
-    CR(BackSlash<I>, Char<I, 'r'>),
+    CR(Char<I, 'r'>),
     ///  \s
-    S(BackSlash<I>, Char<I, 's'>),
+    S(Char<I, 's'>),
     ///  \S
-    NonS(BackSlash<I>, Char<I, 'S'>),
+    NonS(Char<I, 'S'>),
     ///  \t
-    TF(BackSlash<I>, Char<I, 't'>),
+    TF(Char<I, 't'>),
     ///  \v
-    VF(BackSlash<I>, Char<I, 'v'>),
+    VF(Char<I, 'v'>),
     ///  \w
-    Word(BackSlash<I>, Char<I, 'w'>),
+    Word(Char<I, 'w'>),
     ///  \W
-    NonWord(BackSlash<I>, Char<I, 'W'>),
+    NonWord(Char<I, 'W'>),
     /// backreference `\1..`
-    BackReference(BackSlash<I>, FixedDigits<I, 2>),
+    BackReference(FixedDigits<I, 2>),
     /// \xnn
-    Hex(BackSlash<I>, Char<I, 'x'>, FixedHexDigits<I, 2>),
+    Hex(
+        #[parserc(crucial)] Char<I, 'x'>,
+        #[parserc(map_err = CompileError::EscapeHex.map())] FixedHexDigits<I, 2>,
+    ),
     /// \unnnn
-    Unicode(BackSlash<I>, Char<I, 'u'>, FixedHexDigits<I, 4>),
+    Unicode(
+        #[parserc(crucial)] Char<I, 'u'>,
+        #[parserc(map_err = CompileError::EscapeUnicode.map())] FixedHexDigits<I, 4>,
+    ),
 }
 
 #[cfg(test)]
 mod test {
-    use parserc::syntax::InputSyntaxExt;
+    use parserc::{ControlFlow, Span, syntax::InputSyntaxExt};
 
     use super::*;
-    use crate::input::TokenStream;
+    use crate::{errors::RegexError, input::TokenStream};
 
     #[test]
     fn test_escape() {
@@ -88,10 +108,10 @@ mod test {
             ($ty:ident,$input:literal,$match:literal) => {
                 (
                     TokenStream::from($input),
-                    Escape::$ty(
-                        BackSlash(TokenStream::from("\\")),
-                        $ty(TokenStream::from((1, $match))),
-                    ),
+                    Escape {
+                        backslash: BackSlash(TokenStream::from("\\")),
+                        kind: EscapeKind::$ty($ty(TokenStream::from((1, $match)))),
+                    },
                 )
             };
         }
@@ -118,10 +138,10 @@ mod test {
             ($ty:ident,$input:literal,$match:literal) => {
                 (
                     TokenStream::from($input),
-                    Escape::$ty(
-                        BackSlash(TokenStream::from("\\")),
-                        Char(TokenStream::from((1, $match))),
-                    ),
+                    Escape {
+                        backslash: BackSlash(TokenStream::from("\\")),
+                        kind: EscapeKind::$ty(Char(TokenStream::from((1, $match)))),
+                    },
                 )
             };
         }
@@ -148,28 +168,62 @@ mod test {
 
         assert_eq!(
             TokenStream::from(r"\123h").parse(),
-            Ok(Escape::BackReference(
-                BackSlash(TokenStream::from(r"\")),
-                FixedDigits(TokenStream::from((1, "12")))
-            ),)
+            Ok(Escape {
+                backslash: BackSlash(TokenStream::from(r"\")),
+                kind: EscapeKind::BackReference(FixedDigits(TokenStream::from((1, "12"))))
+            },)
         );
 
         assert_eq!(
             TokenStream::from(r"\xa0b").parse(),
-            Ok(Escape::Hex(
-                BackSlash(TokenStream::from(r"\")),
-                Char(TokenStream::from((1, "x"))),
-                FixedHexDigits(TokenStream::from((2, "a0")))
-            ),)
+            Ok(Escape {
+                backslash: BackSlash(TokenStream::from(r"\")),
+                kind: EscapeKind::Hex(
+                    Char(TokenStream::from((1, "x"))),
+                    FixedHexDigits(TokenStream::from((2, "a0")))
+                ),
+            },)
         );
 
         assert_eq!(
             TokenStream::from(r"\u00A0h").parse(),
-            Ok(Escape::Unicode(
-                BackSlash(TokenStream::from(r"\")),
-                Char(TokenStream::from((1, "u"))),
-                FixedHexDigits(TokenStream::from((2, "00A0")))
-            ),)
+            Ok(Escape {
+                backslash: BackSlash(TokenStream::from(r"\")),
+                kind: EscapeKind::Unicode(
+                    Char(TokenStream::from((1, "u"))),
+                    FixedHexDigits(TokenStream::from((2, "00A0")))
+                ),
+            })
+        );
+    }
+
+    #[test]
+    fn invalid_escapes() {
+        assert_eq!(
+            TokenStream::from(r"\u").parse::<Escape<_>>(),
+            Err(RegexError::Compile(
+                CompileError::EscapeUnicode,
+                ControlFlow::Fatal,
+                Span::Range(2..2)
+            ))
+        );
+
+        assert_eq!(
+            TokenStream::from(r"\x1ga").parse::<Escape<_>>(),
+            Err(RegexError::Compile(
+                CompileError::EscapeHex,
+                ControlFlow::Fatal,
+                Span::Range(2..3)
+            ))
+        );
+
+        assert_eq!(
+            TokenStream::from(r"\a").parse::<Escape<_>>(),
+            Err(RegexError::Compile(
+                CompileError::Escape,
+                ControlFlow::Fatal,
+                Span::Range(1..2)
+            ))
         );
     }
 }

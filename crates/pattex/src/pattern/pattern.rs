@@ -11,7 +11,7 @@ use crate::pattern::{
 /// Pattern of a sequence of characters.
 #[derive(Debug, PartialEq, Eq, PartialOrd, Ord, Clone, Syntax)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
-#[syntax(
+#[parserc(
     token = |c:char| { c == '-' || !is_token_char(c) },
     map_err = CompileError::PatternChars.map()
 )]
@@ -104,8 +104,8 @@ mod tests {
         input::TokenStream,
         pattern::{
             BackSlash, BracketEnd, BracketStart, Caret, Class, ClassChars, Digits, Dollar, Dot,
-            Escape, Minus, Or, ParenEnd, ParenStart, Pattern, PatternChars, Plus, Question, Repeat,
-            Star, SubPattern,
+            Escape, EscapeKind, Minus, Or, ParenEnd, ParenStart, Pattern, PatternChars, Plus,
+            Question, Repeat, Star, SubPattern,
         },
     };
 
@@ -142,14 +142,14 @@ mod tests {
                     body: (
                         Some(Caret(TokenStream::from((1, "^")))),
                         vec![
-                            ClassChars::Escape(Escape::FF(
-                                BackSlash(TokenStream::from((2, r"\"))),
-                                Char(TokenStream::from((3, "f")))
-                            )),
-                            ClassChars::Escape(Escape::TF(
-                                BackSlash(TokenStream::from((4, r"\"))),
-                                Char(TokenStream::from((5, "t")))
-                            )),
+                            ClassChars::Escape(Escape {
+                                backslash: BackSlash(TokenStream::from((2, r"\"))),
+                                kind: EscapeKind::FF(Char(TokenStream::from((3, "f"))))
+                            }),
+                            ClassChars::Escape(Escape {
+                                backslash: BackSlash(TokenStream::from((4, r"\"))),
+                                kind: EscapeKind::TF(Char(TokenStream::from((5, "t"))))
+                            }),
                             ClassChars::Sequnce(TokenStream::from((6, "hello"))),
                             ClassChars::Range {
                                 from: '0',
@@ -280,26 +280,26 @@ mod tests {
                                         value: "0-9"
                                     }
                                 },
-                                ClassChars::Escape(Escape::Minus(
-                                    BackSlash(TokenStream {
+                                ClassChars::Escape(Escape {
+                                    backslash: BackSlash(TokenStream {
                                         offset: 26,
                                         value: "\\"
                                     }),
-                                    Minus(TokenStream {
+                                    kind: EscapeKind::Minus(Minus(TokenStream {
                                         offset: 27,
                                         value: "-"
-                                    })
-                                )),
-                                ClassChars::Escape(Escape::Dot(
-                                    BackSlash(TokenStream {
+                                    }))
+                                }),
+                                ClassChars::Escape(Escape {
+                                    backslash: BackSlash(TokenStream {
                                         offset: 28,
                                         value: "\\"
                                     }),
-                                    Dot(TokenStream {
+                                    kind: EscapeKind::Dot(Dot(TokenStream {
                                         offset: 29,
                                         value: "."
-                                    })
-                                ))
+                                    }))
+                                },)
                             ]
                         )
                     })),
@@ -307,16 +307,16 @@ mod tests {
                         offset: 31,
                         value: "+"
                     })),
-                    SubPattern::Escap(Escape::Dot(
-                        BackSlash(TokenStream {
+                    SubPattern::Escap(Escape {
+                        backslash: BackSlash(TokenStream {
                             offset: 32,
                             value: "\\"
                         }),
-                        Dot(TokenStream {
+                        kind: EscapeKind::Dot(Dot(TokenStream {
                             offset: 33,
                             value: "."
-                        })
-                    )),
+                        }))
+                    },),
                     SubPattern::Class(Class(Delimiter {
                         start: BracketStart(TokenStream {
                             offset: 34,
@@ -382,16 +382,16 @@ mod tests {
                                 offset: 48,
                                 value: "/"
                             })),
-                            SubPattern::Escap(Escape::NonS(
-                                BackSlash(TokenStream {
+                            SubPattern::Escap(Escape {
+                                backslash: BackSlash(TokenStream {
                                     offset: 49,
                                     value: "\\"
                                 }),
-                                Char(TokenStream {
+                                kind: EscapeKind::NonS(Char(TokenStream {
                                     offset: 50,
                                     value: "S"
-                                })
-                            )),
+                                }))
+                            },),
                             SubPattern::Star(Star(TokenStream {
                                 offset: 51,
                                 value: "*"

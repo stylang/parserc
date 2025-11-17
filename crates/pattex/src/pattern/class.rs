@@ -114,7 +114,8 @@ mod tests {
         errors::{CompileError, RegexError},
         input::TokenStream,
         pattern::{
-            BackSlash, BracketEnd, BracketStart, Caret, Class, ClassChars, Escape, FixedDigits,
+            BackSlash, BracketEnd, BracketStart, Caret, Class, ClassChars, Escape, EscapeKind,
+            FixedDigits,
         },
     };
 
@@ -150,10 +151,10 @@ mod tests {
 
         assert_eq!(
             TokenStream::from(r"\123a-z").parse(),
-            Ok(ClassChars::Escape(Escape::BackReference(
-                BackSlash(TokenStream::from((0, r"\"))),
-                FixedDigits(TokenStream::from((1, "12")))
-            ),))
+            Ok(ClassChars::Escape(Escape {
+                backslash: BackSlash(TokenStream::from((0, r"\"))),
+                kind: EscapeKind::BackReference(FixedDigits(TokenStream::from((1, "12")))),
+            }))
         );
 
         assert_eq!(
@@ -185,14 +186,14 @@ mod tests {
                 body: (
                     Some(Caret(TokenStream::from((1, "^")))),
                     vec![
-                        ClassChars::Escape(Escape::FF(
-                            BackSlash(TokenStream::from((2, r"\"))),
-                            Char(TokenStream::from((3, "f")))
-                        )),
-                        ClassChars::Escape(Escape::TF(
-                            BackSlash(TokenStream::from((4, r"\"))),
-                            Char(TokenStream::from((5, "t")))
-                        )),
+                        ClassChars::Escape(Escape {
+                            backslash: BackSlash(TokenStream::from((2, r"\"))),
+                            kind: EscapeKind::FF(Char(TokenStream::from((3, "f"))))
+                        }),
+                        ClassChars::Escape(Escape {
+                            backslash: BackSlash(TokenStream::from((4, r"\"))),
+                            kind: EscapeKind::TF(Char(TokenStream::from((5, "t"))))
+                        }),
                         ClassChars::Sequnce(TokenStream::from((6, "hello"))),
                         ClassChars::Range {
                             from: '0',

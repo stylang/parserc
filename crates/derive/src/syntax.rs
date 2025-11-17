@@ -27,7 +27,7 @@ pub fn derive_syntax(input: TokenStream) -> TokenStream {
     }
 }
 
-struct Syntax {
+struct ItemConfig {
     ty_input: Type,
     map_err: Option<Expr>,
     keyword: Option<Lit>,
@@ -35,7 +35,7 @@ struct Syntax {
     c: Option<Lit>,
 }
 
-impl Default for Syntax {
+impl Default for ItemConfig {
     fn default() -> Self {
         Self {
             ty_input: syn::parse2(quote! { I }).unwrap(),
@@ -47,107 +47,200 @@ impl Default for Syntax {
     }
 }
 
-fn parse_syntax_options(attrs: &[Attribute]) -> Result<Syntax> {
-    let met_lists = attrs
-        .iter()
-        .filter_map(|syntax| {
-            if syntax.path().is_ident("syntax") {
-                match &syntax.meta {
-                    syn::Meta::Path(path) => {
-                        return Some(Err(Error::new(
-                            path.span(),
-                            "Empty body, expect `syntax(...)`",
-                        )));
-                    }
-                    syn::Meta::List(meta_list) => return Some(Ok(meta_list)),
-                    syn::Meta::NameValue(value) => {
-                        return Some(Err(Error::new(value.span(), "Unsupport syntax.")));
-                    }
+impl ItemConfig {
+    fn parse(attrs: &[Attribute]) -> Result<ItemConfig> {
+        let met_lists = attrs
+            .iter()
+            .filter_map(|syntax| {
+                if syntax.path().is_ident("parserc") {
+                    match &syntax.meta {
+                        syn::Meta::Path(path) => {
+                            return Some(Err(Error::new(
+                                path.span(),
+                                "Empty body, expect `parserc(...)`",
+                            )));
+                        }
+                        syn::Meta::List(meta_list) => return Some(Ok(meta_list)),
+                        syn::Meta::NameValue(value) => {
+                            return Some(Err(Error::new(value.span(), "Unsupport syntax.")));
+                        }
+                    };
+                }
+
+                None
+            })
+            .collect::<Result<Vec<_>>>()?;
+
+        if met_lists.is_empty() {
+            return Ok(Default::default());
+        };
+
+        let mut ty_input: Option<Type> = None;
+        let mut map_err: Option<Expr> = None;
+        let mut keyword: Option<Lit> = None;
+        let mut c: Option<Lit> = None;
+        let mut token: Option<ExprClosure> = None;
+
+        for meta_list in met_lists {
+            let parser = syn::meta::parser(|meta| {
+                macro_rules! error {
+                ($($t:tt)+) => {
+                    return Err(meta.error(format_args!($($t)+)))
                 };
             }
 
-            None
-        })
-        .collect::<Result<Vec<_>>>()?;
+                let Some(ident) = meta.path.get_ident() else {
+                    error!("Unsupport macro `syntax` option.");
+                };
 
-    if met_lists.is_empty() {
-        return Ok(Default::default());
-    };
+                if ident == "input" {
+                    if ty_input.is_some() {
+                        error!("Call `input` twice.");
+                    }
+                    ty_input = Some(meta.value()?.parse()?);
+                } else if ident == "map_err" {
+                    if map_err.is_some() {
+                        error!("Call `map_err` twice.");
+                    }
+                    map_err = Some(meta.value()?.parse()?);
+                } else if ident == "keyword" {
+                    if token.is_some() || c.is_some() {
+                        error!("The syntax has been set as a `token` or `char`.");
+                    }
 
-    let mut ty_input: Option<Type> = None;
-    let mut map_err: Option<Expr> = None;
-    let mut keyword: Option<Lit> = None;
-    let mut c: Option<Lit> = None;
-    let mut token: Option<ExprClosure> = None;
+                    if keyword.is_some() {
+                        error!("Call `keyword` twice.");
+                    }
 
-    for meta_list in met_lists {
-        let parser = syn::meta::parser(|meta| {
-            macro_rules! error {
-            ($($t:tt)+) => {
-                return Err(meta.error(format_args!($($t)+)))
-            };
+                    keyword = Some(meta.value()?.parse()?);
+                } else if ident == "token" {
+                    if keyword.is_some() || c.is_some() {
+                        error!("The syntax has been set as a `keyword` or `char`.");
+                    }
+
+                    if token.is_some() {
+                        error!("Call `token` twice.");
+                    }
+
+                    token = Some(meta.value()?.parse()?);
+                } else if ident == "char" {
+                    if keyword.is_some() || token.is_some() {
+                        error!("The syntax has been set as a `keyword` or `token`.");
+                    }
+
+                    if c.is_some() {
+                        error!("Call `char` twice.");
+                    }
+
+                    c = Some(meta.value()?.parse()?);
+                } else {
+                    error!("Unsupport macro `syntax` option `{}`.", ident);
+                }
+
+                Ok(())
+            });
+
+            parser.parse2(meta_list.tokens.to_token_stream())?;
         }
 
-            let Some(ident) = meta.path.get_ident() else {
-                error!("Unsupport macro `syntax` option.");
-            };
+        if let Some(ty_input) = ty_input {
+            Ok(ItemConfig {
+                ty_input,
+                map_err,
+                keyword,
+                token,
+                c,
+            })
+        } else {
+            Ok(ItemConfig {
+                map_err,
+                keyword,
+                token,
+                c,
+                ..Default::default()
+            })
+        }
+    }
+}
 
-            if ident == "input" {
-                ty_input = Some(meta.value()?.parse()?);
-            } else if ident == "map_err" {
-                map_err = Some(meta.value()?.parse()?);
-            } else if ident == "keyword" {
-                if token.is_some() || c.is_some() {
-                    error!("The syntax has been set as a `token` or `char`.");
+#[derive(Default)]
+struct FieldConfig {
+    crucial: bool,
+    map_err: Option<Expr>,
+}
+
+impl FieldConfig {
+    fn parse(attrs: &[Attribute]) -> Result<Self> {
+        let met_lists = attrs
+            .iter()
+            .filter_map(|syntax| {
+                if syntax.path().is_ident("parserc") {
+                    match &syntax.meta {
+                        syn::Meta::Path(path) => {
+                            return Some(Err(Error::new(
+                                path.span(),
+                                "Empty body, expect `parserc(...)`",
+                            )));
+                        }
+                        syn::Meta::List(meta_list) => return Some(Ok(meta_list)),
+                        syn::Meta::NameValue(value) => {
+                            return Some(Err(Error::new(value.span(), "Unsupport syntax.")));
+                        }
+                    };
                 }
-                keyword = Some(meta.value()?.parse()?);
-            } else if ident == "token" {
-                if keyword.is_some() || c.is_some() {
-                    error!("The syntax has been set as a `keyword` or `char`.");
-                }
-                token = Some(meta.value()?.parse()?);
-            } else if ident == "char" {
-                if keyword.is_some() || token.is_some() {
-                    error!("The syntax has been set as a `keyword` or `token`.");
-                }
-                c = Some(meta.value()?.parse()?);
-            } else {
-                error!("Unsupport macro `syntax` option `{}`.", ident);
+
+                None
+            })
+            .collect::<Result<Vec<_>>>()?;
+
+        if met_lists.is_empty() {
+            return Ok(Default::default());
+        };
+
+        let mut crucial = false;
+        let mut map_err: Option<Expr> = None;
+
+        for meta_list in met_lists {
+            let parser = syn::meta::parser(|meta| {
+                macro_rules! error {
+                ($($t:tt)+) => {
+                    return Err(meta.error(format_args!($($t)+)))
+                };
             }
 
-            Ok(())
-        });
+                let Some(ident) = meta.path.get_ident() else {
+                    error!("Unsupport macro `parserc` option.");
+                };
 
-        parser.parse2(meta_list.tokens.to_token_stream())?;
-    }
+                if ident == "crucial" {
+                    crucial = true;
+                } else if ident == "map_err" {
+                    if map_err.is_some() {
+                        error!("Call `map_err` twice.");
+                    }
+                    map_err = Some(meta.value()?.parse()?);
+                } else {
+                    error!("Unsupport macro `parserc` option `{}`.", ident);
+                }
 
-    if let Some(ty_input) = ty_input {
-        Ok(Syntax {
-            ty_input,
-            map_err,
-            keyword,
-            token,
-            c,
-        })
-    } else {
-        Ok(Syntax {
-            map_err,
-            keyword,
-            token,
-            c,
-            ..Default::default()
-        })
+                Ok(())
+            });
+
+            parser.parse2(meta_list.tokens.to_token_stream())?;
+        }
+
+        Ok(FieldConfig { crucial, map_err })
     }
 }
 
 fn derive_syntax_for_enum(item: ItemEnum) -> Result<proc_macro2::TokenStream> {
-    let Syntax {
+    let ItemConfig {
         ty_input,
         map_err,
         keyword,
         token,
         c,
-    } = parse_syntax_options(&item.attrs)?;
+    } = ItemConfig::parse(&item.attrs)?;
 
     match (keyword, token, c) {
         (None, Some(param), None) => {
@@ -190,20 +283,38 @@ fn derive_syntax_for_enum(item: ItemEnum) -> Result<proc_macro2::TokenStream> {
         .map(|varint| {
             let variant_ident = &varint.ident;
 
+            let mut into_fatal = quote! {};
+
             let parse_fields = varint
                 .fields
-                .members()
-                .map(|member| match member {
-                    syn::Member::Named(ident) => {
+                .iter()
+                .map(|field| {
+                    let FieldConfig { crucial, map_err } = FieldConfig::parse(&field.attrs)?;
+
+                    let map_err = if let Some(map_err) = map_err {
                         quote! {
-                            #ident: input.parse()?
+                            .map_err(#map_err)
                         }
+                    } else {
+                        quote! {}
+                    };
+
+                    let result = match &field.ident {
+                        Some(ident) => Ok(quote! {
+                            #ident: input.parse()#map_err #into_fatal?
+                        }),
+                        None => Ok(quote! {input.parse()#map_err #into_fatal?}),
+                    };
+
+                    if crucial {
+                        into_fatal = quote! {
+                            .map_err(|err| err.into_fatal())
+                        };
                     }
-                    syn::Member::Unnamed(_) => {
-                        quote! {input.parse()?}
-                    }
+
+                    result
                 })
-                .collect::<Vec<_>>();
+                .collect::<Result<Vec<_>>>()?;
 
             let to_spans = varint
                 .fields
@@ -272,8 +383,10 @@ fn derive_syntax_for_enum(item: ItemEnum) -> Result<proc_macro2::TokenStream> {
                 }
             };
 
-            (parse, to_span)
+            Ok((parse, to_span))
         })
+        .collect::<Result<Vec<_>>>()?
+        .into_iter()
         .unzip();
 
     Ok(quote! {
@@ -282,6 +395,7 @@ fn derive_syntax_for_enum(item: ItemEnum) -> Result<proc_macro2::TokenStream> {
             fn parse(input: &mut #ty_input) -> Result<Self, <#ty_input as parserc::Input>::Error> {
                 use parserc::syntax::InputSyntaxExt;
                 use parserc::Parser;
+                use parserc::ParseError;
                 #(#fields)*
 
                 Err(parserc::Kind::Syntax(#ident_str,parserc::ControlFlow::Recovable,input.to_span()).into())#map_err
@@ -298,13 +412,13 @@ fn derive_syntax_for_enum(item: ItemEnum) -> Result<proc_macro2::TokenStream> {
 }
 
 fn derive_syntax_for_struct(item: ItemStruct) -> Result<proc_macro2::TokenStream> {
-    let Syntax {
+    let ItemConfig {
         ty_input,
         map_err,
         keyword,
         token,
         c,
-    } = parse_syntax_options(&item.attrs)?;
+    } = ItemConfig::parse(&item.attrs)?;
 
     let ident = &item.ident;
 
@@ -318,20 +432,38 @@ fn derive_syntax_for_struct(item: ItemStruct) -> Result<proc_macro2::TokenStream
 
     let (impl_generic, type_generic, where_clause) = item.generics.split_for_impl();
 
+    let mut into_fatal = quote! {};
+
     let parse_fields = item
         .fields
-        .members()
-        .map(|member| match member {
-            syn::Member::Named(ident) => {
+        .iter()
+        .map(|field| {
+            let FieldConfig { crucial, map_err } = FieldConfig::parse(&field.attrs)?;
+
+            let map_err = if let Some(map_err) = map_err {
                 quote! {
-                    #ident: input.parse()#map_err?
+                    .map_err(#map_err)
                 }
+            } else {
+                quote! {}
+            };
+
+            let result = match &field.ident {
+                Some(ident) => Ok(quote! {
+                    #ident: input.parse() #map_err #into_fatal?
+                }),
+                None => Ok(quote! {input.parse()#map_err #into_fatal?}),
+            };
+
+            if crucial {
+                into_fatal = quote! {
+                    .map_err(|err| err.into_fatal())
+                };
             }
-            syn::Member::Unnamed(_) => {
-                quote! {input.parse()#map_err?}
-            }
+
+            result
         })
-        .collect::<Vec<_>>();
+        .collect::<Result<Vec<_>>>()?;
 
     let to_spans = item
         .fields
@@ -413,6 +545,7 @@ fn derive_syntax_for_struct(item: ItemStruct) -> Result<proc_macro2::TokenStream
                 #[inline]
                 fn parse(input: &mut #ty_input) -> Result<Self, <#ty_input as parserc::Input>::Error> {
                     use parserc::syntax::InputSyntaxExt;
+                    use parserc::ParseError;
                     #parse
                 }
 

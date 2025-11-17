@@ -8,7 +8,7 @@ pub fn derive_tuple_syntax(args: proc_macro::TokenStream) -> proc_macro::TokenSt
 }
 
 /// Derive `Syntax` trait for `struct`s / `enum`s.
-#[proc_macro_derive(Syntax, attributes(syntax, fatal, from, map_err, try_filter))]
+#[proc_macro_derive(Syntax, attributes(parserc))]
 pub fn derive_syntax(input: proc_macro::TokenStream) -> proc_macro::TokenStream {
     syntax::derive_syntax(input)
 }
