@@ -435,39 +435,3 @@ where
 parserc_derive::derive_tuple_syntax!(16);
 
 pub use parserc_derive::Syntax;
-
-#[cfg(test)]
-mod tests {
-    use crate::{
-        Kind,
-        input::Input,
-        lang::TokenStream,
-        syntax::{Byte, Syntax},
-    };
-
-    #[allow(unused)]
-    struct Mock;
-
-    impl<I> Syntax<I> for Mock
-    where
-        I: Input,
-    {
-        fn parse(_input: &mut I) -> Result<Self, I::Error> {
-            Ok(Mock)
-        }
-
-        fn to_span(&self) -> crate::Span {
-            todo!()
-        }
-    }
-
-    #[test]
-    fn test_byte() {
-        type H<I> = Byte<I, b'H'>;
-
-        assert_eq!(
-            H::parse(&mut TokenStream::<'_, Kind>::from("Hello")),
-            Ok(Byte(TokenStream::from("H")))
-        );
-    }
-}

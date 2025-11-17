@@ -27,8 +27,6 @@ pub enum CompileError {
     CharClass,
     #[error("pattern char sequence.")]
     PatternChars,
-    #[error("unparsing patterns")]
-    Unparsing,
 }
 
 impl CompileError {

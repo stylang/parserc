@@ -16,7 +16,7 @@ serde = { version = "1.0.228", optional = true }
 parserc-derive = { path = "../derive" , version = "^0.10", optional = true }
 
 [features]
-default = ["lang","serde","syntax"]
-lang = ["memchr"]
+default = ["serde","syntax","input"]
+input = ["memchr"]
 serde = ["dep:serde","serde/derive", "sourcespan/serde"]
 syntax = ["parserc-derive"]

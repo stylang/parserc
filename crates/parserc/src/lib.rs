@@ -16,10 +16,6 @@ pub use parser::*;
 mod c;
 pub use c::*;
 
-#[cfg(feature = "lang")]
-#[cfg_attr(docsrs, doc(cfg(feature = "lang")))]
-pub mod lang;
-
 #[cfg(feature = "syntax")]
 #[cfg_attr(docsrs, doc(cfg(feature = "syntax")))]
 pub mod syntax;

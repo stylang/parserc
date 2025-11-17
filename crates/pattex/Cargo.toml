@@ -15,8 +15,14 @@ parserc = { version = "^0.10", path = "../parserc", default-features=false, feat
 
 [dev-dependencies]
 color-print = { version = "0.3.7"}
-
+divan = "0.1.21"
+regex = "1.12.2"
 
 [features]
 default = ["serde"]
 serde = ["dep:serde","parserc/serde"]
+
+
+[[bench]]
+name = "compile"
+harness = false

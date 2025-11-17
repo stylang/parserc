@@ -3,6 +3,8 @@ use pattex::{input::TokenStream, pattern::Pattern};
 
 #[test]
 fn pattern_parse_spec() {
+    let mut errors = 0;
+
     for line in include_str!("regex.spec").lines() {
         print!("spec `{}`", line);
 
@@ -12,9 +14,15 @@ fn pattern_parse_spec() {
             }
 
             Err(err) => {
-                color_print::ceprintln!("<r>... failed.</>");
-                eprintln!("{}", err)
+                color_print::cprintln!("<r>... failed.</>");
+                println!("{}", err);
+
+                errors += 1;
             }
         }
+    }
+
+    if errors != 0 {
+        panic!("run spec {} failed", errors);
     }
 }

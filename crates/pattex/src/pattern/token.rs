@@ -142,7 +142,7 @@ where
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 #[parserc(keyword = "(?:")]
 #[parserc(map_err = CompileError::Token.map())]
-pub struct BracketStartQeustionColon<I>(pub I)
+pub struct ParenStartQeustionColon<I>(pub I)
 where
     I: PatternInput;
 
@@ -151,7 +151,7 @@ where
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 #[parserc(keyword = "(?=")]
 #[parserc(map_err = CompileError::Token.map())]
-pub struct BracketStartQeustionEq<I>(pub I)
+pub struct ParenStartQeustionEq<I>(pub I)
 where
     I: PatternInput;
 
@@ -160,7 +160,7 @@ where
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 #[parserc(keyword = "(?!")]
 #[parserc(map_err = CompileError::Token.map())]
-pub struct BracketStartQeustionNot<I>(pub I)
+pub struct ParenStartQeustionNot<I>(pub I)
 where
     I: PatternInput;
 
@@ -169,7 +169,7 @@ where
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 #[parserc(keyword = "(?<=")]
 #[parserc(map_err = CompileError::Token.map())]
-pub struct BracketStartQeustionLtEq<I>(pub I)
+pub struct ParenStartQeustionLtEq<I>(pub I)
 where
     I: PatternInput;
 
@@ -178,7 +178,7 @@ where
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 #[parserc(keyword = "(?<!")]
 #[parserc(map_err = CompileError::Token.map())]
-pub struct BracketStartQeustionLtNot<I>(pub I)
+pub struct ParenStartQeustionLtNot<I>(pub I)
 where
     I: PatternInput;
 

@@ -4,7 +4,9 @@ use parserc::syntax::{Delimiter, Syntax};
 use crate::errors::CompileError;
 use crate::input::PatternInput;
 use crate::pattern::{
-    Class, Dot, Escape, Or, ParenEnd, ParenStart, Plus, Question, Repeat, Star, is_token_char,
+    Caret, Class, Dollar, Dot, Escape, Or, ParenEnd, ParenStart, ParenStartQeustionColon,
+    ParenStartQeustionEq, ParenStartQeustionLtEq, ParenStartQeustionLtNot, ParenStartQeustionNot,
+    Plus, Question, Repeat, Star, is_token_char,
 };
 
 /// Pattern of a sequence of characters.
@@ -25,12 +27,20 @@ pub enum SubPattern<I>
 where
     I: PatternInput,
 {
-    /// A sub-pattern of a sequence of characters.
-    Chars(PatternChars<I>),
+    /// Look behind positive assert `(?<=pattern)`
+    LookBehind(Delimiter<ParenStartQeustionLtEq<I>, ParenEnd<I>, Vec<SubPattern<I>>>),
+    /// Look behind negative assert `(?<!pattern)`
+    NegativeLookBehind(Delimiter<ParenStartQeustionLtNot<I>, ParenEnd<I>, Vec<SubPattern<I>>>),
+    /// Look ahead positive assert `(?=pattern)`
+    LookAhead(Delimiter<ParenStartQeustionEq<I>, ParenEnd<I>, Vec<SubPattern<I>>>),
+    /// Look ahead negative assert `(?!pattern)`
+    NegativeLookAhead(Delimiter<ParenStartQeustionNot<I>, ParenEnd<I>, Vec<SubPattern<I>>>),
+    /// match pattern but not capture the matched sub-string. `(?:pattern)`
+    NonCapture(Delimiter<ParenStartQeustionColon<I>, ParenEnd<I>, Vec<SubPattern<I>>>),
+    /// A capture of sub-pattern sequence. `()`
+    Capture(Delimiter<ParenStart<I>, ParenEnd<I>, Vec<SubPattern<I>>>),
     /// A escape sub-pattern.
     Escap(Escape<I>),
-    /// A capture of sub-pattern sequence.
-    Capture(Delimiter<ParenStart<I>, ParenEnd<I>, Vec<SubPattern<I>>>),
     /// A repeat sub-pattern.
     Repeat(Repeat<I>),
     /// A start sub-pattern.
@@ -45,6 +55,12 @@ where
     Or(Or<I>),
     /// A `.` sub-pattern.
     Dot(Dot<I>),
+    /// A sub-pattern of a sequence of characters.
+    Chars(PatternChars<I>),
+    /// A sub-pattern `^`
+    Caret(Caret<I>),
+    /// A sub-pattern `$`
+    Dollar(Dollar<I>),
 }
 
 /// Pattern sequence.
@@ -82,7 +98,7 @@ mod tests {
         input::TokenStream,
         pattern::{
             BackSlash, BracketEnd, BracketStart, Caret, Class, ClassChars, Digits, Escape,
-            EscapeKind, ParenEnd, ParenStart, PatternChars, Plus, Question, Repeat, Star,
+            EscapeKind, ParenEnd, ParenStart, Pattern, PatternChars, Plus, Question, Repeat, Star,
             SubPattern,
         },
     };
@@ -181,5 +197,12 @@ mod tests {
                 SubPattern::Plus(Plus(TokenStream::from((3, "+"))))
             ])
         );
+    }
+
+    #[test]
+    fn test_pattern() {
+        TokenStream::from(r"^(http|https)://[a-zA-Z0-9\-\.]+\.[a-zA-Z]{2,3}(/\S*)?$")
+            .parse::<Pattern<_>>()
+            .unwrap();
     }
 }
