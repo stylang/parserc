@@ -21,11 +21,7 @@ where
                 return Ok(input.split_to(item.len()));
             }
 
-            Err((Kind::Next(
-                ControlFlow::Recovable,
-                Span::Range(input.start()..input.start() + 1),
-            ))
-            .into())
+            Err((Kind::Next(ControlFlow::Recovable, input.to_span_at(1))).into())
         } else {
             Err((Kind::Next(ControlFlow::Incomplete, input.to_span())).into())
         }
@@ -45,9 +41,9 @@ where
                 return Ok(input.split_to(next.len()));
             }
 
-            Err((Kind::NextIf(ControlFlow::Recovable, input.to_span())).into())
+            Err((Kind::NextIf(ControlFlow::Recovable, input.to_span_at(1))).into())
         } else {
-            Err((Kind::NextIf(ControlFlow::Incomplete, input.to_span())).into())
+            Err((Kind::NextIf(ControlFlow::Incomplete, input.to_span_at(1))).into())
         }
     }
 }
