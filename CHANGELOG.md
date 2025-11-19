@@ -9,6 +9,10 @@ Note: In this file, do not use the hard wrap in the middle of a sentence for
 compatibility with GitHub comment style markdown rendering.
 -->
 
+## [0.11.2] - 2025-11-19
+
+- drive `Ord` and `Eq` for syntax `Or`.
+
 ## [0.11.1] - 2025-11-18
 
 - fixed the `span` bug of the `next_if`,`next` functions.

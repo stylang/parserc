@@ -368,7 +368,7 @@ where
 /// When merging two abstract syntax trees,
 /// it first attempts to match the left subtree;
 /// if unsuccessful, it proceeds to match the right subtree.
-#[derive(Debug, PartialEq, PartialOrd, Clone)]
+#[derive(Debug, PartialEq, Eq, PartialOrd, Ord, Clone)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub enum Or<F, S> {
     First(F),
