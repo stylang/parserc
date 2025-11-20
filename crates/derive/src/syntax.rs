@@ -167,6 +167,7 @@ impl ItemConfig {
 struct FieldConfig {
     crucial: bool,
     map_err: Option<Expr>,
+    keyword: Option<Lit>,
 }
 
 impl FieldConfig {
@@ -199,6 +200,7 @@ impl FieldConfig {
 
         let mut crucial = false;
         let mut map_err: Option<Expr> = None;
+        let mut keyword: Option<Lit> = None;
 
         for meta_list in met_lists {
             let parser = syn::meta::parser(|meta| {
@@ -219,6 +221,11 @@ impl FieldConfig {
                         error!("Call `map_err` twice.");
                     }
                     map_err = Some(meta.value()?.parse()?);
+                } else if ident == "keyword" {
+                    if keyword.is_some() {
+                        error!("Call `keyword` twice.");
+                    }
+                    keyword = Some(meta.value()?.parse()?);
                 } else {
                     error!("Unsupport macro `parserc` option `{}`.", ident);
                 }
@@ -229,7 +236,11 @@ impl FieldConfig {
             parser.parse2(meta_list.tokens.to_token_stream())?;
         }
 
-        Ok(FieldConfig { crucial, map_err })
+        Ok(FieldConfig {
+            crucial,
+            map_err,
+            keyword,
+        })
     }
 }
 
@@ -289,7 +300,11 @@ fn derive_syntax_for_enum(item: ItemEnum) -> Result<proc_macro2::TokenStream> {
                 .fields
                 .iter()
                 .map(|field| {
-                    let FieldConfig { crucial, map_err } = FieldConfig::parse(&field.attrs)?;
+                    let FieldConfig {
+                        crucial,
+                        map_err,
+                        keyword,
+                    } = FieldConfig::parse(&field.attrs)?;
 
                     let map_err = if let Some(map_err) = map_err {
                         quote! {
@@ -299,11 +314,30 @@ fn derive_syntax_for_enum(item: ItemEnum) -> Result<proc_macro2::TokenStream> {
                         quote! {}
                     };
 
+                    let parse = if let Some(keyword) = keyword {
+                        if ty_input.to_token_stream().to_string()
+                            != field.ty.to_token_stream().to_string()
+                        {
+                            return Err(Error::new(
+                                field.ty.span(),
+                                "`keyword` can only be applied to field with input type.",
+                            ));
+                        }
+
+                        quote! {
+                            parserc::keyword(#keyword).parse(input)
+                        }
+                    } else {
+                        quote! {
+                            input.parse()
+                        }
+                    };
+
                     let result = match &field.ident {
                         Some(ident) => Ok(quote! {
-                            #ident: input.parse()#map_err #into_fatal?
+                            #ident: #parse #map_err #into_fatal?
                         }),
-                        None => Ok(quote! {input.parse()#map_err #into_fatal?}),
+                        None => Ok(quote! {#parse #map_err #into_fatal?}),
                     };
 
                     if crucial {
@@ -393,9 +427,10 @@ fn derive_syntax_for_enum(item: ItemEnum) -> Result<proc_macro2::TokenStream> {
         impl #impl_generic parserc::syntax::Syntax<#ty_input> for #ident #type_generic #where_clause {
             #[inline]
             fn parse(input: &mut #ty_input) -> Result<Self, <#ty_input as parserc::Input>::Error> {
-                use parserc::syntax::InputSyntaxExt;
                 use parserc::Parser;
                 use parserc::ParseError;
+                use parserc::syntax::InputSyntaxExt;
+
                 #(#fields)*
 
                 Err(parserc::Kind::Syntax(#ident_str,parserc::ControlFlow::Recovable,input.to_span()).into())#map_err
@@ -438,7 +473,11 @@ fn derive_syntax_for_struct(item: ItemStruct) -> Result<proc_macro2::TokenStream
         .fields
         .iter()
         .map(|field| {
-            let FieldConfig { crucial, map_err } = FieldConfig::parse(&field.attrs)?;
+            let FieldConfig {
+                crucial,
+                map_err,
+                keyword,
+            } = FieldConfig::parse(&field.attrs)?;
 
             let map_err = if let Some(map_err) = map_err {
                 quote! {
@@ -448,11 +487,29 @@ fn derive_syntax_for_struct(item: ItemStruct) -> Result<proc_macro2::TokenStream
                 map_err_global.clone()
             };
 
+            let parse = if let Some(keyword) = keyword {
+                if ty_input.to_token_stream().to_string() != field.ty.to_token_stream().to_string()
+                {
+                    return Err(Error::new(
+                        field.ty.span(),
+                        "`keyword` can only be applied to field with input type.",
+                    ));
+                }
+
+                quote! {
+                    parserc::keyword(#keyword).parse(input)
+                }
+            } else {
+                quote! {
+                    input.parse()
+                }
+            };
+
             let result = match &field.ident {
                 Some(ident) => Ok(quote! {
-                    #ident: input.parse() #map_err #into_fatal?
+                    #ident: #parse #map_err #into_fatal?
                 }),
-                None => Ok(quote! {input.parse()#map_err #into_fatal?}),
+                None => Ok(quote! {#parse #map_err #into_fatal?}),
             };
 
             if crucial {
@@ -544,8 +601,10 @@ fn derive_syntax_for_struct(item: ItemStruct) -> Result<proc_macro2::TokenStream
             impl #impl_generic parserc::syntax::Syntax<#ty_input> for #ident #type_generic #where_clause {
                 #[inline]
                 fn parse(input: &mut #ty_input) -> Result<Self, <#ty_input as parserc::Input>::Error> {
-                    use parserc::syntax::InputSyntaxExt;
+                    use parserc::Parser;
                     use parserc::ParseError;
+                    use parserc::syntax::InputSyntaxExt;
+
                     #parse
                 }
 
