@@ -9,7 +9,7 @@ use parserc_derive::Syntax;
 type TokenStream<'a> = chars::TokenStream<'a, Kind>;
 
 #[derive(Debug, PartialEq, Eq, PartialOrd, Ord, Syntax)]
-#[parserc(token = |c: char| c.is_ascii_alphabetic())]
+#[parserc(take_while = |c: char| c.is_ascii_alphabetic())]
 struct Ident<I>(pub I)
 where
     I: CharsInput;

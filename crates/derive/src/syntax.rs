@@ -1,8 +1,8 @@
 use proc_macro::TokenStream;
 use quote::{ToTokens, format_ident, quote};
 use syn::{
-    Attribute, Error, Expr, ExprClosure, Fields, Item, ItemEnum, ItemStruct, Lit, Result, Type,
-    parse::Parser, parse_macro_input, spanned::Spanned,
+    Attribute, Error, Expr, Fields, Item, ItemEnum, ItemStruct, Lit, Result, Type, parse::Parser,
+    parse_macro_input, spanned::Spanned,
 };
 
 pub fn derive_syntax(input: TokenStream) -> TokenStream {
@@ -31,7 +31,7 @@ struct ItemConfig {
     ty_input: Type,
     map_err: Option<Expr>,
     keyword: Option<Lit>,
-    token: Option<ExprClosure>,
+    take_while: Option<Expr>,
     c: Option<Lit>,
 }
 
@@ -41,7 +41,7 @@ impl Default for ItemConfig {
             ty_input: syn::parse2(quote! { I }).unwrap(),
             map_err: None,
             keyword: None,
-            token: None,
+            take_while: None,
             c: None,
         }
     }
@@ -79,7 +79,7 @@ impl ItemConfig {
         let mut map_err: Option<Expr> = None;
         let mut keyword: Option<Lit> = None;
         let mut c: Option<Lit> = None;
-        let mut token: Option<ExprClosure> = None;
+        let mut take_while: Option<Expr> = None;
 
         for meta_list in met_lists {
             let parser = syn::meta::parser(|meta| {
@@ -104,8 +104,8 @@ impl ItemConfig {
                     }
                     map_err = Some(meta.value()?.parse()?);
                 } else if ident == "keyword" {
-                    if token.is_some() || c.is_some() {
-                        error!("The syntax has been set as a `token` or `char`.");
+                    if take_while.is_some() || c.is_some() {
+                        error!("The syntax has been set as a `take_while` or `char`.");
                     }
 
                     if keyword.is_some() {
@@ -113,19 +113,19 @@ impl ItemConfig {
                     }
 
                     keyword = Some(meta.value()?.parse()?);
-                } else if ident == "token" {
+                } else if ident == "take_while" {
                     if keyword.is_some() || c.is_some() {
                         error!("The syntax has been set as a `keyword` or `char`.");
                     }
 
-                    if token.is_some() {
-                        error!("Call `token` twice.");
+                    if take_while.is_some() {
+                        error!("Call `take_while` twice.");
                     }
 
-                    token = Some(meta.value()?.parse()?);
+                    take_while = Some(meta.value()?.parse()?);
                 } else if ident == "char" {
-                    if keyword.is_some() || token.is_some() {
-                        error!("The syntax has been set as a `keyword` or `token`.");
+                    if keyword.is_some() || take_while.is_some() {
+                        error!("The syntax has been set as a `keyword` or `take_while`.");
                     }
 
                     if c.is_some() {
@@ -148,14 +148,14 @@ impl ItemConfig {
                 ty_input,
                 map_err,
                 keyword,
-                token,
+                take_while,
                 c,
             })
         } else {
             Ok(ItemConfig {
                 map_err,
                 keyword,
-                token,
+                take_while,
                 c,
                 ..Default::default()
             })
@@ -168,6 +168,8 @@ struct FieldConfig {
     crucial: bool,
     map_err: Option<Expr>,
     keyword: Option<Lit>,
+    take_while: Option<Expr>,
+    parser: Option<Expr>,
 }
 
 impl FieldConfig {
@@ -201,6 +203,8 @@ impl FieldConfig {
         let mut crucial = false;
         let mut map_err: Option<Expr> = None;
         let mut keyword: Option<Lit> = None;
+        let mut take_while: Option<Expr> = None;
+        let mut parser: Option<Expr> = None;
 
         for meta_list in met_lists {
             let parser = syn::meta::parser(|meta| {
@@ -222,10 +226,32 @@ impl FieldConfig {
                     }
                     map_err = Some(meta.value()?.parse()?);
                 } else if ident == "keyword" {
+                    if take_while.is_some() || parser.is_some() {
+                        error!("The syntax has been set as a `parser` or `take_while`.");
+                    }
+
                     if keyword.is_some() {
                         error!("Call `keyword` twice.");
                     }
                     keyword = Some(meta.value()?.parse()?);
+                } else if ident == "take_while" {
+                    if keyword.is_some() || parser.is_some() {
+                        error!("The syntax has been set as a `keyword` or `parser`.");
+                    }
+
+                    if take_while.is_some() {
+                        error!("Call `token` twice.");
+                    }
+                    take_while = Some(meta.value()?.parse()?);
+                } else if ident == "parser" {
+                    if take_while.is_some() || keyword.is_some() {
+                        error!("The syntax has been set as a `keyword` or `take_while`.");
+                    }
+
+                    if parser.is_some() {
+                        error!("Call `parser` twice.");
+                    }
+                    parser = Some(meta.value()?.parse()?);
                 } else {
                     error!("Unsupport macro `parserc` option `{}`.", ident);
                 }
@@ -240,6 +266,8 @@ impl FieldConfig {
             crucial,
             map_err,
             keyword,
+            take_while,
+            parser,
         })
     }
 }
@@ -249,7 +277,7 @@ fn derive_syntax_for_enum(item: ItemEnum) -> Result<proc_macro2::TokenStream> {
         ty_input,
         map_err,
         keyword,
-        token,
+        take_while: token,
         c,
     } = ItemConfig::parse(&item.attrs)?;
 
@@ -304,6 +332,8 @@ fn derive_syntax_for_enum(item: ItemEnum) -> Result<proc_macro2::TokenStream> {
                         crucial,
                         map_err,
                         keyword,
+                        take_while: token,
+                        parser,
                     } = FieldConfig::parse(&field.attrs)?;
 
                     let map_err = if let Some(map_err) = map_err {
@@ -326,6 +356,32 @@ fn derive_syntax_for_enum(item: ItemEnum) -> Result<proc_macro2::TokenStream> {
 
                         quote! {
                             parserc::keyword(#keyword).parse(input)
+                        }
+                    } else if let Some(token) = token {
+                        if ty_input.to_token_stream().to_string()
+                            != field.ty.to_token_stream().to_string()
+                        {
+                            return Err(Error::new(
+                                field.ty.span(),
+                                "`token` can only be applied to field with input type.",
+                            ));
+                        }
+
+                        quote! {
+                            parserc::take_while(#token).parse(input)
+                        }
+                    } else if let Some(parser) = parser {
+                        if ty_input.to_token_stream().to_string()
+                            != field.ty.to_token_stream().to_string()
+                        {
+                            return Err(Error::new(
+                                field.ty.span(),
+                                "`parser` can only be applied to field with input type.",
+                            ));
+                        }
+
+                        quote! {
+                            #parser.parse(input)
                         }
                     } else {
                         quote! {
@@ -451,7 +507,7 @@ fn derive_syntax_for_struct(item: ItemStruct) -> Result<proc_macro2::TokenStream
         ty_input,
         map_err,
         keyword,
-        token,
+        take_while: token,
         c,
     } = ItemConfig::parse(&item.attrs)?;
 
@@ -477,6 +533,8 @@ fn derive_syntax_for_struct(item: ItemStruct) -> Result<proc_macro2::TokenStream
                 crucial,
                 map_err,
                 keyword,
+                take_while: token,
+                parser,
             } = FieldConfig::parse(&field.attrs)?;
 
             let map_err = if let Some(map_err) = map_err {
@@ -498,6 +556,30 @@ fn derive_syntax_for_struct(item: ItemStruct) -> Result<proc_macro2::TokenStream
 
                 quote! {
                     parserc::keyword(#keyword).parse(input)
+                }
+            } else if let Some(token) = token {
+                if ty_input.to_token_stream().to_string() != field.ty.to_token_stream().to_string()
+                {
+                    return Err(Error::new(
+                        field.ty.span(),
+                        "`token` can only be applied to field with input type.",
+                    ));
+                }
+
+                quote! {
+                    parserc::take_while(#token).parse(input)
+                }
+            } else if let Some(parser) = parser {
+                if ty_input.to_token_stream().to_string() != field.ty.to_token_stream().to_string()
+                {
+                    return Err(Error::new(
+                        field.ty.span(),
+                        "`parser` can only be applied to field with input type.",
+                    ));
+                }
+
+                quote! {
+                    #parser.parse(input)
                 }
             } else {
                 quote! {
