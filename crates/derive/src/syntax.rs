@@ -433,7 +433,7 @@ fn derive_syntax_for_enum(item: ItemEnum) -> Result<proc_macro2::TokenStream> {
 
                 #(#fields)*
 
-                Err(parserc::Kind::Syntax(#ident_str,parserc::ControlFlow::Recovable,input.to_span()).into())#map_err
+                Err(parserc::Kind::Syntax(#ident_str,parserc::ControlFlow::Recovable,input.to_span_at(1)).into())#map_err
             }
 
             #[inline]

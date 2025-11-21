@@ -45,9 +45,14 @@ pub trait ParseError: From<Kind> {
     fn to_span(&self) -> Span;
     /// Returns `ControlFlow` code of this error.
     fn control_flow(&self) -> ControlFlow;
-
     /// Ensure this error is an fatal error.
     fn into_fatal(self) -> Self;
+
+    /// Returns true if it's `control_flow == ControlFlow::Fatal`
+    #[inline]
+    fn is_fatal(&self) -> bool {
+        self.control_flow() == ControlFlow::Fatal
+    }
 }
 
 impl ParseError for Kind {

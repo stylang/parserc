@@ -9,6 +9,10 @@ Note: In this file, do not use the hard wrap in the middle of a sentence for
 compatibility with GitHub comment style markdown rendering.
 -->
 
+## [0.11.4] - 2025-11-20
+
+- ParseError: add `is_fatal` function.
+
 ## [0.11.3] - 2025-11-19
 
 - support attribute `#[parserc(keyword = "xxx")]` on struct/enum field.
