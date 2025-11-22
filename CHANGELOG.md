@@ -9,6 +9,10 @@ Note: In this file, do not use the hard wrap in the middle of a sentence for
 compatibility with GitHub comment style markdown rendering.
 -->
 
+## [0.11.6] - 2025-11-22
+
+- derive: item `parserc` attribute add `semantic` cfg.
+
 ## [0.11.5] - 2025-11-21
 
 - derive: `parserc` attribute add meta cfg `take_while` and `parser`.

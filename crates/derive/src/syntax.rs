@@ -33,6 +33,7 @@ struct ItemConfig {
     keyword: Option<Lit>,
     take_while: Option<Expr>,
     c: Option<Lit>,
+    semantic: Option<Expr>,
 }
 
 impl Default for ItemConfig {
@@ -43,6 +44,7 @@ impl Default for ItemConfig {
             keyword: None,
             take_while: None,
             c: None,
+            semantic: None,
         }
     }
 }
@@ -80,6 +82,7 @@ impl ItemConfig {
         let mut keyword: Option<Lit> = None;
         let mut c: Option<Lit> = None;
         let mut take_while: Option<Expr> = None;
+        let mut semantic: Option<Expr> = None;
 
         for meta_list in met_lists {
             let parser = syn::meta::parser(|meta| {
@@ -133,6 +136,16 @@ impl ItemConfig {
                     }
 
                     c = Some(meta.value()?.parse()?);
+                } else if ident == "semantic" {
+                    if keyword.is_some() || take_while.is_some() {
+                        error!("The syntax has been set as a `keyword` or `take_while`.");
+                    }
+
+                    if c.is_some() {
+                        error!("Call `char` twice.");
+                    }
+
+                    semantic = Some(meta.value()?.parse()?);
                 } else {
                     error!("Unsupport macro `syntax` option `{}`.", ident);
                 }
@@ -150,6 +163,7 @@ impl ItemConfig {
                 keyword,
                 take_while,
                 c,
+                semantic,
             })
         } else {
             Ok(ItemConfig {
@@ -157,6 +171,7 @@ impl ItemConfig {
                 keyword,
                 take_while,
                 c,
+                semantic,
                 ..Default::default()
             })
         }
@@ -279,6 +294,7 @@ fn derive_syntax_for_enum(item: ItemEnum) -> Result<proc_macro2::TokenStream> {
         keyword,
         take_while: token,
         c,
+        semantic,
     } = ItemConfig::parse(&item.attrs)?;
 
     match (keyword, token, c) {
@@ -426,13 +442,23 @@ fn derive_syntax_for_enum(item: ItemEnum) -> Result<proc_macro2::TokenStream> {
 
             let parse = if let Fields::Named(_) = &varint.fields {
                 quote! {
-                    Ok(#ident::#variant_ident {
+                    #ident::#variant_ident {
                         #(#parse_fields),*
-                    })
+                    }
                 }
             } else {
                 quote! {
-                    Ok(#ident::#variant_ident(#(#parse_fields),*))
+                    #ident::#variant_ident(#(#parse_fields),*)
+                }
+            };
+
+            let parse = if let Some(semantic) = &semantic {
+                quote! {
+                    #semantic(#parse)
+                }
+            } else {
+                quote! {
+                    Ok(#parse)
                 }
             };
 
@@ -509,6 +535,7 @@ fn derive_syntax_for_struct(item: ItemStruct) -> Result<proc_macro2::TokenStream
         keyword,
         take_while: token,
         c,
+        semantic,
     } = ItemConfig::parse(&item.attrs)?;
 
     let ident = &item.ident;
@@ -623,13 +650,23 @@ fn derive_syntax_for_struct(item: ItemStruct) -> Result<proc_macro2::TokenStream
 
     let parse = if item.semi_token.is_some() {
         quote! {
-            Ok(Self(#(#parse_fields),*))
+            Self(#(#parse_fields),*)
         }
     } else {
         quote! {
-            Ok(Self {
+            Self {
                 #(#parse_fields),*
-            })
+            }
+        }
+    };
+
+    let parse = if let Some(semantic) = semantic {
+        quote! {
+            #semantic(#parse)
+        }
+    } else {
+        quote! {
+            Ok(#parse)
         }
     };
 
