@@ -166,10 +166,7 @@ pub mod bytes {
 
     impl<'a, E> Debug for TokenStream<'a, E> {
         fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-            f.debug_struct("TokenStream")
-                .field("offset", &self.offset)
-                .field("value", &self.value)
-                .finish()
+            write!(f, "TokenStream::from(({},{}))", self.offset, self.value)
         }
     }
 

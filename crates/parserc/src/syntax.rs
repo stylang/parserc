@@ -330,6 +330,20 @@ pub struct Punctuated<T, P> {
     pub tail: Option<Box<T>>,
 }
 
+impl<T, P> Punctuated<T, P> {
+    /// returns the sequence length.
+    #[inline]
+    pub fn len(&self) -> usize {
+        self.pairs.len() + self.tail.as_ref().map_or(0, |_| 1)
+    }
+
+    /// Returns true if the punctuated sequence length is 0.
+    #[inline]
+    pub fn is_empty(&self) -> bool {
+        self.len() == 0
+    }
+}
+
 impl<T, P, I> Syntax<I> for Punctuated<T, P>
 where
     T: Syntax<I>,

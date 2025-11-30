@@ -9,6 +9,10 @@ Note: In this file, do not use the hard wrap in the middle of a sentence for
 compatibility with GitHub comment style markdown rendering.
 -->
 
+## [0.11.7] - 2025-11-30
+
+- `Punctuated`: add `len` and `is_empty` fncs.
+
 ## [0.11.6] - 2025-11-22
 
 - derive: item `parserc` attribute add `semantic` cfg.
