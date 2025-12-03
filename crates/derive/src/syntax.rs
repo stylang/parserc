@@ -387,14 +387,14 @@ fn derive_syntax_for_enum(item: ItemEnum) -> Result<proc_macro2::TokenStream> {
                             parserc::take_while(#token).parse(input)
                         }
                     } else if let Some(parser) = parser {
-                        if ty_input.to_token_stream().to_string()
-                            != field.ty.to_token_stream().to_string()
-                        {
-                            return Err(Error::new(
-                                field.ty.span(),
-                                "`parser` can only be applied to field with input type.",
-                            ));
-                        }
+                        // if ty_input.to_token_stream().to_string()
+                        //     != field.ty.to_token_stream().to_string()
+                        // {
+                        //     return Err(Error::new(
+                        //         field.ty.span(),
+                        //         "`parser` can only be applied to field with input type.",
+                        //     ));
+                        // }
 
                         quote! {
                             #parser.parse(input)
@@ -597,13 +597,13 @@ fn derive_syntax_for_struct(item: ItemStruct) -> Result<proc_macro2::TokenStream
                     parserc::take_while(#token).parse(input)
                 }
             } else if let Some(parser) = parser {
-                if ty_input.to_token_stream().to_string() != field.ty.to_token_stream().to_string()
-                {
-                    return Err(Error::new(
-                        field.ty.span(),
-                        "`parser` can only be applied to field with input type.",
-                    ));
-                }
+                // if ty_input.to_token_stream().to_string() != field.ty.to_token_stream().to_string()
+                // {
+                //     return Err(Error::new(
+                //         field.ty.span(),
+                //         "`parser` can only be applied to field with input type.",
+                //     ));
+                // }
 
                 quote! {
                     #parser.parse(input)

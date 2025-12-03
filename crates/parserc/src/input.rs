@@ -145,6 +145,7 @@ pub mod bytes {
 
     /// `BytesInput` implementation.
     #[derive(Eq, PartialOrd, Ord, Hash)]
+    #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
     pub struct TokenStream<'a, Error = Kind> {
         /// offset in the whole token stream.
         pub offset: usize,
@@ -166,7 +167,7 @@ pub mod bytes {
 
     impl<'a, E> Debug for TokenStream<'a, E> {
         fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-            write!(f, "TokenStream::from(({},{}))", self.offset, self.value)
+            write!(f, "TokenStream::from(({},{:?}))", self.offset, self.value)
         }
     }
 
@@ -361,6 +362,7 @@ pub mod chars {
 
     /// `BytesInput` implementation.
     #[derive(Eq, PartialOrd, Ord, Hash)]
+    #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
     pub struct TokenStream<'a, Error = Kind> {
         /// offset in the whole token stream.
         pub offset: usize,

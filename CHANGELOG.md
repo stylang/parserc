@@ -9,6 +9,10 @@ Note: In this file, do not use the hard wrap in the middle of a sentence for
 compatibility with GitHub comment style markdown rendering.
 -->
 
+## [0.11.8] - 2025-12-08
+
+- derive: now `parser` argument in `#[parserc(parser)]` can returns any type value.
+
 ## [0.11.7] - 2025-11-30
 
 - `Punctuated`: add `len` and `is_empty` fncs.
