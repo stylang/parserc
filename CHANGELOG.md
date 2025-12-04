@@ -9,6 +9,10 @@ Note: In this file, do not use the hard wrap in the middle of a sentence for
 compatibility with GitHub comment style markdown rendering.
 -->
 
+## [0.11.9] - 2025-12-08
+
+- derive: semantic signature is changed to: `fn(I,T) -> Result<T,E>`.
+
 ## [0.11.8] - 2025-12-08
 
 - derive: now `parser` argument in `#[parserc(parser)]` can returns any type value.
