@@ -454,7 +454,8 @@ fn derive_syntax_for_enum(item: ItemEnum) -> Result<proc_macro2::TokenStream> {
 
             let parse = if let Some(semantic) = &semantic {
                 quote! {
-                    #semantic(#parse)
+                    let _c = #parse;
+                    #semantic(input, _c)
                 }
             } else {
                 quote! {
@@ -662,7 +663,8 @@ fn derive_syntax_for_struct(item: ItemStruct) -> Result<proc_macro2::TokenStream
 
     let parse = if let Some(semantic) = semantic {
         quote! {
-            #semantic(#parse)
+            let _c = #parse;
+            #semantic(input, _c)
         }
     } else {
         quote! {
