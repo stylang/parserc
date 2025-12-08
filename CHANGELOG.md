@@ -9,6 +9,10 @@ Note: In this file, do not use the hard wrap in the middle of a sentence for
 compatibility with GitHub comment style markdown rendering.
 -->
 
+## [0.11.10] - 2025-12-08
+
+- Concrete syntax tree: add `left recursion detect` switch attribute `parser(left_recursion)`.
+
 ## [0.11.9] - 2025-12-08
 
 - derive: semantic signature is changed to: `fn(I,T) -> Result<T,E>`.

@@ -181,6 +181,7 @@ impl ItemConfig {
 #[derive(Default)]
 struct FieldConfig {
     crucial: bool,
+    left_recursion: bool,
     map_err: Option<Expr>,
     keyword: Option<Lit>,
     take_while: Option<Expr>,
@@ -216,6 +217,7 @@ impl FieldConfig {
         };
 
         let mut crucial = false;
+        let mut left_recursion = false;
         let mut map_err: Option<Expr> = None;
         let mut keyword: Option<Lit> = None;
         let mut take_while: Option<Expr> = None;
@@ -235,6 +237,8 @@ impl FieldConfig {
 
                 if ident == "crucial" {
                     crucial = true;
+                } else if ident == "left_recursion" {
+                    left_recursion = true;
                 } else if ident == "map_err" {
                     if map_err.is_some() {
                         error!("Call `map_err` twice.");
@@ -279,6 +283,7 @@ impl FieldConfig {
 
         Ok(FieldConfig {
             crucial,
+            left_recursion,
             map_err,
             keyword,
             take_while,
@@ -350,6 +355,7 @@ fn derive_syntax_for_enum(item: ItemEnum) -> Result<proc_macro2::TokenStream> {
                         keyword,
                         take_while: token,
                         parser,
+                        left_recursion,
                     } = FieldConfig::parse(&field.attrs)?;
 
                     let map_err = if let Some(map_err) = map_err {
@@ -387,15 +393,6 @@ fn derive_syntax_for_enum(item: ItemEnum) -> Result<proc_macro2::TokenStream> {
                             parserc::take_while(#token).parse(input)
                         }
                     } else if let Some(parser) = parser {
-                        // if ty_input.to_token_stream().to_string()
-                        //     != field.ty.to_token_stream().to_string()
-                        // {
-                        //     return Err(Error::new(
-                        //         field.ty.span(),
-                        //         "`parser` can only be applied to field with input type.",
-                        //     ));
-                        // }
-
                         quote! {
                             #parser.parse(input)
                         }
@@ -405,11 +402,31 @@ fn derive_syntax_for_enum(item: ItemEnum) -> Result<proc_macro2::TokenStream> {
                         }
                     };
 
+                    let parse = if left_recursion {
+                        quote! {
+                            {
+                                thread_local! {
+                                    static GUARD: std::cell::RefCell<bool> = std::cell::RefCell::new(false);
+                                }
+
+                                if GUARD.replace(true) {
+                                    Err(parserc::Kind::LeftRecursion(parserc::ControlFlow::Recovable,input.to_span_at(1)).into()) #map_err #into_fatal
+                                } else {
+                                    let r = #parse #map_err #into_fatal;
+                                    GUARD.replace(false);
+                                    r
+                                }
+                            }
+                        }
+                    } else {
+                        quote! { #parse #map_err #into_fatal }
+                    };
+
                     let result = match &field.ident {
                         Some(ident) => Ok(quote! {
-                            #ident: #parse #map_err #into_fatal?
+                            #ident: #parse?
                         }),
-                        None => Ok(quote! {#parse #map_err #into_fatal?}),
+                        None => Ok(quote! { #parse? }),
                     };
 
                     if crucial {
@@ -563,6 +580,7 @@ fn derive_syntax_for_struct(item: ItemStruct) -> Result<proc_macro2::TokenStream
                 keyword,
                 take_while: token,
                 parser,
+                left_recursion,
             } = FieldConfig::parse(&field.attrs)?;
 
             let map_err = if let Some(map_err) = map_err {
@@ -598,14 +616,6 @@ fn derive_syntax_for_struct(item: ItemStruct) -> Result<proc_macro2::TokenStream
                     parserc::take_while(#token).parse(input)
                 }
             } else if let Some(parser) = parser {
-                // if ty_input.to_token_stream().to_string() != field.ty.to_token_stream().to_string()
-                // {
-                //     return Err(Error::new(
-                //         field.ty.span(),
-                //         "`parser` can only be applied to field with input type.",
-                //     ));
-                // }
-
                 quote! {
                     #parser.parse(input)
                 }
@@ -615,11 +625,31 @@ fn derive_syntax_for_struct(item: ItemStruct) -> Result<proc_macro2::TokenStream
                 }
             };
 
+            let parse = if left_recursion {
+                quote! {
+                    {
+                        thread_local! {
+                            static GUARD: std::cell::RefCell<bool> = std::cell::RefCell::new(false);
+                        }
+
+                        if GUARD.replace(true) {
+                            Err(parserc::Kind::LeftRecursion(parserc::ControlFlow::Recovable,input.to_span_at(1)).into()) #map_err #into_fatal
+                        } else {
+                            let r = #parse #map_err #into_fatal;
+                            GUARD.replace(false);
+                            r
+                        }
+                    }
+                }
+            } else {
+                quote! { #parse #map_err #into_fatal }
+            };
+
             let result = match &field.ident {
                 Some(ident) => Ok(quote! {
-                    #ident: #parse #map_err #into_fatal?
+                    #ident: #parse?
                 }),
-                None => Ok(quote! {#parse #map_err #into_fatal?}),
+                None => Ok(quote! { #parse? }),
             };
 
             if crucial {
