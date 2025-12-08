@@ -11,7 +11,7 @@ compatibility with GitHub comment style markdown rendering.
 
 ## [0.11.10] - 2025-12-08
 
-- Concrete syntax tree: add `left recursion detect` switch attribute `parser(left_recursion)`.
+- Concrete syntax tree: add `left recursion detect` switch attribute `parserc(left_recursion)`.
 
 ## [0.11.9] - 2025-12-08
 
