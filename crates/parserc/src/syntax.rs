@@ -194,7 +194,7 @@ where
 
         let body = Body::into_parser().parse(input)?;
 
-        let end = End::into_parser().parse(input)?;
+        let end = End::into_parser().fatal().parse(input)?;
 
         Ok(Self { start, body, end })
     }
