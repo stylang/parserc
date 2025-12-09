@@ -9,6 +9,11 @@ Note: In this file, do not use the hard wrap in the middle of a sentence for
 compatibility with GitHub comment style markdown rendering.
 -->
 
+## [0.12.0] - 2025-12-09
+
+- rename `InputSyntaxEx` to `SyntaxInput`.
+- remove trait `PartialSyntax`.
+
 ## [0.11.10] - 2025-12-08
 
 - Concrete syntax tree: add `left recursion detect` switch attribute `parserc(left_recursion)`.

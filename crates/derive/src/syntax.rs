@@ -497,7 +497,7 @@ fn derive_syntax_for_enum(item: ItemEnum) -> Result<proc_macro2::TokenStream> {
 
             let parse = quote! {
                 let parser = | input: &mut #ty_input | {
-                        use parserc::syntax::InputSyntaxExt;
+                        use parserc::syntax::SyntaxInput;
                         #parse
                 };
 
@@ -529,7 +529,7 @@ fn derive_syntax_for_enum(item: ItemEnum) -> Result<proc_macro2::TokenStream> {
             fn parse(input: &mut #ty_input) -> Result<Self, <#ty_input as parserc::Input>::Error> {
                 use parserc::Parser;
                 use parserc::ParseError;
-                use parserc::syntax::InputSyntaxExt;
+                use parserc::syntax::SyntaxInput;
 
                 #(#fields)*
 
@@ -754,7 +754,7 @@ fn derive_syntax_for_struct(item: ItemStruct) -> Result<proc_macro2::TokenStream
                 fn parse(input: &mut #ty_input) -> Result<Self, <#ty_input as parserc::Input>::Error> {
                     use parserc::Parser;
                     use parserc::ParseError;
-                    use parserc::syntax::InputSyntaxExt;
+                    use parserc::syntax::SyntaxInput;
 
                     #parse
                 }

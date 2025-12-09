@@ -39,6 +39,8 @@ pub enum Kind {
     TakeWhileFrom(ControlFlow, Span),
     #[error("Detected `left recursion`")]
     LeftRecursion(ControlFlow, Span),
+    #[error("Unclosed `delimiter`")]
+    Delimiter(ControlFlow, Span),
 }
 
 /// A error type returns by parser combinators.
@@ -72,6 +74,7 @@ impl ParseError for Kind {
             Kind::TakeWhileRange(control_flow, _) => *control_flow,
             Kind::TakeWhileFrom(control_flow, _) => *control_flow,
             Kind::LeftRecursion(control_flow, _) => *control_flow,
+            Kind::Delimiter(control_flow, _) => *control_flow,
         }
     }
 
@@ -88,6 +91,7 @@ impl ParseError for Kind {
             Kind::LimitsTo(_, span) => Kind::LimitsTo(ControlFlow::Fatal, span),
             Kind::Limits(_, span) => Kind::Limits(ControlFlow::Fatal, span),
             Kind::LimitsFrom(_, span) => Kind::LimitsFrom(ControlFlow::Fatal, span),
+            Kind::Delimiter(_, span) => Kind::LimitsFrom(ControlFlow::Fatal, span),
             Kind::LeftRecursion(_, span) => Kind::LeftRecursion(ControlFlow::Fatal, span),
         }
     }
@@ -106,6 +110,7 @@ impl ParseError for Kind {
             Kind::TakeWhileFrom(_, span) => span.clone(),
             Kind::LimitsFrom(_, span) => span.clone(),
             Kind::LeftRecursion(_, span) => span.clone(),
+            Kind::Delimiter(_, span) => span.clone(),
         }
     }
 }

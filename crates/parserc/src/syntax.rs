@@ -6,7 +6,7 @@ use crate::{ControlFlow, Kind, Span, next};
 use crate::{input::Input, parser::Parser};
 
 /// An extension trait to help syntax struct parsing.
-pub trait InputSyntaxExt: Input {
+pub trait SyntaxInput: Input {
     /// Parse a specific `Syntax` type.
     #[inline]
     fn parse<S>(&mut self) -> Result<S, Self::Error>
@@ -18,7 +18,7 @@ pub trait InputSyntaxExt: Input {
     }
 }
 
-impl<I> InputSyntaxExt for I where I: Input {}
+impl<I> SyntaxInput for I where I: Input {}
 
 /// A syntax tree struct/enum should implment this trait
 pub trait Syntax<I>: Sized
@@ -192,7 +192,12 @@ where
     fn parse(input: &mut I) -> Result<Self, I::Error> {
         let start = Start::parse(input)?;
         let body = Body::into_parser().parse(input)?;
-        let end = End::into_parser().fatal().parse(input)?;
+
+        let span = start.to_span() + body.to_span();
+
+        let end = End::into_parser()
+            .parse(input)
+            .map_err(|_| Kind::Delimiter(ControlFlow::Recovable, span))?;
 
         Ok(Self { start, body, end })
     }
@@ -411,37 +416,6 @@ where
             Or::First(v) => v.to_span(),
             Or::Second(v) => v.to_span(),
         }
-    }
-}
-
-/// Use the parsed prefix to parse the syntax tree.
-pub trait PartialSyntax<I>: Sized
-where
-    I: Input,
-{
-    /// Parsed prefix.
-    type P;
-
-    ///  Use the parsed prefix to parse the syntax tree.
-    fn parse_with_prefix(prefix: Self::P, input: &mut I) -> Result<Self, I::Error>;
-
-    /// Create a new `Parser` with parsed prefix subtree.
-    fn into_parser_with_prefix(prefix: Self::P) -> impl Parser<I, Output = Self> {
-        PartialSyntaxParser(prefix, Default::default(), Default::default())
-    }
-}
-
-struct PartialSyntaxParser<S, P, T>(P, PhantomData<S>, PhantomData<T>);
-
-impl<I, P, T> Parser<I> for PartialSyntaxParser<I, P, T>
-where
-    I: Input,
-    T: PartialSyntax<I, P = P>,
-{
-    type Output = T;
-
-    fn parse(self, input: &mut I) -> Result<Self::Output, I::Error> {
-        T::parse_with_prefix(self.0, input)
     }
 }
 

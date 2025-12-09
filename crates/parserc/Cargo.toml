@@ -13,8 +13,8 @@ thiserror = "2.0.17"
 memchr = { version = "2.7.6", optional = true }
 serde = { version = "1.0.228", optional = true }
 
-parserc-derive = { path = "../derive" , version = "^0.11", optional = true }
-sourcespan = { version = "^0.11", path = "../span" }
+parserc-derive = { path = "../derive" , version = "^0.12", optional = true }
+sourcespan = { version = "^0.12", path = "../span" }
 
 [features]
 default = ["serde","syntax","input"]

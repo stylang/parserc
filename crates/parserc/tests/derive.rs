@@ -1,7 +1,7 @@
 use parserc::{
     ControlFlow, Kind, Span,
     chars::{self, CharsInput},
-    syntax::{InputSyntaxExt, Syntax},
+    syntax::{Syntax, SyntaxInput},
 };
 
 type TokenStream<'a> = chars::TokenStream<'a, Kind>;
