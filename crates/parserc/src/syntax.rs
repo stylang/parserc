@@ -191,13 +191,10 @@ where
 {
     fn parse(input: &mut I) -> Result<Self, I::Error> {
         let start = Start::parse(input)?;
+
         let body = Body::into_parser().parse(input)?;
 
-        let span = start.to_span() + body.to_span();
-
-        let end = End::into_parser()
-            .parse(input)
-            .map_err(|_| Kind::Delimiter(ControlFlow::Recovable, span))?;
+        let end = End::into_parser().parse(input)?;
 
         Ok(Self { start, body, end })
     }
@@ -309,12 +306,12 @@ where
             sourcespan::Span::Range(range) => range.len(),
             sourcespan::Span::RangeTo(range_to) => range_to.end,
             _ => {
-                return Err(Kind::Limits(ControlFlow::Recovable, start).into());
+                return Err(Kind::LimitsFrom(ControlFlow::Recovable, start).into());
             }
         };
 
         if len < LOWER {
-            return Err(Kind::Limits(ControlFlow::Recovable, start).into());
+            return Err(Kind::LimitsFrom(ControlFlow::Recovable, start).into());
         }
 
         Ok(Self(t))

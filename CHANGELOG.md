@@ -9,6 +9,10 @@ Note: In this file, do not use the hard wrap in the middle of a sentence for
 compatibility with GitHub comment style markdown rendering.
 -->
 
+## [0.12.1] - 2025-12-09
+
+- remove: Kind::Delimiter
+
 ## [0.12.0] - 2025-12-09
 
 - rename `InputSyntaxEx` to `SyntaxInput`.
