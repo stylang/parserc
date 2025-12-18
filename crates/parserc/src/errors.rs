@@ -37,6 +37,8 @@ pub enum Kind {
     TakeWhileRange(ControlFlow, Span),
     #[error("Error from `take_while_from`")]
     TakeWhileFrom(ControlFlow, Span),
+    #[error("Error from `take_while_to`")]
+    TakeWhileTo(ControlFlow, Span),
     #[error("Detected `left recursion`")]
     LeftRecursion(ControlFlow, Span),
 }
@@ -71,6 +73,7 @@ impl ParseError for Kind {
             Kind::Token(_, control_flow, _) => *control_flow,
             Kind::TakeWhileRange(control_flow, _) => *control_flow,
             Kind::TakeWhileFrom(control_flow, _) => *control_flow,
+            Kind::TakeWhileTo(control_flow, _) => *control_flow,
             Kind::LeftRecursion(control_flow, _) => *control_flow,
         }
     }
@@ -82,7 +85,8 @@ impl ParseError for Kind {
             Kind::Keyword(_, span) => Kind::Keyword(ControlFlow::Fatal, span),
             Kind::TakeUntil(_, span) => Kind::TakeUntil(ControlFlow::Fatal, span),
             Kind::TakeWhileRange(_, span) => Kind::TakeWhileRange(ControlFlow::Fatal, span),
-            Kind::TakeWhileFrom(_, span) => Kind::TakeWhileRange(ControlFlow::Fatal, span),
+            Kind::TakeWhileFrom(_, span) => Kind::TakeWhileFrom(ControlFlow::Fatal, span),
+            Kind::TakeWhileTo(_, span) => Kind::TakeWhileTo(ControlFlow::Fatal, span),
             Kind::Syntax(name, _, span) => Kind::Syntax(name, ControlFlow::Fatal, span),
             Kind::Token(name, _, span) => Kind::Token(name, ControlFlow::Fatal, span),
             Kind::LimitsTo(_, span) => Kind::LimitsTo(ControlFlow::Fatal, span),
@@ -104,6 +108,7 @@ impl ParseError for Kind {
             Kind::TakeUntil(_, span) => span.clone(),
             Kind::TakeWhileRange(_, span) => span.clone(),
             Kind::TakeWhileFrom(_, span) => span.clone(),
+            Kind::TakeWhileTo(_, span) => span.clone(),
             Kind::LimitsFrom(_, span) => span.clone(),
             Kind::LeftRecursion(_, span) => span.clone(),
         }

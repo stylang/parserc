@@ -1,6 +1,6 @@
 //! Parser combinators for tokenizer/lexer.
 
-use std::{cmp::min, fmt::Debug, ops::Range};
+use std::{fmt::Debug, ops::Range};
 
 use crate::{
     Length, Span,
@@ -59,11 +59,7 @@ where
         if let Some(len) = input.starts_with(keyword.clone()) {
             Ok(input.split_to(len))
         } else {
-            Err((Kind::Keyword(
-                ControlFlow::Recovable,
-                Span::Range(input.start()..min(input.start() + keyword.len(), input.end())),
-            ))
-            .into())
+            Err((Kind::Keyword(ControlFlow::Recovable, input.to_span_at(keyword.len()))).into())
         }
     }
 }
@@ -130,15 +126,21 @@ where
     move |input: &mut I| {
         let mut iter = input.iter();
         let mut offset = 0;
-        while offset < n {
-            if let Some(next) = iter.next() {
-                if !(cond)(next) {
-                    break;
-                }
-
-                offset += next.len();
-            } else {
+        let mut items = 0;
+        while let Some(next) = iter.next() {
+            if !(cond)(next) {
                 break;
+            }
+
+            offset += next.len();
+            items += 1;
+
+            if items == n {
+                return Err(Kind::TakeWhileTo(
+                    ControlFlow::Recovable,
+                    Span::Range(input.start()..input.start() + offset),
+                )
+                .into());
             }
         }
 
@@ -157,20 +159,18 @@ where
 {
     move |input: &mut I| {
         let mut iter = input.iter();
+        let mut items = 0;
         let mut offset = 0;
-        loop {
-            if let Some(next) = iter.next() {
-                if !(cond)(next) {
-                    break;
-                }
-
-                offset += next.len();
-            } else {
+        while let Some(next) = iter.next() {
+            if !(cond)(next) {
                 break;
             }
+
+            offset += next.len();
+            items += 1;
         }
 
-        if offset < n {
+        if items < n {
             return Err(Kind::TakeWhileFrom(
                 ControlFlow::Recovable,
                 Span::Range(input.start()..input.start() + offset),
@@ -193,25 +193,28 @@ where
 {
     move |input: &mut I| {
         let mut iter = input.iter();
+        let mut items = 0;
         let mut offset = 0;
-        while offset < range.end {
-            if let Some(next) = iter.next() {
-                if !(cond)(next) {
-                    break;
-                }
-
-                offset += next.len();
-            } else {
+        while let Some(next) = iter.next() {
+            if !(cond)(next) {
                 break;
+            }
+
+            offset += next.len();
+
+            items += 1;
+
+            if items == range.end {
+                return Err(
+                    Kind::TakeWhileRange(ControlFlow::Recovable, input.to_span_at(offset)).into(),
+                );
             }
         }
 
-        if offset < range.start {
-            return Err(Kind::TakeWhileRange(
-                ControlFlow::Recovable,
-                Span::Range(input.start()..input.start() + offset),
-            )
-            .into());
+        if items < range.start {
+            return Err(
+                Kind::TakeWhileRange(ControlFlow::Recovable, input.to_span_at(offset)).into(),
+            );
         }
 
         Ok(input.split_to(offset))
