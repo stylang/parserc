@@ -9,6 +9,10 @@ Note: In this file, do not use the hard wrap in the middle of a sentence for
 compatibility with GitHub comment style markdown rendering.
 -->
 
+## [0.12.4] - 2025-12-24
+
+- parser combinator `take_while_*`: modified to `non-greedy` matching alogrithem.
+
 ## [0.12.3] - 2025-12-18
 
 - parser combinator `take_while_*`: fixed range bugs.

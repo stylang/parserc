@@ -135,12 +135,8 @@ where
             offset += next.len();
             items += 1;
 
-            if items == n {
-                return Err(Kind::TakeWhileTo(
-                    ControlFlow::Recovable,
-                    Span::Range(input.start()..input.start() + offset),
-                )
-                .into());
+            if items + 1 == n {
+                break;
             }
         }
 
@@ -204,10 +200,8 @@ where
 
             items += 1;
 
-            if items == range.end {
-                return Err(
-                    Kind::TakeWhileRange(ControlFlow::Recovable, input.to_span_at(offset)).into(),
-                );
+            if items + 1 == range.end {
+                break;
             }
         }
 
