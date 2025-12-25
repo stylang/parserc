@@ -186,6 +186,7 @@ struct FieldConfig {
     keyword: Option<Lit>,
     take_while: Option<Expr>,
     parser: Option<Expr>,
+    semantic: Option<Expr>,
 }
 
 impl FieldConfig {
@@ -222,6 +223,7 @@ impl FieldConfig {
         let mut keyword: Option<Lit> = None;
         let mut take_while: Option<Expr> = None;
         let mut parser: Option<Expr> = None;
+        let mut semantic: Option<Expr> = None;
 
         for meta_list in met_lists {
             let parser = syn::meta::parser(|meta| {
@@ -271,6 +273,12 @@ impl FieldConfig {
                         error!("Call `parser` twice.");
                     }
                     parser = Some(meta.value()?.parse()?);
+                } else if ident == "semantic" {
+                    if keyword.is_some() || take_while.is_some() {
+                        error!("The syntax has been set as a `keyword` or `take_while`.");
+                    }
+
+                    semantic = Some(meta.value()?.parse()?);
                 } else {
                     error!("Unsupport macro `parserc` option `{}`.", ident);
                 }
@@ -288,6 +296,7 @@ impl FieldConfig {
             keyword,
             take_while,
             parser,
+            semantic,
         })
     }
 }
@@ -356,6 +365,7 @@ fn derive_syntax_for_enum(item: ItemEnum) -> Result<proc_macro2::TokenStream> {
                         take_while: token,
                         parser,
                         left_recursion,
+                        semantic,
                     } = FieldConfig::parse(&field.attrs)?;
 
                     let map_err = if let Some(map_err) = map_err {
@@ -422,6 +432,14 @@ fn derive_syntax_for_enum(item: ItemEnum) -> Result<proc_macro2::TokenStream> {
                         quote! { #parse #map_err #into_fatal }
                     };
 
+                    let parse = if let Some(semantic) = semantic {
+                        quote! {
+                            #semantic(input.clone(), #parse?)
+                        }
+                    } else {
+                        parse
+                    };
+
                     let result = match &field.ident {
                         Some(ident) => Ok(quote! {
                             #ident: #parse?
@@ -471,8 +489,7 @@ fn derive_syntax_for_enum(item: ItemEnum) -> Result<proc_macro2::TokenStream> {
 
             let parse = if let Some(semantic) = &semantic {
                 quote! {
-                    let _c = #parse;
-                    #semantic(input, _c)
+                    #semantic(input.clone(), #parse)
                 }
             } else {
                 quote! {
@@ -581,6 +598,7 @@ fn derive_syntax_for_struct(item: ItemStruct) -> Result<proc_macro2::TokenStream
                 take_while: token,
                 parser,
                 left_recursion,
+                semantic,
             } = FieldConfig::parse(&field.attrs)?;
 
             let map_err = if let Some(map_err) = map_err {
@@ -645,6 +663,14 @@ fn derive_syntax_for_struct(item: ItemStruct) -> Result<proc_macro2::TokenStream
                 quote! { #parse #map_err #into_fatal }
             };
 
+            let parse = if let Some(semantic) = semantic {
+                quote! {
+                    #semantic(input.clone(), #parse)
+                }
+            } else {
+                parse
+            };
+
             let result = match &field.ident {
                 Some(ident) => Ok(quote! {
                     #ident: #parse?
@@ -693,8 +719,7 @@ fn derive_syntax_for_struct(item: ItemStruct) -> Result<proc_macro2::TokenStream
 
     let parse = if let Some(semantic) = semantic {
         quote! {
-            let _c = #parse;
-            #semantic(input, _c)
+            #semantic(input.clone(), #parse)
         }
     } else {
         quote! {
