@@ -9,6 +9,10 @@ Note: In this file, do not use the hard wrap in the middle of a sentence for
 compatibility with GitHub comment style markdown rendering.
 -->
 
+## [0.12.6] - 2025-12-27
+
+- add new trait `ToSpan`
+
 ## [0.12.5] - 2025-12-25
 
 - derive: field attribute `parserc` now supports `semantic` option.

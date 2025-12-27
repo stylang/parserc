@@ -555,6 +555,7 @@ fn derive_syntax_for_enum(item: ItemEnum) -> Result<proc_macro2::TokenStream> {
 
             #[inline]
             fn to_span(&self) -> parserc::Span {
+                use parserc::ToSpan;
                 match self {
                     #(#to_spans),*
                 }
@@ -786,6 +787,8 @@ fn derive_syntax_for_struct(item: ItemStruct) -> Result<proc_macro2::TokenStream
 
                 #[inline]
                 fn to_span(&self) -> parserc::Span {
+                    use parserc::ToSpan;
+
                     let mut lhs = parserc::Span::None;
                     #(
                         lhs = lhs.union(&#to_spans);

@@ -118,6 +118,25 @@ pub trait Input: PartialEq + Debug {
     }
 }
 
+/// A trait provides `to_span` func.
+pub trait ToSpan {
+    /// Returns the regiion of this input.
+    fn to_span(&self) -> Span;
+}
+
+impl<I> ToSpan for Option<I>
+where
+    I: Input,
+{
+    #[inline]
+    fn to_span(&self) -> Span {
+        match self {
+            Some(input) => input.to_span(),
+            None => Span::None,
+        }
+    }
+}
+
 /// bytes input implementation.
 #[cfg(feature = "input")]
 pub mod bytes {
