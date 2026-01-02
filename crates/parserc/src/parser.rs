@@ -35,6 +35,16 @@ where
         Map(self, f)
     }
 
+    /// On failed, use func `F` to convert origin error
+    #[inline]
+    fn map_err<F>(self, f: F) -> impl Parser<I, Output = Self::Output>
+    where
+        F: FnOnce(I::Error) -> I::Error,
+        Self: Sized,
+    {
+        MapErr(self, f)
+    }
+
     /// Creates a parser that convert all `non-fatal` error into [`fatal`](ControlFlow::Fatal) error.
     #[inline]
     fn fatal(self) -> impl Parser<I, Output = Self::Output>
@@ -117,6 +127,22 @@ where
     #[inline]
     fn parse(self, input: &mut I) -> Result<Self::Output, I::Error> {
         self.0.parse(input).map(|output| (self.1)(output))
+    }
+}
+
+struct MapErr<P, F>(P, F);
+
+impl<P, I, F> Parser<I> for MapErr<P, F>
+where
+    I: Input,
+    P: Parser<I>,
+    F: FnOnce(I::Error) -> I::Error,
+{
+    type Output = P::Output;
+
+    #[inline]
+    fn parse(self, input: &mut I) -> Result<Self::Output, I::Error> {
+        self.0.parse(input).map_err(|output| (self.1)(output))
     }
 }
 

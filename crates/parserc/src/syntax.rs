@@ -28,6 +28,7 @@ where
     /// Parse input data and construct a new `Syntax` instance.
     fn parse(input: &mut I) -> Result<Self, I::Error>;
 
+    /// Returns the region of this syntax item in the whole source code.
     fn to_span(&self) -> Span;
 
     /// Create a new `Parser` from this type.

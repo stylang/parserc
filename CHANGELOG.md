@@ -9,6 +9,10 @@ Note: In this file, do not use the hard wrap in the middle of a sentence for
 compatibility with GitHub comment style markdown rendering.
 -->
 
+## [0.12.7] - 2026-01-02
+
+- fixed `semantic` option derive bug.
+
 ## [0.12.6] - 2025-12-27
 
 - add new trait `ToSpan`

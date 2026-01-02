@@ -434,7 +434,7 @@ fn derive_syntax_for_enum(item: ItemEnum) -> Result<proc_macro2::TokenStream> {
 
                     let parse = if let Some(semantic) = semantic {
                         quote! {
-                            #semantic(input.clone(), #parse?)
+                            #semantic(input.clone(),#parse?)
                         }
                     } else {
                         parse
@@ -489,7 +489,7 @@ fn derive_syntax_for_enum(item: ItemEnum) -> Result<proc_macro2::TokenStream> {
 
             let parse = if let Some(semantic) = &semantic {
                 quote! {
-                    #semantic(input.clone(), #parse)
+                    #semantic(input.clone(),#parse)
                 }
             } else {
                 quote! {
@@ -666,7 +666,7 @@ fn derive_syntax_for_struct(item: ItemStruct) -> Result<proc_macro2::TokenStream
 
             let parse = if let Some(semantic) = semantic {
                 quote! {
-                    #semantic(input.clone(), #parse)
+                    #semantic(input.clone(),#parse?)
                 }
             } else {
                 parse
@@ -720,7 +720,7 @@ fn derive_syntax_for_struct(item: ItemStruct) -> Result<proc_macro2::TokenStream
 
     let parse = if let Some(semantic) = semantic {
         quote! {
-            #semantic(input.clone(), #parse)
+            #semantic(input.clone(),#parse)
         }
     } else {
         quote! {
