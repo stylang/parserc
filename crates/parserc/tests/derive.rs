@@ -1,3 +1,5 @@
+use std::fmt::Debug;
+
 use parserc::{
     ControlFlow, Kind, Span,
     chars::{self, CharsInput},
