@@ -1,0 +1,164 @@
+//! unsyn for `unsyn`
+
+
+whitespace WHITESPACE ->
+      U+0009
+    | U+000A
+    | U+000B
+    | U+000C
+    | U+000D
+    | U+0020
+    | U+0085
+    | U+200E
+    | U+200F
+    | U+2028
+    | U+2029;
+
+lexer TAB -> U+0009;
+lexer LF  -> U+000A;
+lexer CR  -> U+000D;
+
+lexer IDENTIFIER_OR_KEYWORD -> ( XID_Start | _ ) XID_Continue*;
+
+lexer XID_Start -> <XID_Start>;
+
+lexer XID_Continue -> <XID_Continue>;
+
+lexer RAW_IDENTIFIER -> 'r#' IDENTIFIER_OR_KEYWORD;
+
+lexer NON_KEYWORD_IDENTIFIER -> IDENTIFIER_OR_KEYWORD except KEYWORDS;
+
+lexer IDENTIFIER -> NON_KEYWORD_IDENTIFIER | RAW_IDENTIFIER;
+
+lexer KEYWORDS ->
+      'lexer'
+    | 'syntax'
+    | 'followed'
+    | 'except'
+    | 'super'
+    | 'crate'
+    ;
+
+lexer STRING_LITERAL ->
+    '\'' (
+        ~['"','\\',CR]
+      | QUOTE_ESCAPE
+      | ASCII_ESCAPE
+      | UNICODE_ESCAPE
+    )* '\''
+    ;
+
+lexer QUOTE_ESCAPE -> '\\\'';
+
+lexer ASCII_ESCAPE ->
+      '\\x' OCT_DIGIT HEX_DIGIT
+    | '\\n'
+    | '\\r'
+    | '\\t'
+    | '\\\\'
+    | '\\0'
+    ;
+
+lexer UNICODE_ESCAPE ->
+    '\\u{' ( HEX_DIGIT '_'* ){1..6} '}'
+    ;
+
+lexer OCT_DIGIT -> ['0'-'7'];
+lexer DEC_DIGIT -> ['0'-'9'];
+lexer HEX_DIGIT -> ['0'-'9','a'-'f','A'-'F'];
+
+lexer DEC_LITERAL -> DEC_DIGIT ( DEC_DIGIT | _ )*;
+
+lexer UNICODE_LITERAL -> 'U+' concat HEX_DIGIT{4};
+
+lexer LINE_COMMENT ->
+    '//' (~['/','!',LF] | '//') ~[LF]*
+    ;
+
+lexer BLOCK_COMMENT ->
+      '/*'
+        ( ~['*','!'] | '**' | BLOCK_COMMENT_OR_DOC )
+        ( BLOCK_COMMENT_OR_DOC | ~['*/'] )*
+      '*/'
+    | '/**/'
+    | '/***/'
+    ;
+
+lexer INNER_LINE_DOC -> '//!' ~[LR,CR];
+
+lexer INNER_BLOCK_DOC ->
+    '/*!' ( BLOCK_COMMENT_OR_DOC | ~['*/',CR] )* '*/'
+    ;
+
+lexer OUTER_LINE_DOC ->
+    '///' ( ~'/' ~[LF,CR]* )?
+    ;
+
+lexer OUTER_BLOCK_DOC ->
+    '/**'
+      ( ~'*' | BLOCK_COMMENT_OR_DOC )
+      ( BLOCK_COMMENT_OR_DOC | ~['*/',CR] )*
+    '*/'
+    ;
+
+lexer BLOCK_COMMENT_OR_DOC ->
+      BLOCK_COMMENT
+    | OUTER_BLOCK_DOC
+    | INNER_BLOCK_DOC
+    ;
+
+
+syntax
+Path ->
+    '::'? PathSegment ( '::' PathSegment )*
+    ;
+
+syntax PathSegment ->
+    'super' | 'crate'| IDENTIFIER
+    ;
+
+syntax UseDeclaration -> 'use' UseTree;
+
+syntax UseTree ->
+      ( Path? '::' )? '*'
+    | ( Path? '::' )? '{' ( UseTree ( ',' UseTree )* ','? )? '}'
+    | Path ( 'as' ( IDENTIFIER | '_' ) )?
+    ;
+
+syntax Expr -> ExprNoTopAlt+ ( '|' ExprNoTopAlt+ )?;
+
+syntax ExprNoTopAlt -> ExprWithSuffix | ExprWithoutSuffix;
+
+syntax ExprWithoutSuffix ->
+      '~'  ExprWithoutSuffix
+    | '<' IDENTIFIER '>'
+    | '(' Expr ')'
+    | '[' (Range | STRING_LITERAL |  UNICODE_LITERAL) ']'
+    | STRING_LITERAL
+    | UNICODE_LITERAL
+    | Path
+    ;
+
+syntax ExprWithSuffix ->
+      ExprWithoutSuffix
+      (
+          '*'
+        | '?'
+        | '+'
+        | '{' Repeat '}'
+      )
+    | ExprWithoutSuffix 'concat' ExprNoTopAlt
+    | ExprWithoutSuffix 'followed' ExprNoTopAlt
+    | ExprWithoutSuffix 'except' ExprWithoutSuffix
+    ;
+
+syntax Repeat ->
+      DEC_LITERAL
+    | DEC_LITERAL '..' DEC_LITERAL?
+    | '..' DEC_LITERAL
+    ;
+
+syntax Range ->
+      UNICODE_LITERAL '-' UNICODE_LITERAL
+    | STRING_LITERAL concat '-' concat STRING_LITERAL
+    ;

@@ -1,0 +1,21 @@
+[package]
+description = "A DSL for specifying concrete syntax trees."
+documentation = "https://docs.rs/unsyn"
+edition = "2024"
+license = "MIT"
+name = "unsyn"
+repository = "https://github.com/stylang/stylang/crates/unsyn"
+version.workspace = true
+
+[dependencies]
+thiserror = "2.0.17"
+unicode-ident = "1.0.22"
+serde = { version = "1.0.228", optional = true }
+parserc = { path = "../parserc", version = "^0.12", default-features = false, features = ["syntax","input"] }
+
+[dev-dependencies]
+walkdir = "2"
+
+[features]
+default = ["serde"]
+serde = ["dep:serde","parserc/serde"]
