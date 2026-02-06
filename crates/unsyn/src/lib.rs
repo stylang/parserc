@@ -3,4 +3,5 @@
 pub mod errors;
 pub mod input;
 pub mod lexical;
+pub mod semantics;
 pub mod syntax;

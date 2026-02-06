@@ -1,5 +1,6 @@
 //! unsyn for `unsyn`
 
+use a::*;
 
 whitespace WHITESPACE ->
       U+0009

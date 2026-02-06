@@ -1,7 +1,10 @@
 use std::{fs, path::PathBuf};
 
 use parserc::{Input, syntax::Syntax};
-use unsyn::{input::TokenStream, syntax::Crate};
+use unsyn::{
+    input::TokenStream,
+    syntax::{Crate, Item},
+};
 use walkdir::WalkDir;
 
 #[test]
@@ -22,8 +25,16 @@ fn bootstrap() {
 
         let mut token_stream = TokenStream::from(content.as_str());
 
-        Crate::parse(&mut token_stream).expect(&format!("parse {:?}", entry.path()));
+        let c = Crate::parse(&mut token_stream).expect(&format!("parse {:?}", entry.path()));
 
         assert_eq!(token_stream.len(), 0);
+
+        for item in c.items.iter() {
+            let Item::Use(syn, _) = item else {
+                continue;
+            };
+
+            println!("{:?}", syn.to_span());
+        }
     }
 }
