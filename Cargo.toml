@@ -4,3 +4,11 @@ members = ["crates/*"]
 
 [workspace.package]
 version = "0.13.0"
+
+
+[workspace.dependencies]
+
+memchr = { version = "2.7.6" }
+
+sourcespan = { path = "./crates/span", version = "^0.13"}
+sourceinput = { path = "./crates/input", version = "^0.13"}

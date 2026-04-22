@@ -1,0 +1,19 @@
+[package]
+description = "`input` represents the source data stream to be parsed"
+documentation = "https://docs.rs/sourceinput"
+edition = "2024"
+license = "MIT"
+name = "sourceinput"
+repository = "https://github.com/stylang/parserc/crates/input"
+version.workspace = true
+
+[dependencies]
+serde = { version = "1.0.228", optional = true }
+sourcespan = { workspace = true }
+memchr = { workspace = true }
+
+[features]
+default = ["serde","bytes","chars"]
+serde = ["dep:serde","serde/derive"]
+bytes = []
+chars = []
