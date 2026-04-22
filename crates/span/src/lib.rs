@@ -4,6 +4,7 @@
 
 use std::{
     cmp,
+    fmt::Display,
     ops::{self, Range},
 };
 
@@ -17,6 +18,19 @@ pub enum Span<Idx> {
         /// The upper bound of the range (exclusive).
         end: Idx,
     },
+}
+
+impl<Idx> Display for Span<Idx>
+where
+    Idx: Display,
+{
+    #[inline]
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Span::None => write!(f, "Span(None)"),
+            Span::Range { start, end } => write!(f, "Span({}..{})", start, end),
+        }
+    }
 }
 
 impl<Idx> Default for Span<Idx> {

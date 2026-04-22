@@ -38,7 +38,7 @@ impl Item for u8 {
 }
 
 /// A source code stream must implement this trait.
-pub trait Input: PartialEq + Clone + Debug {
+pub trait Input {
     /// Error raised by combinators.
     type Error;
     /// Value yielded by this `Input`.
@@ -97,7 +97,10 @@ pub trait SplitTo: Input<Split = Self> {
     ///
     /// Afterwards self contains elements [at, len), and the returned `Self` contains elements [0, at).
     #[inline]
-    fn split_to(&mut self, at: usize) -> Self {
+    fn split_to(&mut self, at: usize) -> Self
+    where
+        Self: Clone,
+    {
         let (lhs, rhs) = self.clone().split_at(at);
 
         *self = rhs;
@@ -114,7 +117,10 @@ pub trait SplitOff: Input<Split = Self> {
     ///
     /// Afterwards self contains elements [0, at), and the returned `Self` contains elements [at, capacity).
     #[inline]
-    fn split_off(&mut self, at: usize) -> Self {
+    fn split_off(&mut self, at: usize) -> Self
+    where
+        Self: Clone,
+    {
         let (lhs, rhs) = self.clone().split_at(at);
 
         *self = lhs;
@@ -489,6 +495,8 @@ impl<'a, E> CharsInput<E> for Chars<'a, E> {}
 
 #[cfg(test)]
 mod tests {
+    use std::fmt::Debug;
+
     use crate::{Find, Input, Source, Span, SplitOff, SplitTo, StartWith};
 
     #[test]
@@ -511,7 +519,7 @@ mod tests {
     fn split_to() {
         fn assert_split_to<I>(mut input: I, mid: usize, lhs: I, rhs: I)
         where
-            I: Input<Error = (), Split = I>,
+            I: Input<Error = (), Split = I> + Clone + PartialEq + Debug,
         {
             let to = input.split_to(mid);
 
@@ -538,7 +546,7 @@ mod tests {
     fn split_off() {
         fn assert_split_off<I>(mut input: I, mid: usize, lhs: I, rhs: I)
         where
-            I: Input<Error = (), Split = I>,
+            I: Input<Error = (), Split = I> + Clone + PartialEq + Debug,
         {
             let to = input.split_off(mid);
 
