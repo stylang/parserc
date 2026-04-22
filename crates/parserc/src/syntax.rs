@@ -39,6 +39,22 @@ where
     }
 }
 
+/// An extension trait for [`Input`] to provide the `parse` method.
+pub trait SyntaxExt: Input {
+    /// Parse the next output using a [`Syntax`] parser.
+    #[inline]
+    fn parse<S>(&mut self) -> Result<S, Self::Error>
+    where
+        Self: Sized,
+        Self::Error: ParseError,
+        S: Syntax<Self>,
+    {
+        S::parse(self)
+    }
+}
+
+impl<I> SyntaxExt for I where I: Input {}
+
 impl<T, I> Syntax<I> for PhantomData<T>
 where
     I: Input,
