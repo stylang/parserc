@@ -38,47 +38,27 @@ impl Item for u8 {
 }
 
 /// A source code stream must implement this trait.
-pub trait Input: Clone {
+pub trait Input: PartialEq + Clone + Debug {
     /// Error raised by combinators.
     type Error;
     /// Value yielded by this `Input`.
     type Item: Item;
     /// Iterator type returns by [`iter`](Input::iter).
     type Iter: Iterator<Item = Self::Item>;
+
     /// Iterator type returns by [`iter_indices`](Input::iter_indices).
     type IterIndices: Iterator<Item = (usize, Self::Item)>;
+
+    /// Result type of fn [`split_at`](Input::split_at)
+    type Split: Input;
 
     // Returns the length of this input stream in bytes.
     fn len(&self) -> usize;
 
     /// Split the input into two at the given index.
-    fn split_at(self, mid: usize) -> (Self, Self)
+    fn split_at(self, mid: usize) -> (Self::Split, Self::Split)
     where
         Self: Sized;
-
-    /// Split the input into two at the given index.
-    ///
-    /// Afterwards self contains elements [at, len), and the returned `Self` contains elements [0, at).
-    #[inline]
-    fn split_to(&mut self, at: usize) -> Self {
-        let (lhs, rhs) = self.clone().split_at(at);
-
-        *self = rhs;
-
-        lhs
-    }
-
-    /// Split the input into two at the given index.
-    ///
-    /// Afterwards self contains elements [0, at), and the returned `Self` contains elements [at, capacity).
-    #[inline]
-    fn split_off(&mut self, at: usize) -> Self {
-        let (lhs, rhs) = self.clone().split_at(at);
-
-        *self = lhs;
-
-        rhs
-    }
 
     /// Returns an immutable iterator over source code chars.
     fn iter(&self) -> Self::Iter;
@@ -104,12 +84,46 @@ pub trait Input: Clone {
         Span::from(self.start()..self.end())
     }
 
-    /// Returns the subspan of the current input fragment starting at `offset` in the entire source code.
+    /// Returns the subspan of the current input fragment
     #[inline]
-    fn to_span_from(&self, offset: usize) -> Span {
-        Span::from(self.start()..cmp::min(self.start() + offset, self.end()))
+    fn to_span_with(&self, len: usize) -> Span {
+        Span::from(self.start()..cmp::min(self.start() + len, self.end()))
     }
 }
+
+/// An extension trait that add fn `split_to` to `Input`
+pub trait SplitTo: Input<Split = Self> {
+    /// Split the input into two at the given index.
+    ///
+    /// Afterwards self contains elements [at, len), and the returned `Self` contains elements [0, at).
+    #[inline]
+    fn split_to(&mut self, at: usize) -> Self {
+        let (lhs, rhs) = self.clone().split_at(at);
+
+        *self = rhs;
+
+        lhs
+    }
+}
+
+impl<I> SplitTo for I where I: Input<Split = Self> {}
+
+/// An extension trait that add fn `split_off` to `Input`
+pub trait SplitOff: Input<Split = Self> {
+    /// Split the input into two at the given index.
+    ///
+    /// Afterwards self contains elements [0, at), and the returned `Self` contains elements [at, capacity).
+    #[inline]
+    fn split_off(&mut self, at: usize) -> Self {
+        let (lhs, rhs) = self.clone().split_at(at);
+
+        *self = lhs;
+
+        rhs
+    }
+}
+
+impl<I> SplitOff for I where I: Input<Split = Self> {}
 
 /// Convert `Input` as `&[u8]`
 pub trait AsBytes {
@@ -128,6 +142,13 @@ impl AsBytes for &[u8] {
     #[inline]
     fn as_bytes(&self) -> &[u8] {
         self
+    }
+}
+
+impl<const N: usize> AsBytes for &[u8; N] {
+    #[inline]
+    fn as_bytes(&self) -> &[u8] {
+        self.as_slice()
     }
 }
 
@@ -189,10 +210,22 @@ where
 pub struct Source<S, E> {
     /// start offset in the source file/data.
     offset: usize,
-    /// sgement of source data.
-    sgement: S,
+    /// segment of source data.
+    segment: S,
     /// error type marker.
     _marker: PhantomData<E>,
+}
+
+impl<S, E> Source<S, E> {
+    /// Create source stream from raw source data.
+    #[inline]
+    pub fn new(segment: S) -> Self {
+        Self {
+            offset: 0,
+            segment,
+            _marker: PhantomData,
+        }
+    }
 }
 
 impl<S, E> PartialEq for Source<S, E>
@@ -201,7 +234,7 @@ where
 {
     fn eq(&self, other: &Self) -> bool {
         self.offset == other.offset
-            && self.sgement == other.sgement
+            && self.segment == other.segment
             && self._marker == other._marker
     }
 }
@@ -215,7 +248,7 @@ where
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("Source")
             .field("offset", &self.offset)
-            .field("sgement", &self.sgement)
+            .field("sgement", &self.segment)
             .field("_marker", &self._marker)
             .finish()
     }
@@ -228,18 +261,7 @@ where
     fn clone(&self) -> Self {
         Self {
             offset: self.offset.clone(),
-            sgement: self.sgement.clone(),
-            _marker: PhantomData,
-        }
-    }
-}
-
-impl<S, E> From<S> for Source<S, E> {
-    #[inline]
-    fn from(value: S) -> Self {
-        Self {
-            offset: 0,
-            sgement: value,
+            segment: self.segment.clone(),
             _marker: PhantomData,
         }
     }
@@ -247,10 +269,10 @@ impl<S, E> From<S> for Source<S, E> {
 
 impl<S, E> From<(usize, S)> for Source<S, E> {
     #[inline]
-    fn from((offset, value): (usize, S)) -> Self {
+    fn from((offset, segment): (usize, S)) -> Self {
         Self {
             offset,
-            sgement: value,
+            segment,
             _marker: PhantomData,
         }
     }
@@ -262,7 +284,7 @@ where
 {
     #[inline]
     fn as_bytes(&self) -> &[u8] {
-        self.sgement.as_bytes()
+        self.segment.as_bytes()
     }
 }
 
@@ -272,7 +294,7 @@ where
 {
     #[inline]
     fn as_str(&self) -> &str {
-        self.sgement.as_str()
+        self.segment.as_str()
     }
 }
 
@@ -286,9 +308,11 @@ impl<'a, E> Input for Source<&'a str, E> {
 
     type IterIndices = std::str::CharIndices<'a>;
 
+    type Split = Self;
+
     #[inline]
     fn len(&self) -> usize {
-        self.sgement.len()
+        self.segment.len()
     }
 
     #[inline]
@@ -296,19 +320,19 @@ impl<'a, E> Input for Source<&'a str, E> {
     where
         Self: Sized,
     {
-        let (lhs, rhs) = self.sgement.split_at(mid);
+        let (lhs, rhs) = self.segment.split_at(mid);
 
         ((self.offset, lhs).into(), (self.offset + mid, rhs).into())
     }
 
     #[inline]
     fn iter(&self) -> Self::Iter {
-        self.sgement.chars()
+        self.segment.chars()
     }
 
     #[inline]
     fn iter_indices(&self) -> Self::IterIndices {
-        self.sgement.char_indices()
+        self.segment.char_indices()
     }
 
     #[inline]
@@ -318,7 +342,7 @@ impl<'a, E> Input for Source<&'a str, E> {
 
     #[inline]
     fn end(&self) -> usize {
-        self.offset + self.sgement.len()
+        self.offset + self.segment.len()
     }
 }
 
@@ -332,9 +356,11 @@ impl<'a, E> Input for Source<&'a [u8], E> {
 
     type IterIndices = Enumerate<Self::Iter>;
 
+    type Split = Self;
+
     #[inline]
     fn len(&self) -> usize {
-        self.sgement.len()
+        self.segment.len()
     }
 
     #[inline]
@@ -342,14 +368,14 @@ impl<'a, E> Input for Source<&'a [u8], E> {
     where
         Self: Sized,
     {
-        let (lhs, rhs) = self.sgement.split_at(mid);
+        let (lhs, rhs) = self.segment.split_at(mid);
 
         ((self.offset, lhs).into(), (self.offset + mid, rhs).into())
     }
 
     #[inline]
     fn iter(&self) -> Self::Iter {
-        self.sgement.iter().copied()
+        self.segment.iter().copied()
     }
 
     #[inline]
@@ -364,7 +390,55 @@ impl<'a, E> Input for Source<&'a [u8], E> {
 
     #[inline]
     fn end(&self) -> usize {
-        self.offset + self.sgement.len()
+        self.offset + self.segment.len()
+    }
+}
+
+#[cfg(feature = "bytes")]
+impl<'a, const N: usize, E> Input for Source<&'a [u8; N], E> {
+    type Error = E;
+
+    type Item = u8;
+
+    type Iter = Copied<Iter<'a, u8>>;
+
+    type IterIndices = Enumerate<Self::Iter>;
+
+    type Split = Source<&'a [u8], E>;
+
+    #[inline]
+    fn len(&self) -> usize {
+        self.segment.len()
+    }
+
+    #[inline]
+    fn split_at(self, mid: usize) -> (Self::Split, Self::Split)
+    where
+        Self: Sized,
+    {
+        let (lhs, rhs) = self.segment.split_at(mid);
+
+        ((self.offset, lhs).into(), (self.offset + mid, rhs).into())
+    }
+
+    #[inline]
+    fn iter(&self) -> Self::Iter {
+        self.segment.iter().copied()
+    }
+
+    #[inline]
+    fn iter_indices(&self) -> Self::IterIndices {
+        self.iter().enumerate()
+    }
+
+    #[inline]
+    fn start(&self) -> usize {
+        self.offset
+    }
+
+    #[inline]
+    fn end(&self) -> usize {
+        self.offset + self.segment.len()
     }
 }
 
@@ -384,6 +458,10 @@ pub trait BytesInput<E>:
 /// An `Input` stream wrapper for `&[u8]`
 #[cfg(feature = "bytes")]
 pub type Bytes<'a, E> = Source<&'a [u8], E>;
+
+/// An `Input` stream wrapper for `&[u8;N]`
+#[cfg(feature = "bytes")]
+pub type BytesArray<'a, const N: usize, E> = Source<&'a [u8; N], E>;
 
 #[cfg(feature = "bytes")]
 impl<'a, E> BytesInput<E> for Bytes<'a, E> {}
@@ -408,3 +486,143 @@ pub type Chars<'a, E> = Source<&'a str, E>;
 
 #[cfg(feature = "chars")]
 impl<'a, E> CharsInput<E> for Chars<'a, E> {}
+
+#[cfg(test)]
+mod tests {
+    use crate::{Find, Input, Source, Span, SplitOff, SplitTo, StartWith};
+
+    #[test]
+    fn len() {
+        fn assert_len<I>(input: I, expect: usize)
+        where
+            I: Input<Error = ()>,
+        {
+            assert_eq!(input.len(), expect);
+        }
+
+        assert_len(Source::new("hello world"), 11);
+        assert_len(Source::new(b"hello world".as_slice()), 11);
+
+        assert_len(Source::from((10usize, "hello world")), 11);
+        assert_len(Source::from((10usize, b"hello world".as_slice())), 11);
+    }
+
+    #[test]
+    fn split_to() {
+        fn assert_split_to<I>(mut input: I, mid: usize, lhs: I, rhs: I)
+        where
+            I: Input<Error = (), Split = I>,
+        {
+            let to = input.split_to(mid);
+
+            assert_eq!(input, lhs);
+            assert_eq!(to, rhs);
+        }
+
+        assert_split_to(
+            Source::new(b"hello  world".as_slice()),
+            5,
+            (5, b"  world".as_slice()).into(),
+            (0, b"hello".as_slice()).into(),
+        );
+
+        assert_split_to(
+            Source::new("hello  world"),
+            5,
+            (5, "  world").into(),
+            (0, "hello").into(),
+        );
+    }
+
+    #[test]
+    fn split_off() {
+        fn assert_split_off<I>(mut input: I, mid: usize, lhs: I, rhs: I)
+        where
+            I: Input<Error = (), Split = I>,
+        {
+            let to = input.split_off(mid);
+
+            assert_eq!(input, lhs);
+            assert_eq!(to, rhs);
+        }
+
+        assert_split_off(
+            Source::new(b"hello  world".as_slice()),
+            5,
+            (0, b"hello".as_slice()).into(),
+            (5, b"  world".as_slice()).into(),
+        );
+
+        assert_split_off(
+            Source::new("hello  world"),
+            5,
+            (0, "hello").into(),
+            (5, "  world").into(),
+        );
+    }
+
+    #[test]
+    fn to_span() {
+        fn assert_to_span<I>(input: I, expect: Span)
+        where
+            I: Input<Error = ()>,
+        {
+            assert_eq!(input.to_span(), expect);
+        }
+
+        assert_to_span(Source::new("hello  world"), Span::new(0, 12));
+        assert_to_span(Source::new(b"hello  world".as_slice()), Span::new(0, 12));
+    }
+
+    #[test]
+    fn to_span_with() {
+        fn assert_to_span_with<I>(input: I, from: usize, expect: Span)
+        where
+            I: Input<Error = ()>,
+        {
+            assert_eq!(input.to_span_with(from), expect);
+        }
+
+        assert_to_span_with(Source::new("hello  world"), 20, Span::new(0, 12));
+        assert_to_span_with(
+            Source::new(b"hello  world".as_slice()),
+            10,
+            Span::new(0, 10),
+        );
+    }
+
+    #[test]
+    fn start_with() {
+        fn assert_start_with<I, Needle>(input: I, prefix: Needle)
+        where
+            I: Input<Error = ()> + StartWith<Needle>,
+        {
+            assert!(input.start_with(prefix));
+        }
+
+        assert_start_with(Source::from((10, "hello")), "he");
+        assert_start_with(Source::from((10, "hello")), b"he");
+
+        assert_start_with(Source::from((10, b"hello")), "he");
+        assert_start_with(Source::from((10, b"hello")), b"he");
+    }
+
+    #[test]
+    fn find() {
+        fn assert_find<I, Needle>(input: I, needle: Needle, offset: Option<usize>)
+        where
+            I: Input<Error = ()> + Find<Needle>,
+        {
+            assert_eq!(input.find(needle), offset);
+        }
+
+        assert_find(Source::from((10, "hello")), "lo", Some(3));
+        assert_find(Source::from((10, "hello")), b"lo", Some(3));
+
+        assert_find(Source::from((10, b"hello")), "lo", Some(3));
+        assert_find(Source::from((10, b"hello")), b"lo", Some(3));
+
+        assert_find(Source::from((10, "hello")), "loo", None);
+        assert_find(Source::from((10, "hello")), b"lo;", None);
+    }
+}
