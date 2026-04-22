@@ -7,7 +7,7 @@ version = "0.13.0"
 
 
 [workspace.dependencies]
-
+thiserror = "2.0.18"
 memchr = { version = "2.7.6" }
 
 sourcespan = { path = "./crates/span", version = "^0.13"}

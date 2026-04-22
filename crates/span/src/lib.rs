@@ -40,9 +40,13 @@ impl<Idx> Default for Span<Idx> {
     }
 }
 
-impl<Idx> From<Range<Idx>> for Span<Idx> {
+impl<Idx> From<Range<Idx>> for Span<Idx>
+where
+    Idx: PartialOrd,
+{
     #[inline]
     fn from(value: Range<Idx>) -> Self {
+        assert!(value.start < value.end);
         Self::Range {
             start: value.start,
             end: value.end,
@@ -55,12 +59,6 @@ impl<Idx> Span<Idx> {
     #[inline]
     pub const fn none() -> Self {
         Self::None
-    }
-
-    /// Create a span with a [`Range`]
-    #[inline]
-    pub const fn new(start: Idx, end: Idx) -> Self {
-        Self::Range { start, end }
     }
 
     #[inline]

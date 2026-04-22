@@ -1,4 +1,4 @@
-//！ `input` represents the source data stream to be parsed
+//！`input` represents the source data stream to be parsed
 
 #![cfg_attr(docsrs, feature(doc_cfg))]
 
@@ -37,8 +37,13 @@ impl Item for u8 {
     }
 }
 
+/// Add fn `len` to an struct.
+pub trait Length {
+    fn len(&self) -> usize;
+}
+
 /// A source code stream must implement this trait.
-pub trait Input {
+pub trait Input: Length {
     /// Error raised by combinators.
     type Error;
     /// Value yielded by this `Input`.
@@ -51,9 +56,6 @@ pub trait Input {
 
     /// Result type of fn [`split_at`](Input::split_at)
     type Split: Input;
-
-    // Returns the length of this input stream in bytes.
-    fn len(&self) -> usize;
 
     /// Split the input into two at the given index.
     fn split_at(self, mid: usize) -> (Self::Split, Self::Split)
@@ -92,15 +94,12 @@ pub trait Input {
 }
 
 /// An extension trait that add fn `split_to` to `Input`
-pub trait SplitTo: Input<Split = Self> {
+pub trait SplitTo: Input<Split = Self> + Clone {
     /// Split the input into two at the given index.
     ///
     /// Afterwards self contains elements [at, len), and the returned `Self` contains elements [0, at).
     #[inline]
-    fn split_to(&mut self, at: usize) -> Self
-    where
-        Self: Clone,
-    {
+    fn split_to(&mut self, at: usize) -> Self {
         let (lhs, rhs) = self.clone().split_at(at);
 
         *self = rhs;
@@ -109,18 +108,15 @@ pub trait SplitTo: Input<Split = Self> {
     }
 }
 
-impl<I> SplitTo for I where I: Input<Split = Self> {}
+impl<I> SplitTo for I where I: Input<Split = Self> + Clone {}
 
 /// An extension trait that add fn `split_off` to `Input`
-pub trait SplitOff: Input<Split = Self> {
+pub trait SplitOff: Input<Split = Self> + Clone {
     /// Split the input into two at the given index.
     ///
     /// Afterwards self contains elements [0, at), and the returned `Self` contains elements [at, capacity).
     #[inline]
-    fn split_off(&mut self, at: usize) -> Self
-    where
-        Self: Clone,
-    {
+    fn split_off(&mut self, at: usize) -> Self {
         let (lhs, rhs) = self.clone().split_at(at);
 
         *self = lhs;
@@ -129,10 +125,10 @@ pub trait SplitOff: Input<Split = Self> {
     }
 }
 
-impl<I> SplitOff for I where I: Input<Split = Self> {}
+impl<I> SplitOff for I where I: Input<Split = Self> + Clone {}
 
 /// Convert `Input` as `&[u8]`
-pub trait AsBytes {
+pub trait AsBytes: Length {
     /// Convert the input type to a byte slice
     fn as_bytes(&self) -> &[u8];
 }
@@ -151,6 +147,14 @@ impl AsBytes for &[u8] {
     }
 }
 
+impl Length for &[u8] {
+    /// Returns the length of this item in bytes.
+    #[inline(always)]
+    fn len(&self) -> usize {
+        self.as_bytes().len()
+    }
+}
+
 impl<const N: usize> AsBytes for &[u8; N] {
     #[inline]
     fn as_bytes(&self) -> &[u8] {
@@ -158,8 +162,16 @@ impl<const N: usize> AsBytes for &[u8; N] {
     }
 }
 
+impl<const N: usize> Length for &[u8; N] {
+    /// Returns the length of this item in bytes.
+    #[inline(always)]
+    fn len(&self) -> usize {
+        self.as_bytes().len()
+    }
+}
+
 /// Convert `Input` as `&str`
-pub trait AsStr {
+pub trait AsStr: Length {
     /// Convert the input type to a str slice
     fn as_str(&self) -> &str;
 }
@@ -171,6 +183,14 @@ impl AsStr for &str {
     }
 }
 
+impl Length for &str {
+    /// Returns the length of this item in bytes.
+    #[inline(always)]
+    fn len(&self) -> usize {
+        str::len(&self)
+    }
+}
+
 impl AsStr for String {
     #[inline]
     fn as_str(&self) -> &str {
@@ -178,15 +198,23 @@ impl AsStr for String {
     }
 }
 
+impl Length for String {
+    /// Returns the length of this item in bytes.
+    #[inline(always)]
+    fn len(&self) -> usize {
+        str::len(&self)
+    }
+}
+
 /// An extension trait that add `start_with` fn to [`Input`]
-pub trait StartWith<Needle> {
+pub trait StartWith<Needle>: Input {
     /// Returns match length if needle is a prefix of the `Input` or equal to the `Input`.
     fn start_with(&self, prefix: Needle) -> bool;
 }
 
 impl<I, Needle> StartWith<Needle> for I
 where
-    I: AsBytes,
+    I: Input + AsBytes,
     Needle: AsBytes,
 {
     #[inline]
@@ -196,14 +224,14 @@ where
 }
 
 /// An extension trait that add `find` fn to [`Input`]
-pub trait Find<Needle> {
+pub trait Find<Needle>: Input {
     /// Returns the index of the first occurrence of the given needle.
     fn find(&self, prefix: Needle) -> Option<usize>;
 }
 
 impl<I, Needle> Find<Needle> for I
 where
-    I: AsBytes,
+    I: Input + AsBytes,
     Needle: AsBytes,
 {
     #[inline]
@@ -273,6 +301,16 @@ where
     }
 }
 
+impl<S, E> Length for Source<S, E>
+where
+    S: Length,
+{
+    #[inline]
+    fn len(&self) -> usize {
+        self.segment.len()
+    }
+}
+
 impl<S, E> From<(usize, S)> for Source<S, E> {
     #[inline]
     fn from((offset, segment): (usize, S)) -> Self {
@@ -315,11 +353,6 @@ impl<'a, E> Input for Source<&'a str, E> {
     type IterIndices = std::str::CharIndices<'a>;
 
     type Split = Self;
-
-    #[inline]
-    fn len(&self) -> usize {
-        self.segment.len()
-    }
 
     #[inline]
     fn split_at(self, mid: usize) -> (Self, Self)
@@ -365,11 +398,6 @@ impl<'a, E> Input for Source<&'a [u8], E> {
     type Split = Self;
 
     #[inline]
-    fn len(&self) -> usize {
-        self.segment.len()
-    }
-
-    #[inline]
     fn split_at(self, mid: usize) -> (Self, Self)
     where
         Self: Sized,
@@ -411,11 +439,6 @@ impl<'a, const N: usize, E> Input for Source<&'a [u8; N], E> {
     type IterIndices = Enumerate<Self::Iter>;
 
     type Split = Source<&'a [u8], E>;
-
-    #[inline]
-    fn len(&self) -> usize {
-        self.segment.len()
-    }
 
     #[inline]
     fn split_at(self, mid: usize) -> (Self::Split, Self::Split)
@@ -578,8 +601,8 @@ mod tests {
             assert_eq!(input.to_span(), expect);
         }
 
-        assert_to_span(Source::new("hello  world"), Span::new(0, 12));
-        assert_to_span(Source::new(b"hello  world".as_slice()), Span::new(0, 12));
+        assert_to_span(Source::new("hello  world"), Span::from(0..12));
+        assert_to_span(Source::new(b"hello  world".as_slice()), Span::from(0..12));
     }
 
     #[test]
@@ -591,11 +614,11 @@ mod tests {
             assert_eq!(input.to_span_with(from), expect);
         }
 
-        assert_to_span_with(Source::new("hello  world"), 20, Span::new(0, 12));
+        assert_to_span_with(Source::new("hello  world"), 20, Span::from(0..12));
         assert_to_span_with(
             Source::new(b"hello  world".as_slice()),
             10,
-            Span::new(0, 10),
+            Span::from(0..10),
         );
     }
 

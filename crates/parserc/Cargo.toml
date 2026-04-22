@@ -1,0 +1,19 @@
+[package]
+description = "parser combinators for rust language."
+documentation = "https://docs.rs/parserc"
+edition = "2024"
+license = "MIT"
+name = "parserc"
+repository = "https://github.com/stylang/parserc/crates/parserc"
+version.workspace = true
+
+[dependencies]
+thiserror = { workspace = true }
+sourceinput = { workspace = true }
+serde = { version = "1.0.228", optional = true }
+
+[features]
+default = ["serde","combinators","syntax"]
+serde = ["dep:serde","serde/derive"]
+combinators = []
+syntax = []
