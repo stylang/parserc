@@ -328,6 +328,16 @@ mod tests {
             })
         );
 
-        println!("{:?}", Chars::new(r#"'\\\''"#).parse::<LitStr<_>>());
+        assert_eq!(
+            Chars::new(r#"'\\\''"#).parse::<LitStr<_>>(),
+            Ok(LitStr {
+                delimiter_start: Chars::new_offset(0, "'"),
+                content: vec![
+                    StrSegment::ASCIIEscape(ASCIIEscape::BlackSlash(Chars::new_offset(1, "\\\\"))),
+                    StrSegment::QuoteEscape(QuoteEscape(Chars::new_offset(3, "\\'")))
+                ],
+                delimiter_end: Chars::new_offset(5, "'")
+            })
+        );
     }
 }
