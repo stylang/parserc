@@ -37,7 +37,8 @@ where
         let content = content.split_to(1 + rest.len());
 
         match content.as_str() {
-            "lexer" | "syntax" | "followed" | "except" | "use" | "super" | "crate" | "concat" => {
+            "whitespace" | "lexer" | "syntax" | "followed" | "concat" | "except" | "use"
+            | "super" | "crate" | "as" | "self" | "mod" => {
                 return Err(UnsynError::Semantics(
                     SemanticsKind::Keyword,
                     content.to_span(),
@@ -52,5 +53,44 @@ where
     #[inline]
     fn to_span(&self) -> Span {
         self.0.to_span()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use parserc::{sourceinput::Span, syntax::SyntaxExt};
+
+    use crate::{
+        errors::{SemanticsKind, UnsynError},
+        input::Chars,
+        token::ident::Ident,
+    };
+
+    #[test]
+    fn test_ident() {
+        let keywords = [
+            "whitespace",
+            "lexer",
+            "syntax",
+            "followed",
+            "concat",
+            "except",
+            "use",
+            "super",
+            "crate",
+            "as",
+            "self",
+            "mod",
+        ];
+
+        for kw in keywords {
+            assert_eq!(
+                Chars::begin(kw).parse::<Ident<_>>(),
+                Err(UnsynError::Semantics(
+                    SemanticsKind::Keyword,
+                    Span::from(0..kw.len()),
+                ))
+            );
+        }
     }
 }
