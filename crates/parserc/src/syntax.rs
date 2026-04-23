@@ -1,6 +1,6 @@
 use std::marker::PhantomData;
 
-use sourceinput::{Input, Span, SplitTo};
+use sourceinput::{Input, Span, SplitTo, ToSpan};
 
 use crate::{Kind, ParseError, Parser, combinators::next};
 
@@ -145,7 +145,7 @@ where
 
 impl<I, const C: char> Syntax<I> for Char<I, C>
 where
-    I: Input<Item = char> + SplitTo,
+    I: Input<Item = char> + SplitTo + ToSpan,
     I::Error: ParseError,
 {
     #[inline]
@@ -298,13 +298,12 @@ where
     T: Syntax<I>,
 {
     fn parse(input: &mut I) -> Result<Self, <I as Input>::Error> {
-        assert!(LOWER > 0);
-        assert!(LOWER < UPPER);
+        assert!(!(LOWER > UPPER));
 
         let mut children = vec![];
 
         while let Some(v) = T::into_parser().ok().parse(input)? {
-            if children.len() == UPPER {
+            if !(children.len() < UPPER) {
                 break;
             }
 
@@ -321,5 +320,93 @@ where
     #[inline]
     fn to_span(&self) -> Span {
         self.0.to_span()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::Kind;
+
+    type Bytes<'a> = sourceinput::Bytes<'a, Kind>;
+
+    #[test]
+    fn test_range() {
+        assert_eq!(
+            Range::<Byte<_, b'c'>, 0, 0>::parse(&mut Bytes::new(b"cccccc")),
+            Ok(Range(vec![]))
+        );
+
+        assert_eq!(
+            Range::<Byte<_, b'c'>, 0, 4>::parse(&mut Bytes::new(b"cccccc")),
+            Ok(Range(vec![
+                Byte(Bytes::from((0, b"c".as_slice()))),
+                Byte(Bytes::from((1, b"c".as_slice()))),
+                Byte(Bytes::from((2, b"c".as_slice()))),
+                Byte(Bytes::from((3, b"c".as_slice())))
+            ]))
+        );
+
+        assert_eq!(
+            Range::<Byte<_, b'c'>, 1, 4>::parse(&mut Bytes::new(b"cccccc")),
+            Ok(Range(vec![
+                Byte(Bytes::from((0, b"c".as_slice()))),
+                Byte(Bytes::from((1, b"c".as_slice()))),
+                Byte(Bytes::from((2, b"c".as_slice()))),
+                Byte(Bytes::from((3, b"c".as_slice())))
+            ]))
+        );
+
+        assert_eq!(
+            Range::<Byte<_, b'c'>, 3, 4>::parse(&mut Bytes::new(b"cc")),
+            Err(Kind::Range(crate::ControlFlow::Recovable, Span::from(0..2)))
+        );
+    }
+
+    #[test]
+    fn test_limits() {
+        assert_eq!(
+            Limits::<Byte<_, b'c'>, 4>::parse(&mut Bytes::new(b"cccccc")),
+            Ok(Limits(vec![
+                Byte(Bytes::from((0, b"c".as_slice()))),
+                Byte(Bytes::from((1, b"c".as_slice()))),
+                Byte(Bytes::from((2, b"c".as_slice()))),
+                Byte(Bytes::from((3, b"c".as_slice())))
+            ]))
+        );
+
+        assert_eq!(
+            Limits::<Byte<_, b'c'>, 4>::parse(&mut Bytes::new(b"cc")),
+            Ok(Limits(vec![
+                Byte(Bytes::from((0, b"c".as_slice()))),
+                Byte(Bytes::from((1, b"c".as_slice()))),
+            ]))
+        );
+
+        assert_eq!(
+            Limits::<Byte<_, b'c'>, 4>::parse(&mut Bytes::new(b"")),
+            Ok(Limits(vec![]))
+        );
+    }
+
+    #[test]
+    fn test_at_least() {
+        assert_eq!(
+            AtLeast::<Byte<_, b'c'>, 2>::parse(&mut Bytes::new(b"cccc")),
+            Ok(AtLeast(vec![
+                Byte(Bytes::from((0, b"c".as_slice()))),
+                Byte(Bytes::from((1, b"c".as_slice()))),
+                Byte(Bytes::from((2, b"c".as_slice()))),
+                Byte(Bytes::from((3, b"c".as_slice())))
+            ]))
+        );
+
+        assert_eq!(
+            AtLeast::<Byte<_, b'c'>, 4>::parse(&mut Bytes::new(b"cc")),
+            Err(Kind::AtLeast(
+                crate::ControlFlow::Recovable,
+                Span::from(0..2)
+            ))
+        );
     }
 }

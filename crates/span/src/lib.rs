@@ -46,7 +46,7 @@ where
 {
     #[inline]
     fn from(value: Range<Idx>) -> Self {
-        assert!(value.start < value.end);
+        assert!(!(value.start > value.end));
         Self::Range {
             start: value.start,
             end: value.end,

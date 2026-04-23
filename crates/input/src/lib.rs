@@ -37,17 +37,32 @@ impl Item for u8 {
     }
 }
 
-/// Add fn `len` to an struct.
+/// An extension trait add `len` fn to types.
 pub trait Length {
+    /// Returns the length in bytes.
     fn len(&self) -> usize;
+
+    /// Returns true if this  length == 0.
+    #[inline(always)]
+    fn is_empty(&self) -> bool {
+        self.len() == 0
+    }
+}
+
+/// An extension `trait` adds a `to_span` function to types.
+pub trait ToSpan {
+    /// Return the span of the object in the source code.
+    fn to_span(&self) -> Span;
 }
 
 /// A source code stream must implement this trait.
-pub trait Input: Length {
+pub trait Input {
     /// Error raised by combinators.
     type Error;
+
     /// Value yielded by this `Input`.
     type Item: Item;
+
     /// Iterator type returns by [`iter`](Input::iter).
     type Iter: Iterator<Item = Self::Item>;
 
@@ -74,22 +89,20 @@ pub trait Input: Length {
     /// Returns the end position of this input in the whole source code.
     fn end(&self) -> usize;
 
-    /// Returns true if this input length == 0.
-    #[inline]
-    fn is_empty(&self) -> bool {
-        self.len() == 0
-    }
-
-    /// Returns the `span` of the current input fragment in the entire source code.
-    #[inline]
-    fn to_span(&self) -> Span {
-        Span::from(self.start()..self.end())
-    }
-
     /// Returns the subspan of the current input fragment
     #[inline]
     fn to_span_with(&self, len: usize) -> Span {
         Span::from(self.start()..cmp::min(self.start() + len, self.end()))
+    }
+}
+
+impl<I> ToSpan for I
+where
+    I: Input,
+{
+    #[inline(always)]
+    fn to_span(&self) -> Span {
+        Span::from(self.start()..self.end())
     }
 }
 
@@ -475,6 +488,7 @@ impl<'a, const N: usize, E> Input for Source<&'a [u8; N], E> {
 #[cfg(feature = "bytes")]
 pub trait BytesInput<E>:
     Input<Item = u8, Error = E>
+    + Length
     + AsBytes
     + StartWith<&'static str>
     + Find<&'static str>
@@ -499,6 +513,7 @@ impl<'a, E> BytesInput<E> for Bytes<'a, E> {}
 #[cfg(feature = "chars")]
 pub trait CharsInput<E>:
     Input<Item = char, Error = E>
+    + Length
     + AsBytes
     + AsStr
     + StartWith<&'static str>
@@ -520,13 +535,13 @@ impl<'a, E> CharsInput<E> for Chars<'a, E> {}
 mod tests {
     use std::fmt::Debug;
 
-    use crate::{Find, Input, Source, Span, SplitOff, SplitTo, StartWith};
+    use crate::{Find, Input, Length, Source, Span, SplitOff, SplitTo, StartWith, ToSpan};
 
     #[test]
     fn len() {
         fn assert_len<I>(input: I, expect: usize)
         where
-            I: Input<Error = ()>,
+            I: Input<Error = ()> + Length,
         {
             assert_eq!(input.len(), expect);
         }
@@ -596,7 +611,7 @@ mod tests {
     fn to_span() {
         fn assert_to_span<I>(input: I, expect: Span)
         where
-            I: Input<Error = ()>,
+            I: Input<Error = ()> + ToSpan,
         {
             assert_eq!(input.to_span(), expect);
         }
