@@ -251,26 +251,168 @@ where
 #[cfg(test)]
 mod tests {
 
-    use parserc::syntax::SyntaxExt;
+    use parserc::{
+        sourceinput::Source,
+        syntax::{Delimiter, SyntaxExt},
+    };
 
     use super::*;
 
-    use crate::input::Chars;
+    use crate::{
+        input::Chars,
+        syntax::PathSegment,
+        token::{
+            lit::StrSegment,
+            punct::{BracketEnd, BracketStart, ParenEnd, ParenStart},
+        },
+    };
 
     #[test]
     fn test_question() {
-        println!(
-            "{:?}",
-            Chars::new("IDENTIFIER ( '=' ( STRING_LITERAL | RAW_STRING_LITERAL ) )?")
-                .parse::<Expr<_>>()
+        assert_eq!(
+            Chars::begin("IDENTIFIER ( '=' ( STRING_LITERAL | RAW_STRING_LITERAL ) )?")
+                .parse::<Expr<_>>(),
+            Ok(Expr {
+                first: ExprNoTopAlts {
+                    first: ExprNoTopAlt::WithoutSuffix(ExprWithoutSuffix::Path(Path {
+                        leading_sep: None,
+                        first: PathSegment::Ident(Ident(Source::offset(0, "IDENTIFIER"))),
+                        rest: vec![]
+                    })),
+                    rest: vec![(
+                        Some(S(Source::offset(10, " "))),
+                        ExprNoTopAlt::WithSuffix(ExprWithSuffix::Question(
+                            ExprWithoutSuffix::Paren(Delimiter {
+                                start: ParenStart(
+                                    None,
+                                    Source::offset(11, "("),
+                                    Some(S(Source::offset(12, " ")))
+                                ),
+                                end: ParenEnd(None, Source::offset(57, ")"), None),
+                                body: Box::new(Expr {
+                                    first: ExprNoTopAlts {
+                                        first: ExprNoTopAlt::WithoutSuffix(ExprWithoutSuffix::Str(
+                                            LitStr {
+                                                delimiter_start: Source::offset(13, "'"),
+                                                content: vec![StrSegment::CharWithException(
+                                                    Source::offset(14, "=")
+                                                )],
+                                                delimiter_end: Source::offset(15, "'")
+                                            }
+                                        )),
+                                        rest: vec![(
+                                            Some(S(Source::offset(16, " "))),
+                                            ExprNoTopAlt::WithoutSuffix(ExprWithoutSuffix::Paren(
+                                                Delimiter {
+                                                    start: ParenStart(
+                                                        None,
+                                                        Source::offset(17, "("),
+                                                        Some(S(Source::offset(18, " ")))
+                                                    ),
+                                                    end: ParenEnd(
+                                                        Some(S(Source::offset(54, " "))),
+                                                        Source::offset(55, ")"),
+                                                        Some(S(Source::offset(56, " ")))
+                                                    ),
+                                                    body: Box::new(Expr {
+                                                        first: ExprNoTopAlts {
+                                                            first: ExprNoTopAlt::WithoutSuffix(
+                                                                ExprWithoutSuffix::Path(Path {
+                                                                    leading_sep: None,
+                                                                    first: PathSegment::Ident(
+                                                                        Ident(Source::offset(
+                                                                            19,
+                                                                            "STRING_LITERAL"
+                                                                        ))
+                                                                    ),
+                                                                    rest: vec![]
+                                                                })
+                                                            ),
+                                                            rest: vec![]
+                                                        },
+                                                        rest: vec![(
+                                                            Or(
+                                                                Some(S(Source::offset(33, " "))),
+                                                                Source::offset(34, "|"),
+                                                                Some(S(Source::offset(35, " ")))
+                                                            ),
+                                                            ExprNoTopAlts {
+                                                                first: ExprNoTopAlt::WithoutSuffix(
+                                                                    ExprWithoutSuffix::Path(Path {
+                                                                        leading_sep: None,
+                                                                        first: PathSegment::Ident(
+                                                                            Ident(Source::offset(
+                                                                                36,
+                                                                                "RAW_STRING_LITERAL"
+                                                                            ))
+                                                                        ),
+                                                                        rest: vec![]
+                                                                    })
+                                                                ),
+                                                                rest: vec![]
+                                                            }
+                                                        )]
+                                                    })
+                                                }
+                                            ))
+                                        )]
+                                    },
+                                    rest: vec![]
+                                })
+                            }),
+                            Question(None, Source::offset(58, "?"), None)
+                        ))
+                    )]
+                },
+                rest: vec![]
+            })
         );
     }
 
     #[test]
     fn test_stmt() {
-        println!(
-            "{:?}",
-            Chars::new(r#"lexer OCT_DIGIT -> ['0'-'7'];"#).parse::<Stmt<_>>()
+        assert_eq!(
+            Chars::begin(r#"lexer OCT_DIGIT -> ['0'-'7'];"#).parse::<Stmt<_>>(),
+            Ok(Stmt::Lexer {
+                keyword: Lexer(Source::offset(0, "lexer"), Some(S(Source::offset(5, " ")))),
+                ident: Ident(Source::offset(6, "OCT_DIGIT")),
+                arrow_right: ArrowRight(
+                    Some(S(Source::offset(15, " "))),
+                    Source::offset(16, "->"),
+                    Some(S(Source::offset(18, " ")))
+                ),
+                expr: Expr {
+                    first: ExprNoTopAlts {
+                        first: ExprNoTopAlt::WithoutSuffix(ExprWithoutSuffix::Set(Delimiter {
+                            start: BracketStart(None, Source::offset(19, "["), None),
+                            end: BracketEnd(None, Source::offset(27, "]"), None),
+                            body: Punctuated {
+                                pairs: vec![],
+                                tail: Some(Box::new(SetItem::Range(Range::Str(
+                                    LitStr {
+                                        delimiter_start: Source::offset(20, "'"),
+                                        content: vec![StrSegment::CharWithException(
+                                            Source::offset(21, "0")
+                                        )],
+                                        delimiter_end: Source::offset(22, "'")
+                                    },
+                                    Minus(None, Source::offset(23, "-"), None),
+                                    LitStr {
+                                        delimiter_start: Source::offset(24, "'"),
+                                        content: vec![StrSegment::CharWithException(
+                                            Source::offset(25, "7")
+                                        )],
+                                        delimiter_end: Source::offset(26, "'")
+                                    }
+                                ))))
+                            }
+                        })),
+                        rest: vec![]
+                    },
+                    rest: vec![]
+                },
+                semi: Semi(None, Source::offset(28, ";"), None)
+            })
         );
     }
 }

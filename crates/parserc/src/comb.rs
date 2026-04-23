@@ -253,7 +253,7 @@ mod tests {
 
     #[test]
     fn test_next() {
-        let mut input = Chars::new("await");
+        let mut input = Chars::begin("await");
 
         assert_eq!(next('a').parse(&mut input), Ok((0, "a").into()));
         assert_eq!(
@@ -275,16 +275,16 @@ mod tests {
     #[test]
     fn test_keyword() {
         assert_eq!(
-            keyword("await").parse(&mut Chars::new("await~~")),
+            keyword("await").parse(&mut Chars::begin("await~~")),
             Ok((0, "await").into())
         );
         assert_eq!(
-            keyword(b"await").parse(&mut Chars::new("await~~")),
+            keyword(b"await").parse(&mut Chars::begin("await~~")),
             Ok((0, "await").into())
         );
 
         assert_eq!(
-            keyword(b"await").parse(&mut Chars::new("~await~~")),
+            keyword(b"await").parse(&mut Chars::begin("~await~~")),
             Err(Kind::Keyword(
                 crate::ControlFlow::Recovable,
                 Span::from(0..5)
@@ -292,7 +292,7 @@ mod tests {
         );
 
         assert_eq!(
-            keyword(b"await").parse(&mut Chars::new("~")),
+            keyword(b"await").parse(&mut Chars::begin("~")),
             Err(Kind::Keyword(
                 crate::ControlFlow::Recovable,
                 Span::from(0..1)
@@ -303,12 +303,12 @@ mod tests {
     #[test]
     fn test_take_until() {
         assert_eq!(
-            take_until(b"await").parse(&mut Chars::new("~!!!await")),
+            take_until(b"await").parse(&mut Chars::begin("~!!!await")),
             Ok((0, "~!!!").into())
         );
 
         assert_eq!(
-            take_until(b"await").parse(&mut Chars::new("~!!!")),
+            take_until(b"await").parse(&mut Chars::begin("~!!!")),
             Err(Kind::TakeUntil(
                 crate::ControlFlow::Recovable,
                 Span::from(0..4)
@@ -319,12 +319,12 @@ mod tests {
     #[test]
     fn test_take_till() {
         assert_eq!(
-            take_till(|c| c == 't').parse(&mut Chars::new("~!!!await")),
+            take_till(|c| c == 't').parse(&mut Chars::begin("~!!!await")),
             Ok((0, "~!!!awai").into())
         );
 
         assert_eq!(
-            take_till(|c| c == 't').parse(&mut Chars::new("~!!!awai")),
+            take_till(|c| c == 't').parse(&mut Chars::begin("~!!!awai")),
             Ok((0, "~!!!awai").into())
         );
     }
@@ -333,19 +333,19 @@ mod tests {
     fn test_take_while_n() {
         assert_eq!(
             take_while_n(NonZeroUsize::new(4).unwrap(), |c: char| c.is_ascii_digit())
-                .parse(&mut Chars::new("123456789")),
+                .parse(&mut Chars::begin("123456789")),
             Ok((0, "1234").into())
         );
 
         assert_eq!(
             take_while_n(NonZeroUsize::new(4).unwrap(), |c: char| c.is_ascii_digit())
-                .parse(&mut Chars::new("12")),
+                .parse(&mut Chars::begin("12")),
             Ok((0, "12").into())
         );
 
         assert_eq!(
             take_while_n(NonZeroUsize::new(4).unwrap(), |c: char| c.is_ascii_digit())
-                .parse(&mut Chars::new("")),
+                .parse(&mut Chars::begin("")),
             Ok((0, "").into())
         );
     }
@@ -354,13 +354,13 @@ mod tests {
     fn test_take_while_at_least_n() {
         assert_eq!(
             take_while_at_least_n(NonZeroUsize::new(4).unwrap(), |c: char| c.is_ascii_digit())
-                .parse(&mut Chars::new("123456789~")),
+                .parse(&mut Chars::begin("123456789~")),
             Ok((0, "123456789").into())
         );
 
         assert_eq!(
             take_while_at_least_n(NonZeroUsize::new(4).unwrap(), |c: char| c.is_ascii_digit())
-                .parse(&mut Chars::new("123")),
+                .parse(&mut Chars::begin("123")),
             Err(Kind::TakeWhileAtLeastN(
                 crate::ControlFlow::Recovable,
                 Span::from(0..3)
@@ -372,37 +372,37 @@ mod tests {
     fn test_take_while_range() {
         assert_eq!(
             take_while_range(0..=0, |c: char| c.is_ascii_digit())
-                .parse(&mut Chars::new("123456789~")),
+                .parse(&mut Chars::begin("123456789~")),
             Ok((0, "").into())
         );
 
         assert_eq!(
             take_while_range(2..=2, |c: char| c.is_ascii_digit())
-                .parse(&mut Chars::new("123456789~")),
+                .parse(&mut Chars::begin("123456789~")),
             Ok((0, "12").into())
         );
 
         assert_eq!(
             take_while_range(0..=1, |c: char| c.is_ascii_digit())
-                .parse(&mut Chars::new("123456789~")),
+                .parse(&mut Chars::begin("123456789~")),
             Ok((0, "1").into())
         );
 
         assert_eq!(
             take_while_range(0..=4, |c: char| c.is_ascii_digit())
-                .parse(&mut Chars::new("123456789~")),
+                .parse(&mut Chars::begin("123456789~")),
             Ok((0, "1234").into())
         );
 
         assert_eq!(
             take_while_range(0..=4, |c: char| c.is_ascii_digit())
-                .parse(&mut Chars::new("~123456789~")),
+                .parse(&mut Chars::begin("~123456789~")),
             Ok((0, "").into())
         );
 
         assert_eq!(
             take_while_range(1..=4, |c: char| c.is_ascii_digit())
-                .parse(&mut Chars::new("~123456789~")),
+                .parse(&mut Chars::begin("~123456789~")),
             Err(Kind::TakeWhileRange(
                 crate::ControlFlow::Recovable,
                 Span::from(0..0)

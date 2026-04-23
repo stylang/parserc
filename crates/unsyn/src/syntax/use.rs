@@ -85,7 +85,7 @@ mod tests {
     #[test]
     fn test_use_declaration() {
         assert_eq!(
-            Chars::new("use a::b::{c, d, e::f, g::h::*}").parse::<UseDeclaration<_>>(),
+            Chars::begin("use a::b::{c, d, e::f, g::h::*}").parse::<UseDeclaration<_>>(),
             Ok(UseDeclaration {
                 keyword: Use(Chars::from((0, "use")), Some(S(Chars::from((3, " "))))),
                 use_tree: UseTree::Group {
@@ -181,7 +181,7 @@ mod tests {
         );
 
         assert_eq!(
-            Chars::new("use a::b::{this as ab, c, d::{*, e::f}}").parse::<UseDeclaration<_>>(),
+            Chars::begin("use a::b::{self as ab, c, d::{*, e::f}}").parse::<UseDeclaration<_>>(),
             Ok(UseDeclaration {
                 keyword: Use(Chars::from((0, "use")), Some(S(Chars::from((3, " "))))),
                 use_tree: UseTree::Group {
@@ -206,7 +206,7 @@ mod tests {
                                         Path {
                                             leading_sep: None,
                                             first: PathSegment::This(This(
-                                                Chars::from((11, "this")),
+                                                Chars::from((11, "self")),
                                                 Some(S(Chars::from((15, " "))))
                                             )),
                                             rest: vec![]

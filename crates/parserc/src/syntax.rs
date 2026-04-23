@@ -435,12 +435,12 @@ mod tests {
     #[test]
     fn test_range() {
         assert_eq!(
-            Range::<Byte<_, b'c'>, 0, 0>::parse(&mut Bytes::new(b"cccccc")),
+            Range::<Byte<_, b'c'>, 0, 0>::parse(&mut Bytes::begin(b"cccccc")),
             Ok(Range(vec![]))
         );
 
         assert_eq!(
-            Range::<Byte<_, b'c'>, 0, 4>::parse(&mut Bytes::new(b"cccccc")),
+            Range::<Byte<_, b'c'>, 0, 4>::parse(&mut Bytes::begin(b"cccccc")),
             Ok(Range(vec![
                 Byte(Bytes::from((0, b"c".as_slice()))),
                 Byte(Bytes::from((1, b"c".as_slice()))),
@@ -450,7 +450,7 @@ mod tests {
         );
 
         assert_eq!(
-            Range::<Byte<_, b'c'>, 1, 4>::parse(&mut Bytes::new(b"cccccc")),
+            Range::<Byte<_, b'c'>, 1, 4>::parse(&mut Bytes::begin(b"cccccc")),
             Ok(Range(vec![
                 Byte(Bytes::from((0, b"c".as_slice()))),
                 Byte(Bytes::from((1, b"c".as_slice()))),
@@ -460,7 +460,7 @@ mod tests {
         );
 
         assert_eq!(
-            Range::<Byte<_, b'c'>, 3, 4>::parse(&mut Bytes::new(b"cc")),
+            Range::<Byte<_, b'c'>, 3, 4>::parse(&mut Bytes::begin(b"cc")),
             Err(Kind::Range(crate::ControlFlow::Recovable, Span::from(0..2)))
         );
     }
@@ -468,7 +468,7 @@ mod tests {
     #[test]
     fn test_limits() {
         assert_eq!(
-            Limits::<Byte<_, b'c'>, 4>::parse(&mut Bytes::new(b"cccccc")),
+            Limits::<Byte<_, b'c'>, 4>::parse(&mut Bytes::begin(b"cccccc")),
             Ok(Limits(vec![
                 Byte(Bytes::from((0, b"c".as_slice()))),
                 Byte(Bytes::from((1, b"c".as_slice()))),
@@ -478,7 +478,7 @@ mod tests {
         );
 
         assert_eq!(
-            Limits::<Byte<_, b'c'>, 4>::parse(&mut Bytes::new(b"cc")),
+            Limits::<Byte<_, b'c'>, 4>::parse(&mut Bytes::begin(b"cc")),
             Ok(Limits(vec![
                 Byte(Bytes::from((0, b"c".as_slice()))),
                 Byte(Bytes::from((1, b"c".as_slice()))),
@@ -486,7 +486,7 @@ mod tests {
         );
 
         assert_eq!(
-            Limits::<Byte<_, b'c'>, 4>::parse(&mut Bytes::new(b"")),
+            Limits::<Byte<_, b'c'>, 4>::parse(&mut Bytes::begin(b"")),
             Ok(Limits(vec![]))
         );
     }
@@ -494,7 +494,7 @@ mod tests {
     #[test]
     fn test_at_least() {
         assert_eq!(
-            AtLeast::<Byte<_, b'c'>, 2>::parse(&mut Bytes::new(b"cccc")),
+            AtLeast::<Byte<_, b'c'>, 2>::parse(&mut Bytes::begin(b"cccc")),
             Ok(AtLeast(vec![
                 Byte(Bytes::from((0, b"c".as_slice()))),
                 Byte(Bytes::from((1, b"c".as_slice()))),
@@ -504,7 +504,7 @@ mod tests {
         );
 
         assert_eq!(
-            AtLeast::<Byte<_, b'c'>, 4>::parse(&mut Bytes::new(b"cc")),
+            AtLeast::<Byte<_, b'c'>, 4>::parse(&mut Bytes::begin(b"cc")),
             Err(Kind::AtLeast(
                 crate::ControlFlow::Recovable,
                 Span::from(0..2)

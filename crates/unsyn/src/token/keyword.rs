@@ -58,5 +58,5 @@ define_keyword!(Use, "use");
 define_keyword!(Super, "super");
 define_keyword!(Crate, "crate");
 define_keyword!(As, "as");
-define_keyword!(This, "this");
+define_keyword!(This, "self");
 define_keyword!(Mod, "mod");
