@@ -16,3 +16,5 @@ pub mod combinators;
 #[cfg(feature = "syntax")]
 #[cfg_attr(docsrs, doc(cfg(feature = "syntax")))]
 pub mod syntax;
+
+pub use sourceinput;

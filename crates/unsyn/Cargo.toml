@@ -1,0 +1,18 @@
+[package]
+description = "A domain-specific language for building Concrete Syntax Trees, developed by `parserc`."
+documentation = "https://docs.rs/unsyn"
+edition = "2024"
+license = "MIT"
+name = "unsyn"
+repository = "https://github.com/stylang/parserc/crates/unsyn"
+version.workspace = true
+
+[dependencies]
+parserc = { workspace = true }
+thiserror = { workspace = true }
+unicode-ident = { workspace = true }
+serde = { version = "1.0.228", optional = true }
+
+[features]
+default = ["serde"]
+serde = ["dep:serde","serde/derive"]

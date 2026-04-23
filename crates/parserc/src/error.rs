@@ -37,6 +37,8 @@ pub enum Kind {
     TakeWhileAtLeastN(ControlFlow, Span),
     #[error("Detected `left recursion`")]
     LeftRecursion(ControlFlow, Span),
+    #[error("Error from derive `CST` node `{0}`")]
+    Syntax(&'static str, ControlFlow, Span),
 }
 
 /// A error type returns by parser combinators.
@@ -69,6 +71,7 @@ impl ParseError for Kind {
             Kind::TakeWhileRange(control_flow, _) => *control_flow,
             Kind::TakeWhileAtLeastN(control_flow, _) => *control_flow,
             Kind::LeftRecursion(control_flow, _) => *control_flow,
+            Kind::Syntax(_, control_flow, _) => *control_flow,
         }
     }
 
@@ -85,6 +88,7 @@ impl ParseError for Kind {
             Kind::Limits(_, span) => Kind::Limits(ControlFlow::Fatal, span),
             Kind::AtLeast(_, span) => Kind::AtLeast(ControlFlow::Fatal, span),
             Kind::LeftRecursion(_, span) => Kind::LeftRecursion(ControlFlow::Fatal, span),
+            Kind::Syntax(_, _, span) => Kind::LeftRecursion(ControlFlow::Fatal, span),
         }
     }
 
@@ -101,6 +105,7 @@ impl ParseError for Kind {
             Kind::TakeWhileAtLeastN(_, span) => span.clone(),
             Kind::AtLeast(_, span) => span.clone(),
             Kind::LeftRecursion(_, span) => span.clone(),
+            Kind::Syntax(_, _, span) => span.clone(),
         }
     }
 }

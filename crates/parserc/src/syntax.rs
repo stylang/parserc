@@ -323,6 +323,108 @@ where
     }
 }
 
+/// A punctuated sequence of syntax tree nodes of type T separated by punctuation of type P.
+#[derive(Debug, PartialEq, Eq, PartialOrd, Ord, Clone)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+pub struct Punctuated<T, P> {
+    /// (T,P) pairs
+    pub pairs: Vec<(T, P)>,
+    /// individual tail `T`
+    pub tail: Option<Box<T>>,
+}
+
+impl<T, P> Punctuated<T, P> {
+    /// returns the sequence length.
+    #[inline]
+    pub fn len(&self) -> usize {
+        self.pairs.len() + self.tail.as_ref().map_or(0, |_| 1)
+    }
+
+    /// Returns true if the punctuated sequence length is 0.
+    #[inline]
+    pub fn is_empty(&self) -> bool {
+        self.len() == 0
+    }
+}
+
+impl<T, P, I> Syntax<I> for Punctuated<T, P>
+where
+    I: Input + Clone,
+    I::Error: ParseError,
+    T: Syntax<I>,
+    P: Syntax<I>,
+{
+    fn parse(input: &mut I) -> Result<Self, I::Error> {
+        let mut pairs = vec![];
+
+        loop {
+            let t = T::into_parser().ok().parse(input)?;
+
+            let Some(t) = t else {
+                return Ok(Self { pairs, tail: None });
+            };
+
+            let p = P::into_parser().ok().parse(input)?;
+
+            let Some(p) = p else {
+                return Ok(Self {
+                    pairs,
+                    tail: Some(Box::new(t)),
+                });
+            };
+
+            pairs.push((t, p));
+        }
+    }
+
+    #[inline]
+    fn to_span(&self) -> Span {
+        self.pairs.to_span() + self.tail.to_span()
+    }
+}
+
+/// When merging two abstract syntax trees,
+/// it first attempts to match the left subtree;
+/// if unsuccessful, it proceeds to match the right subtree.
+#[derive(Debug, PartialEq, Eq, PartialOrd, Ord, Clone)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+pub enum Or<F, S> {
+    First(F),
+    Second(S),
+}
+
+impl<I, F, S> Syntax<I> for Or<F, S>
+where
+    I: Input + Clone,
+    I::Error: ParseError,
+    F: Syntax<I>,
+    S: Syntax<I>,
+{
+    fn parse(input: &mut I) -> Result<Self, I::Error> {
+        let Some(first) = F::into_parser().ok().parse(input)? else {
+            let s = S::parse(input)?;
+
+            return Ok(Self::Second(s));
+        };
+
+        Ok(Self::First(first))
+    }
+
+    #[inline]
+    fn to_span(&self) -> Span {
+        match self {
+            Or::First(v) => v.to_span(),
+            Or::Second(v) => v.to_span(),
+        }
+    }
+}
+
+// implement Syntax for tuple (T1,T2,...) where T1: Syntax, T2: Syntax, ...
+parserc_derive::derive_tuple_syntax!(16);
+
+#[cfg(feature = "derive")]
+pub use parserc_derive::Syntax;
+
 #[cfg(test)]
 mod tests {
     use super::*;

@@ -9,6 +9,11 @@ version = "0.13.0"
 [workspace.dependencies]
 thiserror = "2.0.18"
 memchr = { version = "2.7.6" }
+unicode-ident = "1.0.22"
 
 sourcespan = { path = "./crates/span", version = "^0.13"}
 sourceinput = { path = "./crates/input", version = "^0.13"}
+
+unsyn = { path = "./crates/unsyn", version = "^0.13"}
+parserc = { path = "./crates/parserc", version = "^0.13"}
+parserc-derive = { path = "./crates/derive", version = "^0.13"}

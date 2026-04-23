@@ -10,10 +10,12 @@ version.workspace = true
 [dependencies]
 thiserror = { workspace = true }
 sourceinput = { workspace = true }
+parserc-derive = { workspace = true, optional = true}
 serde = { version = "1.0.228", optional = true }
 
 [features]
-default = ["serde","combinators","syntax"]
+default = ["serde","combinators","syntax","derive"]
 serde = ["dep:serde","serde/derive"]
 combinators = []
-syntax = []
+syntax = ["parserc-derive"]
+derive = ["syntax"]
