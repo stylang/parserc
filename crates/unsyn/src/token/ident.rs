@@ -85,7 +85,7 @@ mod tests {
 
         for kw in keywords {
             assert_eq!(
-                Chars::begin(kw).parse::<Ident<_>>(),
+                Chars::new(kw).parse::<Ident<_>>(),
                 Err(UnsynError::Semantics(
                     SemanticsKind::Keyword,
                     Span::from(0..kw.len()),

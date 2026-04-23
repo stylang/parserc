@@ -85,7 +85,7 @@ mod tests {
     #[test]
     fn test_use_declaration() {
         assert_eq!(
-            Chars::begin("use a::b::{c, d, e::f, g::h::*}").parse::<UseDeclaration<_>>(),
+            Chars::new("use a::b::{c, d, e::f, g::h::*}").parse::<UseDeclaration<_>>(),
             Ok(UseDeclaration {
                 keyword: Use(Chars::from((0, "use")), Some(S(Chars::from((3, " "))))),
                 use_tree: UseTree::Group {
@@ -181,7 +181,7 @@ mod tests {
         );
 
         assert_eq!(
-            Chars::begin("use a::b::{self as ab, c, d::{*, e::f}}").parse::<UseDeclaration<_>>(),
+            Chars::new("use a::b::{self as ab, c, d::{*, e::f}}").parse::<UseDeclaration<_>>(),
             Ok(UseDeclaration {
                 keyword: Use(Chars::from((0, "use")), Some(S(Chars::from((3, " "))))),
                 use_tree: UseTree::Group {

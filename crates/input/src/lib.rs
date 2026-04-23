@@ -254,6 +254,7 @@ where
 }
 
 /// A segement of source stream that implement `Input` stream.
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct Source<S, E> {
     /// start offset in the source file/data.
     offset: usize,
@@ -266,7 +267,7 @@ pub struct Source<S, E> {
 impl<S, E> Source<S, E> {
     /// Creates a new source code slice starting at `beginning`
     #[inline]
-    pub fn begin(segment: S) -> Self {
+    pub fn new(segment: S) -> Self {
         Self {
             offset: 0,
             segment,
@@ -276,7 +277,7 @@ impl<S, E> Source<S, E> {
 
     /// Create a new source code slice starting at `offset`.
     #[inline]
-    pub fn offset(offset: usize, segment: S) -> Self {
+    pub fn new_offset(offset: usize, segment: S) -> Self {
         Self {
             offset,
             segment,
@@ -552,8 +553,8 @@ mod tests {
             assert_eq!(input.len(), expect);
         }
 
-        assert_len(Source::begin("hello world"), 11);
-        assert_len(Source::begin(b"hello world".as_slice()), 11);
+        assert_len(Source::new("hello world"), 11);
+        assert_len(Source::new(b"hello world".as_slice()), 11);
 
         assert_len(Source::from((10usize, "hello world")), 11);
         assert_len(Source::from((10usize, b"hello world".as_slice())), 11);
@@ -572,14 +573,14 @@ mod tests {
         }
 
         assert_split_to(
-            Source::begin(b"hello  world".as_slice()),
+            Source::new(b"hello  world".as_slice()),
             5,
             (5, b"  world".as_slice()).into(),
             (0, b"hello".as_slice()).into(),
         );
 
         assert_split_to(
-            Source::begin("hello  world"),
+            Source::new("hello  world"),
             5,
             (5, "  world").into(),
             (0, "hello").into(),
@@ -599,14 +600,14 @@ mod tests {
         }
 
         assert_split_off(
-            Source::begin(b"hello  world".as_slice()),
+            Source::new(b"hello  world".as_slice()),
             5,
             (0, b"hello".as_slice()).into(),
             (5, b"  world".as_slice()).into(),
         );
 
         assert_split_off(
-            Source::begin("hello  world"),
+            Source::new("hello  world"),
             5,
             (0, "hello").into(),
             (5, "  world").into(),
@@ -622,8 +623,8 @@ mod tests {
             assert_eq!(input.to_span(), expect);
         }
 
-        assert_to_span(Source::begin("hello  world"), Span::from(0..12));
-        assert_to_span(Source::begin(b"hello  world".as_slice()), Span::from(0..12));
+        assert_to_span(Source::new("hello  world"), Span::from(0..12));
+        assert_to_span(Source::new(b"hello  world".as_slice()), Span::from(0..12));
     }
 
     #[test]
@@ -635,9 +636,9 @@ mod tests {
             assert_eq!(input.to_span_with(from), expect);
         }
 
-        assert_to_span_with(Source::begin("hello  world"), 20, Span::from(0..12));
+        assert_to_span_with(Source::new("hello  world"), 20, Span::from(0..12));
         assert_to_span_with(
-            Source::begin(b"hello  world".as_slice()),
+            Source::new(b"hello  world".as_slice()),
             10,
             Span::from(0..10),
         );

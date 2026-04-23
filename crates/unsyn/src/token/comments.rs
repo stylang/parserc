@@ -389,8 +389,8 @@ mod tests {
 
         for (input, expect) in line_comments {
             assert_eq!(
-                Chars::begin(input).parse::<LineComment<_>>(),
-                Ok(LineComment(Chars::begin(expect)))
+                Chars::new(input).parse::<LineComment<_>>(),
+                Ok(LineComment(Chars::new(expect)))
             );
         }
 
@@ -398,7 +398,7 @@ mod tests {
 
         for (input, unexpect) in non_line_comments {
             assert_eq!(
-                Chars::begin(input).parse::<LineComment<_>>(),
+                Chars::new(input).parse::<LineComment<_>>(),
                 Err(UnsynError::Syntax(
                     SyntaxKind::LineComment,
                     ControlFlow::Recovable,
@@ -408,7 +408,7 @@ mod tests {
         }
 
         assert_eq!(
-            Chars::begin("").parse::<LineComment<_>>(),
+            Chars::new("").parse::<LineComment<_>>(),
             Err(UnsynError::Syntax(
                 SyntaxKind::LineComment,
                 ControlFlow::Recovable,
@@ -427,8 +427,8 @@ mod tests {
 
         for (input, expect) in inner_line_docs {
             assert_eq!(
-                Chars::begin(input).parse::<InnerLineDoc<_>>(),
-                Ok(InnerLineDoc(Chars::begin(expect)))
+                Chars::new(input).parse::<InnerLineDoc<_>>(),
+                Ok(InnerLineDoc(Chars::new(expect)))
             );
         }
 
@@ -436,7 +436,7 @@ mod tests {
 
         for (input, unexpect) in none_inner_line_docs {
             assert_eq!(
-                Chars::begin(input).parse::<InnerLineDoc<_>>(),
+                Chars::new(input).parse::<InnerLineDoc<_>>(),
                 Err(UnsynError::Syntax(
                     SyntaxKind::InnerLineDoc,
                     ControlFlow::Recovable,
@@ -455,8 +455,8 @@ mod tests {
 
         for (input, expect) in inner_line_docs {
             assert_eq!(
-                Chars::begin(input).parse::<InnerBlockDoc<_>>(),
-                Ok(InnerBlockDoc(Chars::begin(expect)))
+                Chars::new(input).parse::<InnerBlockDoc<_>>(),
+                Ok(InnerBlockDoc(Chars::new(expect)))
             );
         }
     }
@@ -472,8 +472,8 @@ mod tests {
 
         for (input, expect) in block_comments {
             assert_eq!(
-                Chars::begin(input).parse::<BlockComment<_>>(),
-                Ok(BlockComment(Chars::begin(expect)))
+                Chars::new(input).parse::<BlockComment<_>>(),
+                Ok(BlockComment(Chars::new(expect)))
             );
         }
 
@@ -484,7 +484,7 @@ mod tests {
 
         for (input, unexpect) in non_block_comments {
             assert_eq!(
-                Chars::begin(input).parse::<BlockComment<_>>(),
+                Chars::new(input).parse::<BlockComment<_>>(),
                 Err(UnsynError::Syntax(
                     SyntaxKind::BlockComment,
                     ControlFlow::Recovable,
@@ -503,8 +503,8 @@ mod tests {
 
         for (input, expect) in inner_line_docs {
             assert_eq!(
-                Chars::begin(input).parse::<OuterBlockDoc<_>>(),
-                Ok(OuterBlockDoc(Chars::begin(expect)))
+                Chars::new(input).parse::<OuterBlockDoc<_>>(),
+                Ok(OuterBlockDoc(Chars::new(expect)))
             );
         }
 
@@ -512,7 +512,7 @@ mod tests {
 
         for (input, unexpect) in non_outer_block_docs {
             assert_eq!(
-                Chars::begin(input).parse::<OuterBlockDoc<_>>(),
+                Chars::new(input).parse::<OuterBlockDoc<_>>(),
                 Err(UnsynError::Syntax(
                     SyntaxKind::OuterBlockDoc,
                     ControlFlow::Recovable,

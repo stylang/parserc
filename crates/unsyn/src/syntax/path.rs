@@ -48,18 +48,18 @@ mod tests {
     #[test]
     fn start_with_crate() {
         assert_eq!(
-            Chars::begin("crate::a::b").parse::<Path<_>>(),
+            Chars::new("crate::a::b").parse::<Path<_>>(),
             Ok(Path {
                 leading_sep: None,
-                first: PathSegment::Crate(Crate(Source::offset(0, "crate"), None)),
+                first: PathSegment::Crate(Crate(Source::new_offset(0, "crate"), None)),
                 rest: vec![
                     (
-                        PathSep(None, Source::offset(5, "::"), None),
-                        PathSegment::Ident(Ident(Source::offset(7, "a")))
+                        PathSep(None, Source::new_offset(5, "::"), None),
+                        PathSegment::Ident(Ident(Source::new_offset(7, "a")))
                     ),
                     (
-                        PathSep(None, Source::offset(8, "::"), None),
-                        PathSegment::Ident(Ident(Source::offset(10, "b")))
+                        PathSep(None, Source::new_offset(8, "::"), None),
+                        PathSegment::Ident(Ident(Source::new_offset(10, "b")))
                     )
                 ]
             })
@@ -69,13 +69,13 @@ mod tests {
     #[test]
     fn start_with_super() {
         assert_eq!(
-            Chars::begin("super::a").parse::<Path<_>>(),
+            Chars::new("super::a").parse::<Path<_>>(),
             Ok(Path {
                 leading_sep: None,
-                first: PathSegment::Super(Super(Source::offset(0, "super"), None)),
+                first: PathSegment::Super(Super(Source::new_offset(0, "super"), None)),
                 rest: vec![(
-                    PathSep(None, Source::offset(5, "::"), None),
-                    PathSegment::Ident(Ident(Source::offset(7, "a")))
+                    PathSep(None, Source::new_offset(5, "::"), None),
+                    PathSegment::Ident(Ident(Source::new_offset(7, "a")))
                 )]
             })
         );

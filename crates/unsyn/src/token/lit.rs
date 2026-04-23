@@ -284,29 +284,29 @@ mod tests {
     #[test]
     fn test_unicode() {
         assert_eq!(
-            Chars::begin("U+2029").parse::<LitUnicode<_>>(),
+            Chars::new("U+2029").parse::<LitUnicode<_>>(),
             Ok(LitUnicode(Chars::from((0, "U+2029"))))
         );
 
         assert_eq!(
-            Chars::begin("U+20290").parse::<LitUnicode<_>>(),
+            Chars::new("U+20290").parse::<LitUnicode<_>>(),
             Ok(LitUnicode(Chars::from((0, "U+20290"))))
         );
 
         assert_eq!(
-            Chars::begin("U+202900").parse::<LitUnicode<_>>(),
+            Chars::new("U+202900").parse::<LitUnicode<_>>(),
             Ok(LitUnicode(Chars::from((0, "U+202900"))))
         );
 
         assert_eq!(
-            Chars::begin("U+1").parse::<LitUnicode<_>>(),
+            Chars::new("U+1").parse::<LitUnicode<_>>(),
             Err(UnsynError::Semantics(
                 SemanticsKind::Unicode,
                 Span::from(0..3)
             ))
         );
         assert_eq!(
-            Chars::begin("U+1123411").parse::<LitUnicode<_>>(),
+            Chars::new("U+1123411").parse::<LitUnicode<_>>(),
             Err(UnsynError::Semantics(
                 SemanticsKind::Unicode,
                 Span::from(0..9)
@@ -317,7 +317,7 @@ mod tests {
     #[test]
     fn test_lit_str() {
         assert_eq!(
-            Chars::begin("'\\'static'").parse::<LitStr<_>>(),
+            Chars::new("'\\'static'").parse::<LitStr<_>>(),
             Ok(LitStr {
                 delimiter_start: Chars::from((0, "'")),
                 content: vec![
@@ -328,6 +328,6 @@ mod tests {
             })
         );
 
-        println!("{:?}", Chars::begin(r#"'\\\''"#).parse::<LitStr<_>>());
+        println!("{:?}", Chars::new(r#"'\\\''"#).parse::<LitStr<_>>());
     }
 }

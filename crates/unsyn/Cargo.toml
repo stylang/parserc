@@ -13,6 +13,11 @@ thiserror = { workspace = true }
 unicode-ident = { workspace = true }
 serde = { version = "1.0.228", optional = true }
 
+[dev-dependencies]
+walkdir = { workspace = true }
+serde_json = { workspace = true }
+
 [features]
 default = ["serde"]
 serde = ["dep:serde","serde/derive"]
+genspec = []
