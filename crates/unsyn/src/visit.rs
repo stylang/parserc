@@ -15,7 +15,9 @@ use crate::{
         comments::{OuterBlockDoc, OuterLineDoc},
         delimiter::{Angle, Brace, Bracket, Paren},
         ident::Ident,
-        keyword::{As, Concat, Crate, Except, Followed, Lexer, Super, Syntax, This, Whitespace},
+        keyword::{
+            As, Concat, Crate, Except, Followed, Lexer, Mod, Super, Syntax, This, Use, Whitespace,
+        },
         lit::{LitDec, LitStr, LitUnicode},
         punct::{ArrowRight, Comma, DotDot, Minus, PathSep, Plus, Question, Semi, Star, Tilde},
     },
@@ -99,13 +101,13 @@ where
     /// visit the `OuterBlockDoc` node.
     #[inline(always)]
     fn visit_outer_block_doc(&mut self, node: &mut OuterBlockDoc<I>) {
-        visit_outer_block_doc(self, node);
+        let _ = node;
     }
 
     /// visit the `OuterLineDoc` node.
     #[inline(always)]
     fn visit_outer_line_doc(&mut self, node: &mut OuterLineDoc<I>) {
-        visit_outer_line_doc(self, node);
+        let _ = node;
     }
 
     /// visit the `Use` node.
@@ -117,7 +119,7 @@ where
     /// visit the `Ident` node.
     #[inline(always)]
     fn visit_token_ident(&mut self, ident: &mut Ident<I>) {
-        visit_token_ident(self, ident);
+        let _ = ident;
     }
 
     /// visit the `Ident` node.
@@ -505,6 +507,16 @@ where
     }
 
     #[inline(always)]
+    fn visit_keyword_mod(&mut self, keyword: &mut Mod<I>) {
+        let _ = keyword;
+    }
+
+    #[inline(always)]
+    fn visit_keyword_use(&mut self, keyword: &mut Use<I>) {
+        let _ = keyword;
+    }
+
+    #[inline(always)]
     fn visit_punct_tilde(&mut self, keyword: &mut Tilde<I>) {
         let _ = keyword;
     }
@@ -558,6 +570,7 @@ where
     I: UnsynInput,
     V: Visitor<I> + ?Sized,
 {
+    visitor.visit_keyword_use(&mut node.keyword);
     visitor.visit_use_tree(&mut node.use_tree);
     visitor.visit_punct_semi(semi);
 }
@@ -569,9 +582,9 @@ where
     I: UnsynInput,
     V: Visitor<I> + ?Sized,
 {
-    visitor.visit_punct_semi(semi);
-
+    visitor.visit_keyword_mod(&mut node.keyword);
     visitor.visit_token_ident(&mut node.ident);
+    visitor.visit_punct_semi(semi);
 }
 
 /// Call this function in [`visit_item_outer_doc`](Analyzer::visit_item_outer_doc) to recurse into child nodes.
@@ -606,28 +619,6 @@ where
     }
 }
 
-/// Call this function in [`visit_outer_block_doc`](Analyzer::visit_outer_block_doc) to recurse into child nodes.
-#[inline]
-pub fn visit_outer_block_doc<V, I>(visitor: &mut V, outer_doc: &mut OuterBlockDoc<I>)
-where
-    I: UnsynInput,
-    V: Visitor<I> + ?Sized,
-{
-    let _ = visitor;
-    let _ = outer_doc;
-}
-
-/// Call this function in [`visit_outer_line_doc`](Analyzer::visit_outer_line_doc) to recurse into child nodes.
-#[inline]
-pub fn visit_outer_line_doc<V, I>(visitor: &mut V, outer_doc: &mut OuterLineDoc<I>)
-where
-    I: UnsynInput,
-    V: Visitor<I> + ?Sized,
-{
-    let _ = visitor;
-    let _ = outer_doc;
-}
-
 /// Call this function in [`visit_use_tree`](Analyzer::visit_use_tree) to recurse into child nodes.
 #[inline]
 pub fn visit_use_tree<V, I>(visitor: &mut V, use_tree: &mut UseTree<I>)
@@ -646,16 +637,6 @@ where
             }
         }
     }
-}
-
-/// Call this function in [`visit_use_tree`](Analyzer::visit_use_tree) to recurse into child nodes.
-#[inline]
-pub fn visit_token_ident<V, I>(#[allow(unused)] visitor: &mut V, ident: &mut Ident<I>)
-where
-    I: UnsynInput,
-    V: Visitor<I> + ?Sized,
-{
-    let _ = ident;
 }
 
 /// Call this function in [`visit_stmt_whitespace`](Analyzer::visit_stmt_whitespace) to recurse into child nodes.
