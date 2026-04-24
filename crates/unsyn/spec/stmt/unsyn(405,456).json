@@ -1,0 +1,101 @@
+{
+  "Lexer": {
+    "keyword": [
+      {
+        "offset": 0,
+        "segment": "lexer",
+        "_marker": null
+      },
+      {
+        "offset": 5,
+        "segment": " ",
+        "_marker": null
+      }
+    ],
+    "ident": {
+      "offset": 6,
+      "segment": "RAW_IDENTIFIER",
+      "_marker": null
+    },
+    "arrow_right": [
+      {
+        "offset": 20,
+        "segment": " ",
+        "_marker": null
+      },
+      {
+        "offset": 21,
+        "segment": "->",
+        "_marker": null
+      },
+      {
+        "offset": 23,
+        "segment": " ",
+        "_marker": null
+      }
+    ],
+    "expr": {
+      "first": {
+        "first": {
+          "WithoutSuffix": {
+            "Str": {
+              "delimiter_start": {
+                "offset": 24,
+                "segment": "'",
+                "_marker": null
+              },
+              "content": [
+                {
+                  "CharWithException": {
+                    "offset": 25,
+                    "segment": "r#",
+                    "_marker": null
+                  }
+                }
+              ],
+              "delimiter_end": {
+                "offset": 27,
+                "segment": "'",
+                "_marker": null
+              }
+            }
+          }
+        },
+        "rest": [
+          [
+            {
+              "offset": 28,
+              "segment": " ",
+              "_marker": null
+            },
+            {
+              "WithoutSuffix": {
+                "Path": {
+                  "leading_sep": null,
+                  "first": {
+                    "Ident": {
+                      "offset": 29,
+                      "segment": "IDENTIFIER_OR_KEYWORD",
+                      "_marker": null
+                    }
+                  },
+                  "rest": []
+                }
+              }
+            }
+          ]
+        ]
+      },
+      "rest": []
+    },
+    "semi": [
+      null,
+      {
+        "offset": 50,
+        "segment": ";",
+        "_marker": null
+      },
+      null
+    ]
+  }
+}

@@ -1,0 +1,247 @@
+{
+  "Syntax": {
+    "keyword": [
+      {
+        "offset": 0,
+        "segment": "syntax",
+        "_marker": null
+      },
+      {
+        "offset": 6,
+        "segment": " ",
+        "_marker": null
+      }
+    ],
+    "ident": {
+      "offset": 7,
+      "segment": "Range",
+      "_marker": null
+    },
+    "arrow_right": [
+      {
+        "offset": 12,
+        "segment": " ",
+        "_marker": null
+      },
+      {
+        "offset": 13,
+        "segment": "->",
+        "_marker": null
+      },
+      {
+        "offset": 15,
+        "segment": "\n      ",
+        "_marker": null
+      }
+    ],
+    "expr": {
+      "first": {
+        "first": {
+          "WithoutSuffix": {
+            "Path": {
+              "leading_sep": null,
+              "first": {
+                "Ident": {
+                  "offset": 22,
+                  "segment": "UNICODE_LITERAL",
+                  "_marker": null
+                }
+              },
+              "rest": []
+            }
+          }
+        },
+        "rest": [
+          [
+            {
+              "offset": 37,
+              "segment": " ",
+              "_marker": null
+            },
+            {
+              "WithoutSuffix": {
+                "Str": {
+                  "delimiter_start": {
+                    "offset": 38,
+                    "segment": "'",
+                    "_marker": null
+                  },
+                  "content": [
+                    {
+                      "CharWithException": {
+                        "offset": 39,
+                        "segment": "-",
+                        "_marker": null
+                      }
+                    }
+                  ],
+                  "delimiter_end": {
+                    "offset": 40,
+                    "segment": "'",
+                    "_marker": null
+                  }
+                }
+              }
+            }
+          ],
+          [
+            {
+              "offset": 41,
+              "segment": " ",
+              "_marker": null
+            },
+            {
+              "WithoutSuffix": {
+                "Path": {
+                  "leading_sep": null,
+                  "first": {
+                    "Ident": {
+                      "offset": 42,
+                      "segment": "UNICODE_LITERAL",
+                      "_marker": null
+                    }
+                  },
+                  "rest": []
+                }
+              }
+            }
+          ]
+        ]
+      },
+      "rest": [
+        [
+          [
+            {
+              "offset": 57,
+              "segment": "\n    ",
+              "_marker": null
+            },
+            {
+              "offset": 62,
+              "segment": "|",
+              "_marker": null
+            },
+            {
+              "offset": 63,
+              "segment": " ",
+              "_marker": null
+            }
+          ],
+          {
+            "first": {
+              "WithSuffix": {
+                "Concat": {
+                  "target": {
+                    "Path": {
+                      "leading_sep": null,
+                      "first": {
+                        "Ident": {
+                          "offset": 64,
+                          "segment": "STRING_LITERAL",
+                          "_marker": null
+                        }
+                      },
+                      "rest": []
+                    }
+                  },
+                  "s": {
+                    "offset": 78,
+                    "segment": " ",
+                    "_marker": null
+                  },
+                  "keyword": [
+                    {
+                      "offset": 79,
+                      "segment": "concat",
+                      "_marker": null
+                    },
+                    {
+                      "offset": 85,
+                      "segment": " ",
+                      "_marker": null
+                    }
+                  ],
+                  "suffix": {
+                    "WithSuffix": {
+                      "Concat": {
+                        "target": {
+                          "Str": {
+                            "delimiter_start": {
+                              "offset": 86,
+                              "segment": "'",
+                              "_marker": null
+                            },
+                            "content": [
+                              {
+                                "CharWithException": {
+                                  "offset": 87,
+                                  "segment": "-",
+                                  "_marker": null
+                                }
+                              }
+                            ],
+                            "delimiter_end": {
+                              "offset": 88,
+                              "segment": "'",
+                              "_marker": null
+                            }
+                          }
+                        },
+                        "s": {
+                          "offset": 89,
+                          "segment": " ",
+                          "_marker": null
+                        },
+                        "keyword": [
+                          {
+                            "offset": 90,
+                            "segment": "concat",
+                            "_marker": null
+                          },
+                          {
+                            "offset": 96,
+                            "segment": " ",
+                            "_marker": null
+                          }
+                        ],
+                        "suffix": {
+                          "WithoutSuffix": {
+                            "Path": {
+                              "leading_sep": null,
+                              "first": {
+                                "Ident": {
+                                  "offset": 97,
+                                  "segment": "STRING_LITERAL",
+                                  "_marker": null
+                                }
+                              },
+                              "rest": []
+                            }
+                          }
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            },
+            "rest": []
+          }
+        ]
+      ]
+    },
+    "semi": [
+      {
+        "offset": 111,
+        "segment": "\n    ",
+        "_marker": null
+      },
+      {
+        "offset": 116,
+        "segment": ";",
+        "_marker": null
+      },
+      null
+    ]
+  }
+}

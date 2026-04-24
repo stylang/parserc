@@ -1,0 +1,102 @@
+{
+  "Lexer": {
+    "keyword": [
+      {
+        "offset": 0,
+        "segment": "lexer",
+        "_marker": null
+      },
+      {
+        "offset": 5,
+        "segment": " ",
+        "_marker": null
+      }
+    ],
+    "ident": {
+      "offset": 6,
+      "segment": "NON_KEYWORD_IDENTIFIER",
+      "_marker": null
+    },
+    "arrow_right": [
+      {
+        "offset": 28,
+        "segment": " ",
+        "_marker": null
+      },
+      {
+        "offset": 29,
+        "segment": "->",
+        "_marker": null
+      },
+      {
+        "offset": 31,
+        "segment": " ",
+        "_marker": null
+      }
+    ],
+    "expr": {
+      "first": {
+        "first": {
+          "WithSuffix": {
+            "Except": {
+              "target": {
+                "Path": {
+                  "leading_sep": null,
+                  "first": {
+                    "Ident": {
+                      "offset": 32,
+                      "segment": "IDENTIFIER_OR_KEYWORD",
+                      "_marker": null
+                    }
+                  },
+                  "rest": []
+                }
+              },
+              "s": {
+                "offset": 53,
+                "segment": " ",
+                "_marker": null
+              },
+              "keyword": [
+                {
+                  "offset": 54,
+                  "segment": "except",
+                  "_marker": null
+                },
+                {
+                  "offset": 60,
+                  "segment": " ",
+                  "_marker": null
+                }
+              ],
+              "tokens": {
+                "Path": {
+                  "leading_sep": null,
+                  "first": {
+                    "Ident": {
+                      "offset": 61,
+                      "segment": "KEYWORDS",
+                      "_marker": null
+                    }
+                  },
+                  "rest": []
+                }
+              }
+            }
+          }
+        },
+        "rest": []
+      },
+      "rest": []
+    },
+    "semi": [
+      null,
+      {
+        "offset": 69,
+        "segment": ";",
+        "_marker": null
+      },
+      null
+    ]
+  }
+}

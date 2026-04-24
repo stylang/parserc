@@ -1,0 +1,145 @@
+{
+  "Lexer": {
+    "keyword": [
+      {
+        "offset": 0,
+        "segment": "lexer",
+        "_marker": null
+      },
+      {
+        "offset": 5,
+        "segment": " ",
+        "_marker": null
+      }
+    ],
+    "ident": {
+      "offset": 6,
+      "segment": "UNICODE_LITERAL",
+      "_marker": null
+    },
+    "arrow_right": [
+      {
+        "offset": 21,
+        "segment": " ",
+        "_marker": null
+      },
+      {
+        "offset": 22,
+        "segment": "->",
+        "_marker": null
+      },
+      {
+        "offset": 24,
+        "segment": " ",
+        "_marker": null
+      }
+    ],
+    "expr": {
+      "first": {
+        "first": {
+          "WithSuffix": {
+            "Concat": {
+              "target": {
+                "Str": {
+                  "delimiter_start": {
+                    "offset": 25,
+                    "segment": "'",
+                    "_marker": null
+                  },
+                  "content": [
+                    {
+                      "CharWithException": {
+                        "offset": 26,
+                        "segment": "U+",
+                        "_marker": null
+                      }
+                    }
+                  ],
+                  "delimiter_end": {
+                    "offset": 28,
+                    "segment": "'",
+                    "_marker": null
+                  }
+                }
+              },
+              "s": {
+                "offset": 29,
+                "segment": " ",
+                "_marker": null
+              },
+              "keyword": [
+                {
+                  "offset": 30,
+                  "segment": "concat",
+                  "_marker": null
+                },
+                {
+                  "offset": 36,
+                  "segment": " ",
+                  "_marker": null
+                }
+              ],
+              "suffix": {
+                "WithSuffix": {
+                  "Repeat": {
+                    "target": {
+                      "Path": {
+                        "leading_sep": null,
+                        "first": {
+                          "Ident": {
+                            "offset": 37,
+                            "segment": "HEX_DIGIT",
+                            "_marker": null
+                          }
+                        },
+                        "rest": []
+                      }
+                    },
+                    "suffix": {
+                      "start": [
+                        null,
+                        {
+                          "offset": 46,
+                          "segment": "{",
+                          "_marker": null
+                        },
+                        null
+                      ],
+                      "end": [
+                        null,
+                        {
+                          "offset": 48,
+                          "segment": "}",
+                          "_marker": null
+                        },
+                        null
+                      ],
+                      "body": {
+                        "Count": {
+                          "offset": 47,
+                          "segment": "4",
+                          "_marker": null
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          }
+        },
+        "rest": []
+      },
+      "rest": []
+    },
+    "semi": [
+      null,
+      {
+        "offset": 49,
+        "segment": ";",
+        "_marker": null
+      },
+      null
+    ]
+  }
+}

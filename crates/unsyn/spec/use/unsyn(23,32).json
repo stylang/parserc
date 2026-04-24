@@ -1,0 +1,60 @@
+[
+  {
+    "keyword": [
+      {
+        "offset": 0,
+        "segment": "use",
+        "_marker": null
+      },
+      {
+        "offset": 3,
+        "segment": " ",
+        "_marker": null
+      }
+    ],
+    "use_tree": {
+      "Star": {
+        "prefix": [
+          {
+            "leading_sep": null,
+            "first": {
+              "Ident": {
+                "offset": 4,
+                "segment": "a",
+                "_marker": null
+              }
+            },
+            "rest": []
+          },
+          [
+            null,
+            {
+              "offset": 5,
+              "segment": "::",
+              "_marker": null
+            },
+            null
+          ]
+        ],
+        "star": [
+          null,
+          {
+            "offset": 7,
+            "segment": "*",
+            "_marker": null
+          },
+          null
+        ]
+      }
+    }
+  },
+  [
+    null,
+    {
+      "offset": 8,
+      "segment": ";",
+      "_marker": null
+    },
+    null
+  ]
+]

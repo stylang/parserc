@@ -1,0 +1,318 @@
+{
+  "Lexer": {
+    "keyword": [
+      {
+        "offset": 0,
+        "segment": "lexer",
+        "_marker": null
+      },
+      {
+        "offset": 5,
+        "segment": " ",
+        "_marker": null
+      }
+    ],
+    "ident": {
+      "offset": 6,
+      "segment": "KEYWORDS",
+      "_marker": null
+    },
+    "arrow_right": [
+      {
+        "offset": 14,
+        "segment": " ",
+        "_marker": null
+      },
+      {
+        "offset": 15,
+        "segment": "->",
+        "_marker": null
+      },
+      {
+        "offset": 17,
+        "segment": "\n      ",
+        "_marker": null
+      }
+    ],
+    "expr": {
+      "first": {
+        "first": {
+          "WithoutSuffix": {
+            "Str": {
+              "delimiter_start": {
+                "offset": 24,
+                "segment": "'",
+                "_marker": null
+              },
+              "content": [
+                {
+                  "CharWithException": {
+                    "offset": 25,
+                    "segment": "lexer",
+                    "_marker": null
+                  }
+                }
+              ],
+              "delimiter_end": {
+                "offset": 30,
+                "segment": "'",
+                "_marker": null
+              }
+            }
+          }
+        },
+        "rest": []
+      },
+      "rest": [
+        [
+          [
+            {
+              "offset": 31,
+              "segment": "\n    ",
+              "_marker": null
+            },
+            {
+              "offset": 36,
+              "segment": "|",
+              "_marker": null
+            },
+            {
+              "offset": 37,
+              "segment": " ",
+              "_marker": null
+            }
+          ],
+          {
+            "first": {
+              "WithoutSuffix": {
+                "Str": {
+                  "delimiter_start": {
+                    "offset": 38,
+                    "segment": "'",
+                    "_marker": null
+                  },
+                  "content": [
+                    {
+                      "CharWithException": {
+                        "offset": 39,
+                        "segment": "syntax",
+                        "_marker": null
+                      }
+                    }
+                  ],
+                  "delimiter_end": {
+                    "offset": 45,
+                    "segment": "'",
+                    "_marker": null
+                  }
+                }
+              }
+            },
+            "rest": []
+          }
+        ],
+        [
+          [
+            {
+              "offset": 46,
+              "segment": "\n    ",
+              "_marker": null
+            },
+            {
+              "offset": 51,
+              "segment": "|",
+              "_marker": null
+            },
+            {
+              "offset": 52,
+              "segment": " ",
+              "_marker": null
+            }
+          ],
+          {
+            "first": {
+              "WithoutSuffix": {
+                "Str": {
+                  "delimiter_start": {
+                    "offset": 53,
+                    "segment": "'",
+                    "_marker": null
+                  },
+                  "content": [
+                    {
+                      "CharWithException": {
+                        "offset": 54,
+                        "segment": "followed",
+                        "_marker": null
+                      }
+                    }
+                  ],
+                  "delimiter_end": {
+                    "offset": 62,
+                    "segment": "'",
+                    "_marker": null
+                  }
+                }
+              }
+            },
+            "rest": []
+          }
+        ],
+        [
+          [
+            {
+              "offset": 63,
+              "segment": "\n    ",
+              "_marker": null
+            },
+            {
+              "offset": 68,
+              "segment": "|",
+              "_marker": null
+            },
+            {
+              "offset": 69,
+              "segment": " ",
+              "_marker": null
+            }
+          ],
+          {
+            "first": {
+              "WithoutSuffix": {
+                "Str": {
+                  "delimiter_start": {
+                    "offset": 70,
+                    "segment": "'",
+                    "_marker": null
+                  },
+                  "content": [
+                    {
+                      "CharWithException": {
+                        "offset": 71,
+                        "segment": "except",
+                        "_marker": null
+                      }
+                    }
+                  ],
+                  "delimiter_end": {
+                    "offset": 77,
+                    "segment": "'",
+                    "_marker": null
+                  }
+                }
+              }
+            },
+            "rest": []
+          }
+        ],
+        [
+          [
+            {
+              "offset": 78,
+              "segment": "\n    ",
+              "_marker": null
+            },
+            {
+              "offset": 83,
+              "segment": "|",
+              "_marker": null
+            },
+            {
+              "offset": 84,
+              "segment": " ",
+              "_marker": null
+            }
+          ],
+          {
+            "first": {
+              "WithoutSuffix": {
+                "Str": {
+                  "delimiter_start": {
+                    "offset": 85,
+                    "segment": "'",
+                    "_marker": null
+                  },
+                  "content": [
+                    {
+                      "CharWithException": {
+                        "offset": 86,
+                        "segment": "super",
+                        "_marker": null
+                      }
+                    }
+                  ],
+                  "delimiter_end": {
+                    "offset": 91,
+                    "segment": "'",
+                    "_marker": null
+                  }
+                }
+              }
+            },
+            "rest": []
+          }
+        ],
+        [
+          [
+            {
+              "offset": 92,
+              "segment": "\n    ",
+              "_marker": null
+            },
+            {
+              "offset": 97,
+              "segment": "|",
+              "_marker": null
+            },
+            {
+              "offset": 98,
+              "segment": " ",
+              "_marker": null
+            }
+          ],
+          {
+            "first": {
+              "WithoutSuffix": {
+                "Str": {
+                  "delimiter_start": {
+                    "offset": 99,
+                    "segment": "'",
+                    "_marker": null
+                  },
+                  "content": [
+                    {
+                      "CharWithException": {
+                        "offset": 100,
+                        "segment": "crate",
+                        "_marker": null
+                      }
+                    }
+                  ],
+                  "delimiter_end": {
+                    "offset": 105,
+                    "segment": "'",
+                    "_marker": null
+                  }
+                }
+              }
+            },
+            "rest": []
+          }
+        ]
+      ]
+    },
+    "semi": [
+      {
+        "offset": 106,
+        "segment": "\n    ",
+        "_marker": null
+      },
+      {
+        "offset": 111,
+        "segment": ";",
+        "_marker": null
+      },
+      null
+    ]
+  }
+}

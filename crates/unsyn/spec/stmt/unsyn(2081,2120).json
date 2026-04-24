@@ -1,0 +1,101 @@
+{
+  "Syntax": {
+    "keyword": [
+      {
+        "offset": 0,
+        "segment": "syntax",
+        "_marker": null
+      },
+      {
+        "offset": 6,
+        "segment": " ",
+        "_marker": null
+      }
+    ],
+    "ident": {
+      "offset": 7,
+      "segment": "UseDeclaration",
+      "_marker": null
+    },
+    "arrow_right": [
+      {
+        "offset": 21,
+        "segment": " ",
+        "_marker": null
+      },
+      {
+        "offset": 22,
+        "segment": "->",
+        "_marker": null
+      },
+      {
+        "offset": 24,
+        "segment": " ",
+        "_marker": null
+      }
+    ],
+    "expr": {
+      "first": {
+        "first": {
+          "WithoutSuffix": {
+            "Str": {
+              "delimiter_start": {
+                "offset": 25,
+                "segment": "'",
+                "_marker": null
+              },
+              "content": [
+                {
+                  "CharWithException": {
+                    "offset": 26,
+                    "segment": "use",
+                    "_marker": null
+                  }
+                }
+              ],
+              "delimiter_end": {
+                "offset": 29,
+                "segment": "'",
+                "_marker": null
+              }
+            }
+          }
+        },
+        "rest": [
+          [
+            {
+              "offset": 30,
+              "segment": " ",
+              "_marker": null
+            },
+            {
+              "WithoutSuffix": {
+                "Path": {
+                  "leading_sep": null,
+                  "first": {
+                    "Ident": {
+                      "offset": 31,
+                      "segment": "UseTree",
+                      "_marker": null
+                    }
+                  },
+                  "rest": []
+                }
+              }
+            }
+          ]
+        ]
+      },
+      "rest": []
+    },
+    "semi": [
+      null,
+      {
+        "offset": 38,
+        "segment": ";",
+        "_marker": null
+      },
+      null
+    ]
+  }
+}

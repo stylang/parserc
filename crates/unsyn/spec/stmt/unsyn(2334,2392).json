@@ -1,0 +1,106 @@
+{
+  "Syntax": {
+    "keyword": [
+      {
+        "offset": 0,
+        "segment": "syntax",
+        "_marker": null
+      },
+      {
+        "offset": 6,
+        "segment": " ",
+        "_marker": null
+      }
+    ],
+    "ident": {
+      "offset": 7,
+      "segment": "ExprNoTopAlt",
+      "_marker": null
+    },
+    "arrow_right": [
+      {
+        "offset": 19,
+        "segment": " ",
+        "_marker": null
+      },
+      {
+        "offset": 20,
+        "segment": "->",
+        "_marker": null
+      },
+      {
+        "offset": 22,
+        "segment": " ",
+        "_marker": null
+      }
+    ],
+    "expr": {
+      "first": {
+        "first": {
+          "WithoutSuffix": {
+            "Path": {
+              "leading_sep": null,
+              "first": {
+                "Ident": {
+                  "offset": 23,
+                  "segment": "ExprWithSuffix",
+                  "_marker": null
+                }
+              },
+              "rest": []
+            }
+          }
+        },
+        "rest": []
+      },
+      "rest": [
+        [
+          [
+            {
+              "offset": 37,
+              "segment": " ",
+              "_marker": null
+            },
+            {
+              "offset": 38,
+              "segment": "|",
+              "_marker": null
+            },
+            {
+              "offset": 39,
+              "segment": " ",
+              "_marker": null
+            }
+          ],
+          {
+            "first": {
+              "WithoutSuffix": {
+                "Path": {
+                  "leading_sep": null,
+                  "first": {
+                    "Ident": {
+                      "offset": 40,
+                      "segment": "ExprWithoutSuffix",
+                      "_marker": null
+                    }
+                  },
+                  "rest": []
+                }
+              }
+            },
+            "rest": []
+          }
+        ]
+      ]
+    },
+    "semi": [
+      null,
+      {
+        "offset": 57,
+        "segment": ";",
+        "_marker": null
+      },
+      null
+    ]
+  }
+}

@@ -1,0 +1,299 @@
+{
+  "Lexer": {
+    "keyword": [
+      {
+        "offset": 0,
+        "segment": "lexer",
+        "_marker": null
+      },
+      {
+        "offset": 5,
+        "segment": " ",
+        "_marker": null
+      }
+    ],
+    "ident": {
+      "offset": 6,
+      "segment": "INNER_BLOCK_DOC",
+      "_marker": null
+    },
+    "arrow_right": [
+      {
+        "offset": 21,
+        "segment": " ",
+        "_marker": null
+      },
+      {
+        "offset": 22,
+        "segment": "->",
+        "_marker": null
+      },
+      {
+        "offset": 24,
+        "segment": "\n    ",
+        "_marker": null
+      }
+    ],
+    "expr": {
+      "first": {
+        "first": {
+          "WithoutSuffix": {
+            "Str": {
+              "delimiter_start": {
+                "offset": 29,
+                "segment": "'",
+                "_marker": null
+              },
+              "content": [
+                {
+                  "CharWithException": {
+                    "offset": 30,
+                    "segment": "/*!",
+                    "_marker": null
+                  }
+                }
+              ],
+              "delimiter_end": {
+                "offset": 33,
+                "segment": "'",
+                "_marker": null
+              }
+            }
+          }
+        },
+        "rest": [
+          [
+            {
+              "offset": 34,
+              "segment": " ",
+              "_marker": null
+            },
+            {
+              "WithSuffix": {
+                "Star": [
+                  {
+                    "Paren": {
+                      "start": [
+                        null,
+                        {
+                          "offset": 35,
+                          "segment": "(",
+                          "_marker": null
+                        },
+                        {
+                          "offset": 36,
+                          "segment": " ",
+                          "_marker": null
+                        }
+                      ],
+                      "end": [
+                        null,
+                        {
+                          "offset": 71,
+                          "segment": ")",
+                          "_marker": null
+                        },
+                        null
+                      ],
+                      "body": {
+                        "first": {
+                          "first": {
+                            "WithoutSuffix": {
+                              "Path": {
+                                "leading_sep": null,
+                                "first": {
+                                  "Ident": {
+                                    "offset": 37,
+                                    "segment": "BLOCK_COMMENT_OR_DOC",
+                                    "_marker": null
+                                  }
+                                },
+                                "rest": []
+                              }
+                            }
+                          },
+                          "rest": []
+                        },
+                        "rest": [
+                          [
+                            [
+                              {
+                                "offset": 57,
+                                "segment": " ",
+                                "_marker": null
+                              },
+                              {
+                                "offset": 58,
+                                "segment": "|",
+                                "_marker": null
+                              },
+                              {
+                                "offset": 59,
+                                "segment": " ",
+                                "_marker": null
+                              }
+                            ],
+                            {
+                              "first": {
+                                "WithoutSuffix": {
+                                  "Tilde": [
+                                    [
+                                      null,
+                                      {
+                                        "offset": 60,
+                                        "segment": "~",
+                                        "_marker": null
+                                      },
+                                      null
+                                    ],
+                                    {
+                                      "Set": {
+                                        "start": [
+                                          null,
+                                          {
+                                            "offset": 61,
+                                            "segment": "[",
+                                            "_marker": null
+                                          },
+                                          null
+                                        ],
+                                        "end": [
+                                          null,
+                                          {
+                                            "offset": 69,
+                                            "segment": "]",
+                                            "_marker": null
+                                          },
+                                          {
+                                            "offset": 70,
+                                            "segment": " ",
+                                            "_marker": null
+                                          }
+                                        ],
+                                        "body": {
+                                          "pairs": [
+                                            [
+                                              {
+                                                "Str": {
+                                                  "delimiter_start": {
+                                                    "offset": 62,
+                                                    "segment": "'",
+                                                    "_marker": null
+                                                  },
+                                                  "content": [
+                                                    {
+                                                      "CharWithException": {
+                                                        "offset": 63,
+                                                        "segment": "*/",
+                                                        "_marker": null
+                                                      }
+                                                    }
+                                                  ],
+                                                  "delimiter_end": {
+                                                    "offset": 65,
+                                                    "segment": "'",
+                                                    "_marker": null
+                                                  }
+                                                }
+                                              },
+                                              [
+                                                null,
+                                                {
+                                                  "offset": 66,
+                                                  "segment": ",",
+                                                  "_marker": null
+                                                },
+                                                null
+                                              ]
+                                            ]
+                                          ],
+                                          "tail": {
+                                            "Path": {
+                                              "leading_sep": null,
+                                              "first": {
+                                                "Ident": {
+                                                  "offset": 67,
+                                                  "segment": "CR",
+                                                  "_marker": null
+                                                }
+                                              },
+                                              "rest": []
+                                            }
+                                          }
+                                        }
+                                      }
+                                    }
+                                  ]
+                                }
+                              },
+                              "rest": []
+                            }
+                          ]
+                        ]
+                      }
+                    }
+                  },
+                  [
+                    null,
+                    {
+                      "offset": 72,
+                      "segment": "*",
+                      "_marker": null
+                    },
+                    {
+                      "offset": 73,
+                      "segment": " ",
+                      "_marker": null
+                    }
+                  ]
+                ]
+              }
+            }
+          ],
+          [
+            null,
+            {
+              "WithoutSuffix": {
+                "Str": {
+                  "delimiter_start": {
+                    "offset": 74,
+                    "segment": "'",
+                    "_marker": null
+                  },
+                  "content": [
+                    {
+                      "CharWithException": {
+                        "offset": 75,
+                        "segment": "*/",
+                        "_marker": null
+                      }
+                    }
+                  ],
+                  "delimiter_end": {
+                    "offset": 77,
+                    "segment": "'",
+                    "_marker": null
+                  }
+                }
+              }
+            }
+          ]
+        ]
+      },
+      "rest": []
+    },
+    "semi": [
+      {
+        "offset": 78,
+        "segment": "\n    ",
+        "_marker": null
+      },
+      {
+        "offset": 83,
+        "segment": ";",
+        "_marker": null
+      },
+      null
+    ]
+  }
+}

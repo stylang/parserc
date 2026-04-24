@@ -1,0 +1,373 @@
+{
+  "Whitespace": {
+    "keyword": [
+      {
+        "offset": 0,
+        "segment": "whitespace",
+        "_marker": null
+      },
+      {
+        "offset": 10,
+        "segment": " ",
+        "_marker": null
+      }
+    ],
+    "ident": {
+      "offset": 11,
+      "segment": "WHITESPACE",
+      "_marker": null
+    },
+    "arrow_right": [
+      {
+        "offset": 21,
+        "segment": " ",
+        "_marker": null
+      },
+      {
+        "offset": 22,
+        "segment": "->",
+        "_marker": null
+      },
+      {
+        "offset": 24,
+        "segment": "\n      ",
+        "_marker": null
+      }
+    ],
+    "expr": {
+      "first": {
+        "first": {
+          "WithoutSuffix": {
+            "Unicode": {
+              "offset": 31,
+              "segment": "U+0009",
+              "_marker": null
+            }
+          }
+        },
+        "rest": []
+      },
+      "rest": [
+        [
+          [
+            {
+              "offset": 37,
+              "segment": "\n    ",
+              "_marker": null
+            },
+            {
+              "offset": 42,
+              "segment": "|",
+              "_marker": null
+            },
+            {
+              "offset": 43,
+              "segment": " ",
+              "_marker": null
+            }
+          ],
+          {
+            "first": {
+              "WithoutSuffix": {
+                "Unicode": {
+                  "offset": 44,
+                  "segment": "U+000A",
+                  "_marker": null
+                }
+              }
+            },
+            "rest": []
+          }
+        ],
+        [
+          [
+            {
+              "offset": 50,
+              "segment": "\n    ",
+              "_marker": null
+            },
+            {
+              "offset": 55,
+              "segment": "|",
+              "_marker": null
+            },
+            {
+              "offset": 56,
+              "segment": " ",
+              "_marker": null
+            }
+          ],
+          {
+            "first": {
+              "WithoutSuffix": {
+                "Unicode": {
+                  "offset": 57,
+                  "segment": "U+000B",
+                  "_marker": null
+                }
+              }
+            },
+            "rest": []
+          }
+        ],
+        [
+          [
+            {
+              "offset": 63,
+              "segment": "\n    ",
+              "_marker": null
+            },
+            {
+              "offset": 68,
+              "segment": "|",
+              "_marker": null
+            },
+            {
+              "offset": 69,
+              "segment": " ",
+              "_marker": null
+            }
+          ],
+          {
+            "first": {
+              "WithoutSuffix": {
+                "Unicode": {
+                  "offset": 70,
+                  "segment": "U+000C",
+                  "_marker": null
+                }
+              }
+            },
+            "rest": []
+          }
+        ],
+        [
+          [
+            {
+              "offset": 76,
+              "segment": "\n    ",
+              "_marker": null
+            },
+            {
+              "offset": 81,
+              "segment": "|",
+              "_marker": null
+            },
+            {
+              "offset": 82,
+              "segment": " ",
+              "_marker": null
+            }
+          ],
+          {
+            "first": {
+              "WithoutSuffix": {
+                "Unicode": {
+                  "offset": 83,
+                  "segment": "U+000D",
+                  "_marker": null
+                }
+              }
+            },
+            "rest": []
+          }
+        ],
+        [
+          [
+            {
+              "offset": 89,
+              "segment": "\n    ",
+              "_marker": null
+            },
+            {
+              "offset": 94,
+              "segment": "|",
+              "_marker": null
+            },
+            {
+              "offset": 95,
+              "segment": " ",
+              "_marker": null
+            }
+          ],
+          {
+            "first": {
+              "WithoutSuffix": {
+                "Unicode": {
+                  "offset": 96,
+                  "segment": "U+0020",
+                  "_marker": null
+                }
+              }
+            },
+            "rest": []
+          }
+        ],
+        [
+          [
+            {
+              "offset": 102,
+              "segment": "\n    ",
+              "_marker": null
+            },
+            {
+              "offset": 107,
+              "segment": "|",
+              "_marker": null
+            },
+            {
+              "offset": 108,
+              "segment": " ",
+              "_marker": null
+            }
+          ],
+          {
+            "first": {
+              "WithoutSuffix": {
+                "Unicode": {
+                  "offset": 109,
+                  "segment": "U+0085",
+                  "_marker": null
+                }
+              }
+            },
+            "rest": []
+          }
+        ],
+        [
+          [
+            {
+              "offset": 115,
+              "segment": "\n    ",
+              "_marker": null
+            },
+            {
+              "offset": 120,
+              "segment": "|",
+              "_marker": null
+            },
+            {
+              "offset": 121,
+              "segment": " ",
+              "_marker": null
+            }
+          ],
+          {
+            "first": {
+              "WithoutSuffix": {
+                "Unicode": {
+                  "offset": 122,
+                  "segment": "U+200E",
+                  "_marker": null
+                }
+              }
+            },
+            "rest": []
+          }
+        ],
+        [
+          [
+            {
+              "offset": 128,
+              "segment": "\n    ",
+              "_marker": null
+            },
+            {
+              "offset": 133,
+              "segment": "|",
+              "_marker": null
+            },
+            {
+              "offset": 134,
+              "segment": " ",
+              "_marker": null
+            }
+          ],
+          {
+            "first": {
+              "WithoutSuffix": {
+                "Unicode": {
+                  "offset": 135,
+                  "segment": "U+200F",
+                  "_marker": null
+                }
+              }
+            },
+            "rest": []
+          }
+        ],
+        [
+          [
+            {
+              "offset": 141,
+              "segment": "\n    ",
+              "_marker": null
+            },
+            {
+              "offset": 146,
+              "segment": "|",
+              "_marker": null
+            },
+            {
+              "offset": 147,
+              "segment": " ",
+              "_marker": null
+            }
+          ],
+          {
+            "first": {
+              "WithoutSuffix": {
+                "Unicode": {
+                  "offset": 148,
+                  "segment": "U+2028",
+                  "_marker": null
+                }
+              }
+            },
+            "rest": []
+          }
+        ],
+        [
+          [
+            {
+              "offset": 154,
+              "segment": "\n    ",
+              "_marker": null
+            },
+            {
+              "offset": 159,
+              "segment": "|",
+              "_marker": null
+            },
+            {
+              "offset": 160,
+              "segment": " ",
+              "_marker": null
+            }
+          ],
+          {
+            "first": {
+              "WithoutSuffix": {
+                "Unicode": {
+                  "offset": 161,
+                  "segment": "U+2029",
+                  "_marker": null
+                }
+              }
+            },
+            "rest": []
+          }
+        ]
+      ]
+    },
+    "semi": [
+      null,
+      {
+        "offset": 167,
+        "segment": ";",
+        "_marker": null
+      },
+      null
+    ]
+  }
+}

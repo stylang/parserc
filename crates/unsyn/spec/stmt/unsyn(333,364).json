@@ -1,0 +1,82 @@
+{
+  "Lexer": {
+    "keyword": [
+      {
+        "offset": 0,
+        "segment": "lexer",
+        "_marker": null
+      },
+      {
+        "offset": 5,
+        "segment": " ",
+        "_marker": null
+      }
+    ],
+    "ident": {
+      "offset": 6,
+      "segment": "XID_Start",
+      "_marker": null
+    },
+    "arrow_right": [
+      {
+        "offset": 15,
+        "segment": " ",
+        "_marker": null
+      },
+      {
+        "offset": 16,
+        "segment": "->",
+        "_marker": null
+      },
+      {
+        "offset": 18,
+        "segment": " ",
+        "_marker": null
+      }
+    ],
+    "expr": {
+      "first": {
+        "first": {
+          "WithoutSuffix": {
+            "Call": {
+              "start": [
+                null,
+                {
+                  "offset": 19,
+                  "segment": "<",
+                  "_marker": null
+                },
+                null
+              ],
+              "end": [
+                null,
+                {
+                  "offset": 29,
+                  "segment": ">",
+                  "_marker": null
+                },
+                null
+              ],
+              "body": {
+                "offset": 20,
+                "segment": "XID_Start",
+                "_marker": null
+              }
+            }
+          }
+        },
+        "rest": []
+      },
+      "rest": []
+    },
+    "semi": [
+      null,
+      {
+        "offset": 30,
+        "segment": ";",
+        "_marker": null
+      },
+      null
+    ]
+  }
+}

@@ -1,0 +1,177 @@
+{
+  "Lexer": {
+    "keyword": [
+      {
+        "offset": 0,
+        "segment": "lexer",
+        "_marker": null
+      },
+      {
+        "offset": 5,
+        "segment": " ",
+        "_marker": null
+      }
+    ],
+    "ident": {
+      "offset": 6,
+      "segment": "INNER_LINE_DOC",
+      "_marker": null
+    },
+    "arrow_right": [
+      {
+        "offset": 20,
+        "segment": " ",
+        "_marker": null
+      },
+      {
+        "offset": 21,
+        "segment": "->",
+        "_marker": null
+      },
+      {
+        "offset": 23,
+        "segment": " ",
+        "_marker": null
+      }
+    ],
+    "expr": {
+      "first": {
+        "first": {
+          "WithoutSuffix": {
+            "Str": {
+              "delimiter_start": {
+                "offset": 24,
+                "segment": "'",
+                "_marker": null
+              },
+              "content": [
+                {
+                  "CharWithException": {
+                    "offset": 25,
+                    "segment": "//!",
+                    "_marker": null
+                  }
+                }
+              ],
+              "delimiter_end": {
+                "offset": 28,
+                "segment": "'",
+                "_marker": null
+              }
+            }
+          }
+        },
+        "rest": [
+          [
+            {
+              "offset": 29,
+              "segment": " ",
+              "_marker": null
+            },
+            {
+              "WithSuffix": {
+                "Star": [
+                  {
+                    "Tilde": [
+                      [
+                        null,
+                        {
+                          "offset": 30,
+                          "segment": "~",
+                          "_marker": null
+                        },
+                        null
+                      ],
+                      {
+                        "Set": {
+                          "start": [
+                            null,
+                            {
+                              "offset": 31,
+                              "segment": "[",
+                              "_marker": null
+                            },
+                            null
+                          ],
+                          "end": [
+                            null,
+                            {
+                              "offset": 37,
+                              "segment": "]",
+                              "_marker": null
+                            },
+                            null
+                          ],
+                          "body": {
+                            "pairs": [
+                              [
+                                {
+                                  "Path": {
+                                    "leading_sep": null,
+                                    "first": {
+                                      "Ident": {
+                                        "offset": 32,
+                                        "segment": "LR",
+                                        "_marker": null
+                                      }
+                                    },
+                                    "rest": []
+                                  }
+                                },
+                                [
+                                  null,
+                                  {
+                                    "offset": 34,
+                                    "segment": ",",
+                                    "_marker": null
+                                  },
+                                  null
+                                ]
+                              ]
+                            ],
+                            "tail": {
+                              "Path": {
+                                "leading_sep": null,
+                                "first": {
+                                  "Ident": {
+                                    "offset": 35,
+                                    "segment": "CR",
+                                    "_marker": null
+                                  }
+                                },
+                                "rest": []
+                              }
+                            }
+                          }
+                        }
+                      }
+                    ]
+                  },
+                  [
+                    null,
+                    {
+                      "offset": 38,
+                      "segment": "*",
+                      "_marker": null
+                    },
+                    null
+                  ]
+                ]
+              }
+            }
+          ]
+        ]
+      },
+      "rest": []
+    },
+    "semi": [
+      null,
+      {
+        "offset": 39,
+        "segment": ";",
+        "_marker": null
+      },
+      null
+    ]
+  }
+}

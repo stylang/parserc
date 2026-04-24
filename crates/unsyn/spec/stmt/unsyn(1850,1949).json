@@ -1,0 +1,147 @@
+{
+  "Lexer": {
+    "keyword": [
+      {
+        "offset": 0,
+        "segment": "lexer",
+        "_marker": null
+      },
+      {
+        "offset": 5,
+        "segment": " ",
+        "_marker": null
+      }
+    ],
+    "ident": {
+      "offset": 6,
+      "segment": "BLOCK_COMMENT_OR_DOC",
+      "_marker": null
+    },
+    "arrow_right": [
+      {
+        "offset": 26,
+        "segment": " ",
+        "_marker": null
+      },
+      {
+        "offset": 27,
+        "segment": "->",
+        "_marker": null
+      },
+      {
+        "offset": 29,
+        "segment": "\n      ",
+        "_marker": null
+      }
+    ],
+    "expr": {
+      "first": {
+        "first": {
+          "WithoutSuffix": {
+            "Path": {
+              "leading_sep": null,
+              "first": {
+                "Ident": {
+                  "offset": 36,
+                  "segment": "BLOCK_COMMENT",
+                  "_marker": null
+                }
+              },
+              "rest": []
+            }
+          }
+        },
+        "rest": []
+      },
+      "rest": [
+        [
+          [
+            {
+              "offset": 49,
+              "segment": "\n    ",
+              "_marker": null
+            },
+            {
+              "offset": 54,
+              "segment": "|",
+              "_marker": null
+            },
+            {
+              "offset": 55,
+              "segment": " ",
+              "_marker": null
+            }
+          ],
+          {
+            "first": {
+              "WithoutSuffix": {
+                "Path": {
+                  "leading_sep": null,
+                  "first": {
+                    "Ident": {
+                      "offset": 56,
+                      "segment": "OUTER_BLOCK_DOC",
+                      "_marker": null
+                    }
+                  },
+                  "rest": []
+                }
+              }
+            },
+            "rest": []
+          }
+        ],
+        [
+          [
+            {
+              "offset": 71,
+              "segment": "\n    ",
+              "_marker": null
+            },
+            {
+              "offset": 76,
+              "segment": "|",
+              "_marker": null
+            },
+            {
+              "offset": 77,
+              "segment": " ",
+              "_marker": null
+            }
+          ],
+          {
+            "first": {
+              "WithoutSuffix": {
+                "Path": {
+                  "leading_sep": null,
+                  "first": {
+                    "Ident": {
+                      "offset": 78,
+                      "segment": "INNER_BLOCK_DOC",
+                      "_marker": null
+                    }
+                  },
+                  "rest": []
+                }
+              }
+            },
+            "rest": []
+          }
+        ]
+      ]
+    },
+    "semi": [
+      {
+        "offset": 93,
+        "segment": "\n    ",
+        "_marker": null
+      },
+      {
+        "offset": 98,
+        "segment": ";",
+        "_marker": null
+      },
+      null
+    ]
+  }
+}

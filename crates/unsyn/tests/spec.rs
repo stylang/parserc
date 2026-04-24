@@ -36,14 +36,10 @@ where
 
         let jsonfile = synfile.path().with_extension("json");
 
-        if cfg!(feature = "genspec") {
-            fs::write(jsonfile, serde_json::to_string(&s).unwrap()).unwrap();
-        } else {
-            let content = fs::read_to_string(jsonfile).unwrap();
+        let content = fs::read_to_string(jsonfile).unwrap();
 
-            let expect = serde_json::from_str::<serde_json::Value>(&content).unwrap();
+        let expect = serde_json::from_str::<serde_json::Value>(&content).unwrap();
 
-            assert_eq!(s, expect);
-        }
+        assert_eq!(s, expect);
     }
 }

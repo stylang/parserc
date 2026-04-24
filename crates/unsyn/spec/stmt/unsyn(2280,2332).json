@@ -1,0 +1,201 @@
+{
+  "Syntax": {
+    "keyword": [
+      {
+        "offset": 0,
+        "segment": "syntax",
+        "_marker": null
+      },
+      {
+        "offset": 6,
+        "segment": " ",
+        "_marker": null
+      }
+    ],
+    "ident": {
+      "offset": 7,
+      "segment": "Expr",
+      "_marker": null
+    },
+    "arrow_right": [
+      {
+        "offset": 11,
+        "segment": " ",
+        "_marker": null
+      },
+      {
+        "offset": 12,
+        "segment": "->",
+        "_marker": null
+      },
+      {
+        "offset": 14,
+        "segment": " ",
+        "_marker": null
+      }
+    ],
+    "expr": {
+      "first": {
+        "first": {
+          "WithSuffix": {
+            "Plus": [
+              {
+                "Path": {
+                  "leading_sep": null,
+                  "first": {
+                    "Ident": {
+                      "offset": 15,
+                      "segment": "ExprNoTopAlt",
+                      "_marker": null
+                    }
+                  },
+                  "rest": []
+                }
+              },
+              [
+                null,
+                {
+                  "offset": 27,
+                  "segment": "+",
+                  "_marker": null
+                },
+                {
+                  "offset": 28,
+                  "segment": " ",
+                  "_marker": null
+                }
+              ]
+            ]
+          }
+        },
+        "rest": [
+          [
+            null,
+            {
+              "WithSuffix": {
+                "Question": [
+                  {
+                    "Paren": {
+                      "start": [
+                        null,
+                        {
+                          "offset": 29,
+                          "segment": "(",
+                          "_marker": null
+                        },
+                        {
+                          "offset": 30,
+                          "segment": " ",
+                          "_marker": null
+                        }
+                      ],
+                      "end": [
+                        null,
+                        {
+                          "offset": 49,
+                          "segment": ")",
+                          "_marker": null
+                        },
+                        null
+                      ],
+                      "body": {
+                        "first": {
+                          "first": {
+                            "WithoutSuffix": {
+                              "Str": {
+                                "delimiter_start": {
+                                  "offset": 31,
+                                  "segment": "'",
+                                  "_marker": null
+                                },
+                                "content": [
+                                  {
+                                    "CharWithException": {
+                                      "offset": 32,
+                                      "segment": "|",
+                                      "_marker": null
+                                    }
+                                  }
+                                ],
+                                "delimiter_end": {
+                                  "offset": 33,
+                                  "segment": "'",
+                                  "_marker": null
+                                }
+                              }
+                            }
+                          },
+                          "rest": [
+                            [
+                              {
+                                "offset": 34,
+                                "segment": " ",
+                                "_marker": null
+                              },
+                              {
+                                "WithSuffix": {
+                                  "Plus": [
+                                    {
+                                      "Path": {
+                                        "leading_sep": null,
+                                        "first": {
+                                          "Ident": {
+                                            "offset": 35,
+                                            "segment": "ExprNoTopAlt",
+                                            "_marker": null
+                                          }
+                                        },
+                                        "rest": []
+                                      }
+                                    },
+                                    [
+                                      null,
+                                      {
+                                        "offset": 47,
+                                        "segment": "+",
+                                        "_marker": null
+                                      },
+                                      {
+                                        "offset": 48,
+                                        "segment": " ",
+                                        "_marker": null
+                                      }
+                                    ]
+                                  ]
+                                }
+                              }
+                            ]
+                          ]
+                        },
+                        "rest": []
+                      }
+                    }
+                  },
+                  [
+                    null,
+                    {
+                      "offset": 50,
+                      "segment": "?",
+                      "_marker": null
+                    },
+                    null
+                  ]
+                ]
+              }
+            }
+          ]
+        ]
+      },
+      "rest": []
+    },
+    "semi": [
+      null,
+      {
+        "offset": 51,
+        "segment": ";",
+        "_marker": null
+      },
+      null
+    ]
+  }
+}
