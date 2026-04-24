@@ -1,0 +1,1 @@
+lexer UNICODE_LITERAL -> 'U+' concat HEX_DIGIT{4};

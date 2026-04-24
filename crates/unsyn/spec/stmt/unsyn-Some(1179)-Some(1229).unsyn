@@ -1,0 +1,1 @@
+lexer DEC_LITERAL -> DEC_DIGIT ( DEC_DIGIT | _ )*;

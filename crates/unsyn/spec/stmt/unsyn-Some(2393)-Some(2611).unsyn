@@ -1,0 +1,9 @@
+syntax ExprWithoutSuffix ->
+      '~'  ExprWithoutSuffix
+    | '<' IDENTIFIER '>'
+    | '(' Expr ')'
+    | '[' (Range | STRING_LITERAL |  UNICODE_LITERAL) ']'
+    | STRING_LITERAL
+    | UNICODE_LITERAL
+    | Path
+    ;

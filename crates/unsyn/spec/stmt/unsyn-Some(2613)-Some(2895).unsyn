@@ -1,0 +1,12 @@
+syntax ExprWithSuffix ->
+      ExprWithoutSuffix
+      (
+          '*'
+        | '?'
+        | '+'
+        | '{' Repeat '}'
+      )
+    | ExprWithoutSuffix 'concat' ExprNoTopAlt
+    | ExprWithoutSuffix 'followed' ExprNoTopAlt
+    | ExprWithoutSuffix 'except' ExprWithoutSuffix
+    ;

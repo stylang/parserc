@@ -1,0 +1,1 @@
+lexer IDENTIFIER_OR_KEYWORD -> ( XID_Start | _ ) XID_Continue*;

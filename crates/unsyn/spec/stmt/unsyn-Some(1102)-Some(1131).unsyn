@@ -1,0 +1,1 @@
+lexer DEC_DIGIT -> ['0'-'9'];

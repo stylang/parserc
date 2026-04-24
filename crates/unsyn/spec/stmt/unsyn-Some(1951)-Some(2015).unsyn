@@ -1,0 +1,4 @@
+syntax
+Path ->
+    '::'? PathSegment ( '::' PathSegment )*
+    ;

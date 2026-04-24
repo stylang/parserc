@@ -1,0 +1,5 @@
+syntax UseTree ->
+      ( Path? '::' )? '*'
+    | ( Path? '::' )? '{' ( UseTree ( ',' UseTree )* ','? )? '}'
+    | Path ( 'as' ( IDENTIFIER | '_' ) )?
+    ;

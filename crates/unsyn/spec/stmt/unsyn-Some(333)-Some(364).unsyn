@@ -1,0 +1,1 @@
+lexer XID_Start -> <XID_Start>;

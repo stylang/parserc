@@ -1,0 +1,8 @@
+lexer KEYWORDS ->
+      'lexer'
+    | 'syntax'
+    | 'followed'
+    | 'except'
+    | 'super'
+    | 'crate'
+    ;

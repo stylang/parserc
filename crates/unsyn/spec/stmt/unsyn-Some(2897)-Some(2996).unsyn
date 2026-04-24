@@ -1,0 +1,5 @@
+syntax Repeat ->
+      DEC_LITERAL
+    | DEC_LITERAL '..' DEC_LITERAL?
+    | '..' DEC_LITERAL
+    ;

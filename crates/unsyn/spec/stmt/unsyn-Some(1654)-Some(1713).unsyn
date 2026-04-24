@@ -1,0 +1,3 @@
+lexer OUTER_LINE_DOC ->
+    '///' ( ~'/' ~[LF,CR]* )?
+    ;

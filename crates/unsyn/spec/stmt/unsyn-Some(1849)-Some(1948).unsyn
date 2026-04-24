@@ -1,0 +1,5 @@
+lexer BLOCK_COMMENT_OR_DOC ->
+      BLOCK_COMMENT
+    | OUTER_BLOCK_DOC
+    | INNER_BLOCK_DOC
+    ;

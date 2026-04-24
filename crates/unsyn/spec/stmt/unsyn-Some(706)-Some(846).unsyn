@@ -1,0 +1,8 @@
+lexer STRING_LITERAL ->
+    '\'' (
+        ~['"','\\',CR]
+      | QUOTE_ESCAPE
+      | ASCII_ESCAPE
+      | UNICODE_ESCAPE
+    )* '\''
+    ;

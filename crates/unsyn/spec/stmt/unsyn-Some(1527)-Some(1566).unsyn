@@ -1,0 +1,1 @@
+lexer INNER_LINE_DOC -> '//!' ~[LR,CR];

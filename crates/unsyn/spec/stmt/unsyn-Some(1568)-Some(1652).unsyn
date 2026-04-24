@@ -1,0 +1,3 @@
+lexer INNER_BLOCK_DOC ->
+    '/*!' ( BLOCK_COMMENT_OR_DOC | ~['*/',CR] )* '*/'
+    ;

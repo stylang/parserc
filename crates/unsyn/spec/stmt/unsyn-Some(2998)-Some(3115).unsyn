@@ -1,0 +1,4 @@
+syntax Range ->
+      UNICODE_LITERAL '-' UNICODE_LITERAL
+    | STRING_LITERAL concat '-' concat STRING_LITERAL
+    ;

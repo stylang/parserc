@@ -1,0 +1,3 @@
+lexer LINE_COMMENT ->
+    '//' (~['/','!',LF] | '//') ~[LF]*
+    ;

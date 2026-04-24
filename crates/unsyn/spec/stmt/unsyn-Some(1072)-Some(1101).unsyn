@@ -1,0 +1,1 @@
+lexer OCT_DIGIT -> ['0'-'7'];

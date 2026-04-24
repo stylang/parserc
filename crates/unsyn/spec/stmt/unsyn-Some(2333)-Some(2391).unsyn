@@ -1,0 +1,1 @@
+syntax ExprNoTopAlt -> ExprWithSuffix | ExprWithoutSuffix;

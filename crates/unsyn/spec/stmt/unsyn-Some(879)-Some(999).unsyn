@@ -1,0 +1,8 @@
+lexer ASCII_ESCAPE ->
+      '\\x' OCT_DIGIT HEX_DIGIT
+    | '\\n'
+    | '\\r'
+    | '\\t'
+    | '\\\\'
+    | '\\0'
+    ;

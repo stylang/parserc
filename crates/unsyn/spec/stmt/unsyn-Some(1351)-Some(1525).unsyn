@@ -1,0 +1,8 @@
+lexer BLOCK_COMMENT ->
+      '/*'
+        ( ~['*','!'] | '**' | BLOCK_COMMENT_OR_DOC )
+        ( BLOCK_COMMENT_OR_DOC | ~['*/'] )*
+      '*/'
+    | '/**/'
+    | '/***/'
+    ;

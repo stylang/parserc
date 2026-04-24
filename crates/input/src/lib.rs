@@ -141,9 +141,35 @@ pub trait SplitOff: Input<Split = Self> + Clone {
 impl<I> SplitOff for I where I: Input<Split = Self> + Clone {}
 
 /// Convert `Input` as `&[u8]`
-pub trait AsBytes: Length {
+pub trait AsBytes {
     /// Convert the input type to a byte slice
     fn as_bytes(&self) -> &[u8];
+
+    /// Get [u8] slice with source span.
+    #[inline]
+    fn as_bytes_with(&self, span: Span) -> Option<&[u8]>
+    where
+        Self: ToSpan,
+    {
+        match (span, self.to_span()) {
+            (sourcespan::Span::None, sourcespan::Span::None) => None,
+            (sourcespan::Span::None, sourcespan::Span::Range { start: _, end: _ }) => None,
+            (sourcespan::Span::Range { start: _, end: _ }, sourcespan::Span::None) => None,
+            (
+                sourcespan::Span::Range {
+                    start: expect_start,
+                    end: expect_end,
+                },
+                sourcespan::Span::Range { start, end },
+            ) => {
+                if expect_start < start || expect_end > end {
+                    None
+                } else {
+                    Some(&self.as_bytes()[expect_start - start..expect_end - start])
+                }
+            }
+        }
+    }
 }
 
 impl AsBytes for &str {
@@ -184,9 +210,35 @@ impl<const N: usize> Length for &[u8; N] {
 }
 
 /// Convert `Input` as `&str`
-pub trait AsStr: Length {
+pub trait AsStr {
     /// Convert the input type to a str slice
     fn as_str(&self) -> &str;
+
+    /// Get str slice with source span.
+    #[inline]
+    fn as_str_with(&self, span: Span) -> Option<&str>
+    where
+        Self: ToSpan,
+    {
+        match (span, self.to_span()) {
+            (sourcespan::Span::None, sourcespan::Span::None) => None,
+            (sourcespan::Span::None, sourcespan::Span::Range { start: _, end: _ }) => None,
+            (sourcespan::Span::Range { start: _, end: _ }, sourcespan::Span::None) => None,
+            (
+                sourcespan::Span::Range {
+                    start: expect_start,
+                    end: expect_end,
+                },
+                sourcespan::Span::Range { start, end },
+            ) => {
+                if expect_start < start || expect_end > end {
+                    None
+                } else {
+                    Some(&self.as_str()[expect_start - start..expect_end - start])
+                }
+            }
+        }
+    }
 }
 
 impl AsStr for &str {

@@ -1,0 +1,3 @@
+lexer UNICODE_ESCAPE ->
+    '\\u{' ( HEX_DIGIT '_'* ){1..6} '}'
+    ;

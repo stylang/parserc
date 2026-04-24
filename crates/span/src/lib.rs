@@ -20,6 +20,32 @@ pub enum Span<Idx> {
     },
 }
 
+impl<Idx> Span<Idx> {
+    /// Get the `start` index.
+    #[inline]
+    pub fn start(&self) -> Option<Idx>
+    where
+        Idx: Clone,
+    {
+        match self {
+            Span::None => None,
+            Span::Range { start, end: _ } => Some(start.clone()),
+        }
+    }
+
+    /// Get the `end` index.
+    #[inline]
+    pub fn end(&self) -> Option<Idx>
+    where
+        Idx: Clone,
+    {
+        match self {
+            Span::None => None,
+            Span::Range { start: _, end } => Some(end.clone()),
+        }
+    }
+}
+
 impl<Idx> Display for Span<Idx>
 where
     Idx: Display,
