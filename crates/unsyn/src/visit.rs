@@ -19,7 +19,7 @@ use crate::{
             As, Concat, Crate, Except, Followed, Lexer, Mod, Super, Syntax, This, Use, Whitespace,
         },
         lit::{LitDec, LitStr, LitUnicode},
-        punct::{ArrowRight, Comma, DotDot, Minus, PathSep, Plus, Question, Semi, Star, Tilde},
+        punct::{ArrowRight, Comma, DotDot, Minus, Or, PathSep, Plus, Question, Semi, Star, Tilde},
     },
 };
 
@@ -517,8 +517,38 @@ where
     }
 
     #[inline(always)]
+    fn visit_keyword_lexer(&mut self, keyword: &mut Lexer<I>) {
+        let _ = keyword;
+    }
+
+    #[inline(always)]
+    fn visit_keyword_syntax(&mut self, keyword: &mut Syntax<I>) {
+        let _ = keyword;
+    }
+
+    #[inline(always)]
+    fn visit_keyword_as(&mut self, keyword: &mut As<I>) {
+        let _ = keyword;
+    }
+
+    #[inline(always)]
     fn visit_punct_tilde(&mut self, keyword: &mut Tilde<I>) {
         let _ = keyword;
+    }
+
+    #[inline(always)]
+    fn visit_punct_sep(&mut self, punct: &mut PathSep<I>) {
+        let _ = punct;
+    }
+
+    #[inline(always)]
+    fn visit_punct_or(&mut self, punct: &mut Or<I>) {
+        let _ = punct;
+    }
+
+    #[inline(always)]
+    fn visit_punct_dotdot(&mut self, punct: &mut DotDot<I>) {
+        let _ = punct;
     }
 }
 
@@ -661,7 +691,6 @@ pub fn visit_stmt_whitespace<V, I>(
 
 /// Call this function in [`visit_stmt_lexer`](Analyzer::visit_stmt_lexer) to recurse into child nodes.
 #[inline(always)]
-#[allow(unused)]
 pub fn visit_stmt_lexer<V, I>(
     visitor: &mut V,
     keyword: &mut Lexer<I>,
@@ -673,13 +702,15 @@ pub fn visit_stmt_lexer<V, I>(
     I: UnsynInput,
     V: Visitor<I> + ?Sized,
 {
+    visitor.visit_keyword_lexer(keyword);
     visitor.visit_token_ident(ident);
+    visitor.visit_punct_arrow_right(arrow_right);
     visitor.visit_expr(expr);
+    visitor.visit_punct_semi(semi);
 }
 
 /// Call this function in [`visit_stmt_syntax`](Analyzer::visit_stmt_syntax) to recurse into child nodes.
 #[inline(always)]
-#[allow(unused)]
 pub fn visit_stmt_syntax<V, I>(
     visitor: &mut V,
     keyword: &mut Syntax<I>,
@@ -691,8 +722,11 @@ pub fn visit_stmt_syntax<V, I>(
     I: UnsynInput,
     V: Visitor<I> + ?Sized,
 {
+    visitor.visit_keyword_syntax(keyword);
     visitor.visit_token_ident(ident);
+    visitor.visit_punct_arrow_right(arrow_right);
     visitor.visit_expr(expr);
+    visitor.visit_punct_semi(semi);
 }
 
 /// Call this function in [`visit_use_tree_star`](Analyzer::visit_use_tree_star) to recurse into child nodes.
@@ -705,8 +739,11 @@ pub fn visit_use_tree_star<V, I>(
     I: UnsynInput,
     V: Visitor<I> + ?Sized,
 {
-    if let Some((Some(path), _)) = prefix {
-        visitor.visit_path(path);
+    if let Some((path, sep)) = prefix {
+        visitor.visit_punct_sep(sep);
+        if let Some(path) = path {
+            visitor.visit_path(path);
+        }
     }
 
     visitor.visit_punct_star(star);
@@ -724,7 +761,8 @@ pub fn visit_use_tree_path<V, I>(
 {
     visitor.visit_path(path);
 
-    if let Some((_, ident)) = as_branch {
+    if let Some((keyword, ident)) = as_branch {
+        visitor.visit_keyword_as(keyword);
         visitor.visit_token_ident(ident);
     }
 }
@@ -739,8 +777,12 @@ pub fn visit_use_tree_group<V, I>(
     I: UnsynInput,
     V: Visitor<I> + ?Sized,
 {
-    if let Some((Some(path), _)) = prefix {
-        visitor.visit_path(path);
+    if let Some((path, sep)) = prefix {
+        if let Some(path) = path {
+            visitor.visit_path(path);
+        }
+
+        visitor.visit_punct_sep(sep);
     }
 
     for use_tree in &mut brace.body {
@@ -757,7 +799,8 @@ where
 {
     visitor.visit_path_segment(&mut path.first);
 
-    for (_, segment) in &mut path.rest {
+    for (sep, segment) in &mut path.rest {
+        visitor.visit_punct_sep(sep);
         visitor.visit_path_segment(segment);
     }
 }
@@ -771,7 +814,8 @@ where
 {
     visitor.visit_expr_no_top_alts(&mut expr.first);
 
-    for (_, next) in &mut expr.rest {
+    for (punct, next) in &mut expr.rest {
+        visitor.visit_punct_or(punct);
         visitor.visit_expr_no_top_alts(next);
     }
 }
@@ -800,7 +844,8 @@ where
 {
     visitor.visit_expr_no_top_alt(&mut node.first);
 
-    for (_, next) in &mut node.rest {
+    for (s, next) in &mut node.rest {
+        visitor.visit_option_s(s);
         visitor.visit_expr_no_top_alt(next);
     }
 }
@@ -1106,7 +1151,7 @@ where
 
 /// A literal string expr.
 #[inline(always)]
-pub fn visit_expr_str<V, I>(#[allow(unused)] visitor: &mut V, expr: &mut LitStr<I>)
+pub fn visit_expr_str<V, I>(visitor: &mut V, expr: &mut LitStr<I>)
 where
     I: UnsynInput,
     V: Visitor<I> + ?Sized,
@@ -1135,7 +1180,7 @@ where
 }
 
 #[inline(always)]
-#[allow(unused)]
+
 pub fn visit_expr_repeat_range_to<V, I>(
     visitor: &mut V,
     dotdot: &mut DotDot<I>,
@@ -1144,10 +1189,12 @@ pub fn visit_expr_repeat_range_to<V, I>(
     I: UnsynInput,
     V: Visitor<I> + ?Sized,
 {
+    visitor.visit_punct_dotdot(dotdot);
+    visitor.visit_lit_dec(dec);
 }
 
 #[inline(always)]
-#[allow(unused)]
+
 pub fn visit_expr_repeat_range<V, I>(
     visitor: &mut V,
     from: &mut LitDec<I>,
@@ -1157,10 +1204,13 @@ pub fn visit_expr_repeat_range<V, I>(
     I: UnsynInput,
     V: Visitor<I> + ?Sized,
 {
+    visitor.visit_lit_dec(from);
+    visitor.visit_punct_dotdot(dotdot);
+    visitor.visit_lit_dec(to);
 }
 
 #[inline(always)]
-#[allow(unused)]
+
 pub fn visit_expr_repeat_range_from<V, I>(
     visitor: &mut V,
     from: &mut LitDec<I>,
@@ -1169,15 +1219,18 @@ pub fn visit_expr_repeat_range_from<V, I>(
     I: UnsynInput,
     V: Visitor<I> + ?Sized,
 {
+    visitor.visit_lit_dec(from);
+    visitor.visit_punct_dotdot(dotdot);
 }
 
 #[inline(always)]
-#[allow(unused)]
+
 pub fn visit_expr_repeat_count<V, I>(visitor: &mut V, dec: &mut LitDec<I>)
 where
     I: UnsynInput,
     V: Visitor<I> + ?Sized,
 {
+    visitor.visit_lit_dec(dec);
 }
 
 #[inline(always)]
