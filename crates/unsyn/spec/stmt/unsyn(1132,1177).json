@@ -62,7 +62,7 @@
                   [
                     {
                       "Range": {
-                        "Str": [
+                        "Char": [
                           {
                             "delimiter_start": {
                               "offset": 20,
@@ -130,7 +130,7 @@
                   [
                     {
                       "Range": {
-                        "Str": [
+                        "Char": [
                           {
                             "delimiter_start": {
                               "offset": 28,
@@ -198,7 +198,7 @@
                 ],
                 "tail": {
                   "Range": {
-                    "Str": [
+                    "Char": [
                       {
                         "delimiter_start": {
                           "offset": 36,

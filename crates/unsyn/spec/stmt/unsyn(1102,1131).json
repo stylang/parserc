@@ -61,7 +61,7 @@
                 "pairs": [],
                 "tail": {
                   "Range": {
-                    "Str": [
+                    "Char": [
                       {
                         "delimiter_start": {
                           "offset": 20,

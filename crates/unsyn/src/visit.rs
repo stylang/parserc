@@ -1,7 +1,6 @@
 //! visit-api for `unsyn` CST.
 
 use parserc::syntax::Punctuated;
-use serde_json::de;
 
 use crate::{
     errors::UnsynError,
@@ -52,13 +51,27 @@ where
     /// visit the `S` node.
     #[inline(always)]
     fn visit_item_s(&mut self, node: &mut S<I>) {
+        self.visit_token_s(node);
+    }
+
+    /// visit the `S` node.
+    #[inline(always)]
+    fn visit_token_s(&mut self, node: &mut S<I>) {
+        let _ = node;
+    }
+
+    /// visit the `S` node.
+    #[inline(always)]
+    fn visit_punct_semi(&mut self, node: &mut Semi<I>) {
         let _ = node;
     }
 
     /// visit the `Option<S>` node.
     #[inline(always)]
     fn visit_option_s(&mut self, node: &mut Option<S<I>>) {
-        let _ = node;
+        if let Some(s) = node {
+            self.visit_token_s(s);
+        }
     }
 
     /// visit the `Use` node.
@@ -103,8 +116,20 @@ where
 
     /// visit the `Ident` node.
     #[inline(always)]
-    fn visit_ident(&mut self, ident: &mut Ident<I>) {
-        visit_ident(self, ident);
+    fn visit_token_ident(&mut self, ident: &mut Ident<I>) {
+        visit_token_ident(self, ident);
+    }
+
+    /// visit the `Ident` node.
+    #[inline(always)]
+    fn visit_punct_minus(&mut self, punct: &mut Minus<I>) {
+        let _ = punct;
+    }
+
+    /// visit the `Ident` node.
+    #[inline(always)]
+    fn visit_punct_arrow_right(&mut self, punct: &mut ArrowRight<I>) {
+        let _ = punct;
     }
 
     /// visit the stmt `Whitespace`.
@@ -239,7 +264,7 @@ where
     /// visit the pathsegment `crate`.
     #[inline(always)]
     fn visit_pathsegment_ident(&mut self, node: &mut Ident<I>) {
-        self.visit_ident(node);
+        self.visit_token_ident(node);
     }
 
     /// visit expr with `star`
@@ -423,6 +448,66 @@ where
     fn visit_expr_repeat_count(&mut self, dec: &mut LitDec<I>) {
         visit_expr_repeat_count(self, dec)
     }
+
+    #[inline(always)]
+    fn visit_lit_unicode(&mut self, lit: &mut LitUnicode<I>) {
+        let _ = lit;
+    }
+
+    #[inline(always)]
+    fn visit_lit_dec(&mut self, lit: &mut LitDec<I>) {
+        let _ = lit;
+    }
+
+    #[inline(always)]
+    fn visit_lit_str(&mut self, lit: &mut LitStr<I>) {
+        let _ = lit;
+    }
+
+    #[inline(always)]
+    fn visit_punct_star(&mut self, punct: &mut Star<I>) {
+        let _ = punct;
+    }
+
+    #[inline(always)]
+    fn visit_keyword_this(&mut self, keyword: &mut This<I>) {
+        let _ = keyword;
+    }
+
+    #[inline(always)]
+    fn visit_keyword_concat(&mut self, keyword: &mut Concat<I>) {
+        let _ = keyword;
+    }
+
+    #[inline(always)]
+    fn visit_keyword_followed(&mut self, keyword: &mut Followed<I>) {
+        let _ = keyword;
+    }
+
+    #[inline(always)]
+    fn visit_keyword_super(&mut self, keyword: &mut Super<I>) {
+        let _ = keyword;
+    }
+
+    #[inline(always)]
+    fn visit_keyword_whitespace(&mut self, keyword: &mut Whitespace<I>) {
+        let _ = keyword;
+    }
+
+    #[inline(always)]
+    fn visit_keyword_crate(&mut self, keyword: &mut Crate<I>) {
+        let _ = keyword;
+    }
+
+    #[inline(always)]
+    fn visit_keyword_except(&mut self, keyword: &mut Except<I>) {
+        let _ = keyword;
+    }
+
+    #[inline(always)]
+    fn visit_punct_tilde(&mut self, keyword: &mut Tilde<I>) {
+        let _ = keyword;
+    }
 }
 
 /// Call this function in [`visit_file`](Analyzer::visit_file) to recurse into child nodes.
@@ -474,7 +559,7 @@ where
     V: Visitor<I> + ?Sized,
 {
     visitor.visit_use_tree(&mut node.use_tree);
-    let _ = semi;
+    visitor.visit_punct_semi(semi);
 }
 
 /// Call this function in [`visit_item_mod`](Analyzer::visit_item_mod) to recurse into child nodes.
@@ -484,9 +569,9 @@ where
     I: UnsynInput,
     V: Visitor<I> + ?Sized,
 {
-    let _ = semi;
+    visitor.visit_punct_semi(semi);
 
-    visitor.visit_ident(&mut node.ident);
+    visitor.visit_token_ident(&mut node.ident);
 }
 
 /// Call this function in [`visit_item_outer_doc`](Analyzer::visit_item_outer_doc) to recurse into child nodes.
@@ -523,24 +608,24 @@ where
 
 /// Call this function in [`visit_outer_block_doc`](Analyzer::visit_outer_block_doc) to recurse into child nodes.
 #[inline]
-pub fn visit_outer_block_doc<V, I>(
-    #[allow(unused)] visitor: &mut V,
-    #[allow(unused)] outer_doc: &mut OuterBlockDoc<I>,
-) where
+pub fn visit_outer_block_doc<V, I>(visitor: &mut V, outer_doc: &mut OuterBlockDoc<I>)
+where
     I: UnsynInput,
     V: Visitor<I> + ?Sized,
 {
+    let _ = visitor;
+    let _ = outer_doc;
 }
 
 /// Call this function in [`visit_outer_line_doc`](Analyzer::visit_outer_line_doc) to recurse into child nodes.
 #[inline]
-pub fn visit_outer_line_doc<V, I>(
-    #[allow(unused)] visitor: &mut V,
-    #[allow(unused)] outer_doc: &mut OuterLineDoc<I>,
-) where
+pub fn visit_outer_line_doc<V, I>(visitor: &mut V, outer_doc: &mut OuterLineDoc<I>)
+where
     I: UnsynInput,
     V: Visitor<I> + ?Sized,
 {
+    let _ = visitor;
+    let _ = outer_doc;
 }
 
 /// Call this function in [`visit_use_tree`](Analyzer::visit_use_tree) to recurse into child nodes.
@@ -557,7 +642,7 @@ where
             visitor.visit_path(path);
 
             if let Some((_, ident)) = as_branch {
-                visitor.visit_ident(ident);
+                visitor.visit_token_ident(ident);
             }
         }
     }
@@ -565,28 +650,32 @@ where
 
 /// Call this function in [`visit_use_tree`](Analyzer::visit_use_tree) to recurse into child nodes.
 #[inline]
-pub fn visit_ident<V, I>(#[allow(unused)] visitor: &mut V, #[allow(unused)] ident: &mut Ident<I>)
+pub fn visit_token_ident<V, I>(#[allow(unused)] visitor: &mut V, ident: &mut Ident<I>)
 where
     I: UnsynInput,
     V: Visitor<I> + ?Sized,
 {
+    let _ = ident;
 }
 
 /// Call this function in [`visit_stmt_whitespace`](Analyzer::visit_stmt_whitespace) to recurse into child nodes.
 #[inline(always)]
 pub fn visit_stmt_whitespace<V, I>(
     visitor: &mut V,
-    #[allow(unused)] keyword: &mut Whitespace<I>,
+    keyword: &mut Whitespace<I>,
     ident: &mut Ident<I>,
-    #[allow(unused)] arrow_right: &mut ArrowRight<I>,
+    arrow_right: &mut ArrowRight<I>,
     expr: &mut Expr<I>,
-    #[allow(unused)] semi: &mut Semi<I>,
+    semi: &mut Semi<I>,
 ) where
     I: UnsynInput,
     V: Visitor<I> + ?Sized,
 {
-    visitor.visit_ident(ident);
+    visitor.visit_keyword_whitespace(keyword);
+    visitor.visit_token_ident(ident);
+    visitor.visit_punct_arrow_right(arrow_right);
     visitor.visit_expr(expr);
+    visitor.visit_punct_semi(semi);
 }
 
 /// Call this function in [`visit_stmt_lexer`](Analyzer::visit_stmt_lexer) to recurse into child nodes.
@@ -603,7 +692,7 @@ pub fn visit_stmt_lexer<V, I>(
     I: UnsynInput,
     V: Visitor<I> + ?Sized,
 {
-    visitor.visit_ident(ident);
+    visitor.visit_token_ident(ident);
     visitor.visit_expr(expr);
 }
 
@@ -621,7 +710,7 @@ pub fn visit_stmt_syntax<V, I>(
     I: UnsynInput,
     V: Visitor<I> + ?Sized,
 {
-    visitor.visit_ident(ident);
+    visitor.visit_token_ident(ident);
     visitor.visit_expr(expr);
 }
 
@@ -635,11 +724,11 @@ pub fn visit_use_tree_star<V, I>(
     I: UnsynInput,
     V: Visitor<I> + ?Sized,
 {
-    let _ = star;
-
     if let Some((Some(path), _)) = prefix {
         visitor.visit_path(path);
     }
+
+    visitor.visit_punct_star(star);
 }
 
 /// Call this function in [`visit_use_tree_path`](Analyzer::visit_use_tree_path) to recurse into child nodes.
@@ -655,7 +744,7 @@ pub fn visit_use_tree_path<V, I>(
     visitor.visit_path(path);
 
     if let Some((_, ident)) = as_branch {
-        visitor.visit_ident(ident);
+        visitor.visit_token_ident(ident);
     }
 }
 
@@ -750,35 +839,32 @@ where
 
 /// Call this function in [`visit_pathsegment_this`](Analyzer::visit_pathsegment_this) to recurse into child nodes.
 #[inline(always)]
-pub fn visit_pathsegment_this<V, I>(
-    #[allow(unused)] visitor: &mut V,
-    #[allow(unused)] node: &mut This<I>,
-) where
+pub fn visit_pathsegment_this<V, I>(visitor: &mut V, node: &mut This<I>)
+where
     I: UnsynInput,
     V: Visitor<I> + ?Sized,
 {
+    visitor.visit_keyword_this(node);
 }
 
 /// Call this function in [`visit_pathsegment_this`](Analyzer::visit_pathsegment_this) to recurse into child nodes.
 #[inline(always)]
-pub fn visit_pathsegment_super<V, I>(
-    #[allow(unused)] visitor: &mut V,
-    #[allow(unused)] node: &mut Super<I>,
-) where
+pub fn visit_pathsegment_super<V, I>(visitor: &mut V, node: &mut Super<I>)
+where
     I: UnsynInput,
     V: Visitor<I> + ?Sized,
 {
+    visitor.visit_keyword_super(node);
 }
 
 /// Call this function in [`visit_pathsegment_this`](Analyzer::visit_pathsegment_this) to recurse into child nodes.
 #[inline(always)]
-pub fn visit_pathsegment_crate<V, I>(
-    #[allow(unused)] visitor: &mut V,
-    #[allow(unused)] node: &mut Crate<I>,
-) where
+pub fn visit_pathsegment_crate<V, I>(visitor: &mut V, node: &mut Crate<I>)
+where
     I: UnsynInput,
     V: Visitor<I> + ?Sized,
 {
+    visitor.visit_keyword_crate(node);
 }
 
 /// Call this function in [`visit_expr_with_suffix`](Analyzer::visit_expr_with_suffix) to recurse into child nodes.
@@ -855,7 +941,7 @@ pub fn visit_expr_with_star<V, I>(
     V: Visitor<I> + ?Sized,
 {
     visitor.visit_expr_without_suffix(expr_without_suffix);
-    let _ = star;
+    visitor.visit_punct_star(star);
 }
 
 /// Call this function in [`visit_expr_without_suffix`](Analyzer::visit_expr_without_suffix) to recurse into child nodes.
@@ -905,14 +991,16 @@ pub fn visit_expr_with_repeat<V, I>(
 pub fn visit_expr_concat<V, I>(
     visitor: &mut V,
     target: &mut ExprWithoutSuffix<I>,
-    #[allow(unused)] s: &mut Option<S<I>>,
-    #[allow(unused)] keyword: &mut Concat<I>,
+    s: &mut Option<S<I>>,
+    keyword: &mut Concat<I>,
     suffix: &mut Box<ExprNoTopAlt<I>>,
 ) where
     I: UnsynInput,
     V: Visitor<I> + ?Sized,
 {
     visitor.visit_expr_without_suffix(target);
+    visitor.visit_option_s(s);
+    visitor.visit_keyword_concat(keyword);
     visitor.visit_expr_no_top_alt(suffix.as_mut());
 }
 
@@ -921,14 +1009,18 @@ pub fn visit_expr_concat<V, I>(
 pub fn visit_expr_with_followed<V, I>(
     visitor: &mut V,
     target: &mut ExprWithoutSuffix<I>,
-    #[allow(unused)] s: &mut Option<S<I>>,
-    #[allow(unused)] keyword: &mut Followed<I>,
+    s: &mut Option<S<I>>,
+    keyword: &mut Followed<I>,
     suffix: &mut Box<ExprNoTopAlt<I>>,
 ) where
     I: UnsynInput,
     V: Visitor<I> + ?Sized,
 {
     visitor.visit_expr_without_suffix(target);
+
+    visitor.visit_option_s(s);
+    visitor.visit_keyword_followed(keyword);
+
     visitor.visit_expr_no_top_alt(suffix.as_mut());
 }
 
@@ -937,14 +1029,18 @@ pub fn visit_expr_with_followed<V, I>(
 pub fn visit_expr_with_except<V, I>(
     visitor: &mut V,
     target: &mut ExprWithoutSuffix<I>,
-    #[allow(unused)] s: &mut Option<S<I>>,
-    #[allow(unused)] keyword: &mut Except<I>,
+    s: &mut Option<S<I>>,
+    keyword: &mut Except<I>,
     suffix: &mut ExprWithoutSuffix<I>,
 ) where
     I: UnsynInput,
     V: Visitor<I> + ?Sized,
 {
     visitor.visit_expr_without_suffix(target);
+
+    visitor.visit_option_s(s);
+    visitor.visit_keyword_except(keyword);
+
     visitor.visit_expr_without_suffix(suffix);
 }
 
@@ -969,12 +1065,13 @@ where
 #[inline(always)]
 pub fn visit_expr_tilde<V, I>(
     visitor: &mut V,
-    #[allow(unused)] keyword: &mut Tilde<I>,
+    keyword: &mut Tilde<I>,
     suffix: &mut Box<ExprWithoutSuffix<I>>,
 ) where
     I: UnsynInput,
     V: Visitor<I> + ?Sized,
 {
+    visitor.visit_punct_tilde(keyword);
     visitor.visit_expr_without_suffix(suffix.as_mut());
 }
 
@@ -984,7 +1081,7 @@ where
     I: UnsynInput,
     V: Visitor<I> + ?Sized,
 {
-    visitor.visit_ident(&mut expr.body);
+    visitor.visit_token_ident(&mut expr.body);
 }
 
 /// paren expr `(T)`
@@ -1028,22 +1125,22 @@ where
 
 /// A literal string expr.
 #[inline(always)]
-pub fn visit_expr_str<V, I>(#[allow(unused)] visitor: &mut V, #[allow(unused)] expr: &mut LitStr<I>)
+pub fn visit_expr_str<V, I>(#[allow(unused)] visitor: &mut V, expr: &mut LitStr<I>)
 where
     I: UnsynInput,
     V: Visitor<I> + ?Sized,
 {
+    visitor.visit_lit_str(expr);
 }
 
 /// A literal unicode expr.
 #[inline(always)]
-pub fn visit_expr_unicode<V, I>(
-    #[allow(unused)] visitor: &mut V,
-    #[allow(unused)] expr: &mut LitUnicode<I>,
-) where
+pub fn visit_expr_unicode<V, I>(visitor: &mut V, expr: &mut LitUnicode<I>)
+where
     I: UnsynInput,
     V: Visitor<I> + ?Sized,
 {
+    visitor.visit_lit_unicode(expr);
 }
 
 /// A path expression.
@@ -1119,13 +1216,14 @@ where
 fn visit_expr_range_unicode<V, I>(
     visitor: &mut V,
     from: &mut LitUnicode<I>,
-    #[allow(unused)] minus: &mut Minus<I>,
+    minus: &mut Minus<I>,
     to: &mut LitUnicode<I>,
 ) where
     I: UnsynInput,
     V: Visitor<I> + ?Sized,
 {
     visitor.visit_expr_unicode(from);
+    visitor.visit_punct_minus(minus);
     visitor.visit_expr_unicode(to);
 }
 
@@ -1134,12 +1232,13 @@ fn visit_expr_range_unicode<V, I>(
 fn visit_expr_range_char<V, I>(
     visitor: &mut V,
     from: &mut LitStr<I>,
-    #[allow(unused)] minus: &mut Minus<I>,
+    minus: &mut Minus<I>,
     to: &mut LitStr<I>,
 ) where
     I: UnsynInput,
     V: Visitor<I> + ?Sized,
 {
     visitor.visit_expr_str(from);
+    visitor.visit_punct_minus(minus);
     visitor.visit_expr_str(to);
 }
