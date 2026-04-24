@@ -1,4 +1,4 @@
-//! syntax trees for `unsyn` language.
+//! `CST` for `unsyn` language.
 
 mod path;
 pub use path::*;

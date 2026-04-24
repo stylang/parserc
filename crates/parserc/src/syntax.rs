@@ -1,4 +1,8 @@
-use std::marker::PhantomData;
+use std::{
+    marker::PhantomData,
+    option,
+    slice::{Iter, IterMut},
+};
 
 use sourceinput::{Input, Span, SplitTo, ToSpan};
 
@@ -334,6 +338,24 @@ pub struct Punctuated<T, P> {
 }
 
 impl<T, P> Punctuated<T, P> {
+    /// Returns an iterator over [`Punctuated`] of type T.
+    #[inline]
+    pub fn iter(&self) -> PunctIter<'_, T, P> {
+        PunctIter {
+            iter: self.pairs.iter(),
+            tail: self.tail.as_ref().map(Box::as_ref).into_iter(),
+        }
+    }
+
+    /// Returns an mutable iterator over [`Punctuated`] of type T.
+    #[inline]
+    pub fn iter_mut(&mut self) -> PunctIterMut<'_, T, P> {
+        PunctIterMut {
+            iter: self.pairs.iter_mut(),
+            tail: self.tail.as_mut().map(Box::as_mut).into_iter(),
+        }
+    }
+
     /// returns the sequence length.
     #[inline]
     pub fn len(&self) -> usize {
@@ -344,6 +366,66 @@ impl<T, P> Punctuated<T, P> {
     #[inline]
     pub fn is_empty(&self) -> bool {
         self.len() == 0
+    }
+}
+
+impl<'a, T, P> IntoIterator for &'a Punctuated<T, P> {
+    type Item = &'a T;
+
+    type IntoIter = PunctIter<'a, T, P>;
+
+    #[inline(always)]
+    fn into_iter(self) -> Self::IntoIter {
+        Punctuated::iter(self)
+    }
+}
+
+impl<'a, T, P> IntoIterator for &'a mut Punctuated<T, P> {
+    type Item = &'a mut T;
+
+    type IntoIter = PunctIterMut<'a, T, P>;
+
+    #[inline(always)]
+    fn into_iter(self) -> Self::IntoIter {
+        Punctuated::iter_mut(self)
+    }
+}
+
+/// Iterator over [`Punctuated`] of type T
+pub struct PunctIter<'a, T, P> {
+    iter: Iter<'a, (T, P)>,
+    tail: option::IntoIter<&'a T>,
+}
+
+impl<'a, T, P> Iterator for PunctIter<'a, T, P> {
+    type Item = &'a T;
+
+    #[inline(always)]
+    fn next(&mut self) -> Option<Self::Item> {
+        let Some((next, _)) = self.iter.next() else {
+            return self.tail.next();
+        };
+
+        Some(next)
+    }
+}
+
+/// Iterator over [`Punctuated`] of type T
+pub struct PunctIterMut<'a, T, P> {
+    iter: IterMut<'a, (T, P)>,
+    tail: option::IntoIter<&'a mut T>,
+}
+
+impl<'a, T, P> Iterator for PunctIterMut<'a, T, P> {
+    type Item = &'a mut T;
+
+    #[inline(always)]
+    fn next(&mut self) -> Option<Self::Item> {
+        let Some((next, _)) = self.iter.next() else {
+            return self.tail.next();
+        };
+
+        Some(next)
     }
 }
 

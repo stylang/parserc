@@ -233,7 +233,7 @@ where
     I: UnsynInput,
 {
     Unicode(LitUnicode<I>, #[parserc(crucial)] Minus<I>, LitUnicode<I>),
-    Str(LitStr<I>, #[parserc(crucial)] Minus<I>, LitStr<I>),
+    Char(LitStr<I>, #[parserc(crucial)] Minus<I>, LitStr<I>),
 }
 
 /// The suffix of repeat expresison.
@@ -244,8 +244,9 @@ where
     I: UnsynInput,
 {
     RangeTo(DotDot<I>, LitDec<I>),
-    RangeFrom(LitDec<I>, DotDot<I>, Option<LitDec<I>>),
-    Count(LitDec<I>),
+    Range(LitDec<I>, DotDot<I>, LitDec<I>),
+    RangeFrom(LitDec<I>, DotDot<I>),
+    Times(LitDec<I>),
 }
 
 #[cfg(test)]
@@ -397,7 +398,7 @@ mod tests {
                             end: BracketEnd(None, Source::new_offset(27, "]"), None),
                             body: Punctuated {
                                 pairs: vec![],
-                                tail: Some(Box::new(SetItem::Range(Range::Str(
+                                tail: Some(Box::new(SetItem::Range(Range::Char(
                                     LitStr {
                                         delimiter_start: Source::new_offset(20, "'"),
                                         content: vec![StrSegment::CharWithException(
