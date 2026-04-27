@@ -910,7 +910,9 @@ where
         ExprWithSuffix::Plus(expr_without_suffix, plus) => {
             visitor.visit_expr_with_plus(expr_without_suffix, plus)
         }
-        ExprWithSuffix::Repeat { target, suffix } => visitor.visit_expr_with_repeat(target, suffix),
+        ExprWithSuffix::Repeat { target, suffix } => {
+            visitor.visit_expr_with_repeat(target, suffix);
+        }
         ExprWithSuffix::Concat {
             target,
             s,
@@ -932,7 +934,9 @@ where
             s,
             keyword,
             tokens,
-        } => visitor.visit_expr_with_except(target, s, keyword, tokens),
+        } => {
+            visitor.visit_expr_with_except(target, s, keyword, tokens);
+        }
     }
 }
 
