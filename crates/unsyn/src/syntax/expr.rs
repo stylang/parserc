@@ -295,7 +295,7 @@ mod tests {
                                         first: ExprNoTopAlt::WithoutSuffix(ExprWithoutSuffix::Str(
                                             LitStr {
                                                 delimiter_start: Source::new_offset(13, "'"),
-                                                content: vec![StrSegment::CharWithException(
+                                                content: vec![StrSegment::CharsWithException(
                                                     Source::new_offset(14, "=")
                                                 )],
                                                 delimiter_end: Source::new_offset(15, "'")
@@ -401,7 +401,7 @@ mod tests {
                                 tail: Some(Box::new(SetItem::Range(Range::Char(
                                     LitStr {
                                         delimiter_start: Source::new_offset(20, "'"),
-                                        content: vec![StrSegment::CharWithException(
+                                        content: vec![StrSegment::CharsWithException(
                                             Source::new_offset(21, "0")
                                         )],
                                         delimiter_end: Source::new_offset(22, "'")
@@ -409,7 +409,7 @@ mod tests {
                                     Minus(None, Source::new_offset(23, "-"), None),
                                     LitStr {
                                         delimiter_start: Source::new_offset(24, "'"),
-                                        content: vec![StrSegment::CharWithException(
+                                        content: vec![StrSegment::CharsWithException(
                                             Source::new_offset(25, "7")
                                         )],
                                         delimiter_end: Source::new_offset(26, "'")

@@ -131,7 +131,7 @@ where
     QuoteEscape(QuoteEscape<I>),
     ASCIIEscape(ASCIIEscape<I>),
     UnicodeEscape(UnicodeEscape<I>),
-    CharWithException(#[parserc(parser = parse_str_item_with_exception)] I),
+    CharsWithException(#[parserc(parser = parse_str_item_with_exception)] I),
 }
 
 #[inline]
@@ -322,7 +322,7 @@ mod tests {
                 delimiter_start: Chars::from((0, "'")),
                 content: vec![
                     StrSegment::QuoteEscape(QuoteEscape(Chars::from((1, "\\'")))),
-                    StrSegment::CharWithException(Chars::from((3, "static")))
+                    StrSegment::CharsWithException(Chars::from((3, "static")))
                 ],
                 delimiter_end: Chars::from((9, "'"))
             })

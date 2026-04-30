@@ -18,7 +18,7 @@ use crate::{
         keyword::{
             As, Concat, Crate, Except, Followed, Lexer, Mod, Super, Syntax, This, Use, Whitespace,
         },
-        lit::{LitDec, LitStr, LitUnicode},
+        lit::{ASCIIEscape, LitDec, LitStr, LitUnicode, QuoteEscape, StrSegment, UnicodeEscape},
         punct::{ArrowRight, Comma, DotDot, Minus, Or, PathSep, Plus, Question, Semi, Star, Tilde},
     },
 };
@@ -463,7 +463,30 @@ where
 
     #[inline(always)]
     fn visit_lit_str(&mut self, lit: &mut LitStr<I>) {
-        let _ = lit;
+        visit_lit_str(self, lit);
+    }
+
+    #[inline(always)]
+    fn visit_str_segment(&mut self, segment: &mut StrSegment<I>) {
+        visit_str_segment(self, segment);
+    }
+
+    #[inline(always)]
+    fn visit_quote_escape(&mut self, segment: &mut QuoteEscape<I>) {
+        let _ = segment;
+    }
+
+    #[inline(always)]
+    fn visit_ascii_escape(&mut self, segment: &mut ASCIIEscape<I>) {
+        let _ = segment;
+    }
+
+    fn visit_unicode_escape(&mut self, segment: &mut UnicodeEscape<I>) {
+        let _ = segment;
+    }
+
+    fn visit_chars_with_exception(&mut self, segment: &mut I) {
+        let _ = segment;
     }
 
     #[inline(always)]
@@ -1163,6 +1186,33 @@ where
     visitor.visit_lit_str(expr);
 }
 
+/// A literal string.
+#[inline(always)]
+pub fn visit_lit_str<V, I>(visitor: &mut V, expr: &mut LitStr<I>)
+where
+    I: UnsynInput,
+    V: Visitor<I> + ?Sized,
+{
+    for segment in &mut expr.content {
+        visitor.visit_str_segment(segment);
+    }
+}
+
+/// A str segment
+#[inline(always)]
+pub fn visit_str_segment<V, I>(visitor: &mut V, expr: &mut StrSegment<I>)
+where
+    I: UnsynInput,
+    V: Visitor<I> + ?Sized,
+{
+    match expr {
+        StrSegment::QuoteEscape(segment) => visitor.visit_quote_escape(segment),
+        StrSegment::ASCIIEscape(segment) => visitor.visit_ascii_escape(segment),
+        StrSegment::UnicodeEscape(segment) => visitor.visit_unicode_escape(segment),
+        StrSegment::CharsWithException(segment) => visitor.visit_chars_with_exception(segment),
+    }
+}
+
 /// A literal unicode expr.
 #[inline(always)]
 pub fn visit_expr_unicode<V, I>(visitor: &mut V, expr: &mut LitUnicode<I>)
@@ -1279,4 +1329,263 @@ fn visit_expr_range_char<V, I>(
     visitor.visit_expr_str(from);
     visitor.visit_punct_minus(minus);
     visitor.visit_expr_str(to);
+}
+
+#[cfg(test)]
+mod tests {
+    use parserc::syntax::Syntax;
+
+    use crate::{input::Chars, syntax::Stmt};
+
+    use super::*;
+
+    #[test]
+    fn ident() {
+        struct Counter(usize);
+
+        impl<I> Visitor<I> for Counter
+        where
+            I: UnsynInput,
+        {
+            fn visit_token_ident(&mut self, _ident: &mut Ident<I>) {
+                self.0 += 1;
+            }
+        }
+
+        let mut stmt = Stmt::parse(&mut Chars::new(include_str!(
+            "../spec/stmt/unsyn(2394,2612).syn"
+        )))
+        .unwrap();
+
+        let mut counter = Counter(0);
+
+        counter.visit_item_stmt(&mut stmt);
+
+        assert_eq!(counter.0, 10);
+    }
+
+    #[test]
+    fn unicode() {
+        struct Counter(usize);
+
+        impl<I> Visitor<I> for Counter
+        where
+            I: UnsynInput,
+        {
+            fn visit_lit_unicode(&mut self, _: &mut LitUnicode<I>) {
+                self.0 += 1;
+            }
+        }
+
+        let mut stmt = Stmt::parse(&mut Chars::new(include_str!(
+            "../spec/stmt/unsyn(34,202).syn"
+        )))
+        .unwrap();
+
+        let mut counter = Counter(0);
+
+        counter.visit_item_stmt(&mut stmt);
+
+        assert_eq!(counter.0, 11);
+    }
+
+    #[test]
+    fn star() {
+        struct Counter(usize);
+
+        impl<I> Visitor<I> for Counter
+        where
+            I: UnsynInput,
+        {
+            fn visit_expr_with_star(&mut self, _: &mut ExprWithoutSuffix<I>, _: &mut Star<I>) {
+                self.0 += 1;
+            }
+        }
+
+        let mut stmt = Stmt::parse(&mut Chars::new(include_str!(
+            "../spec/stmt/unsyn(268,331).syn"
+        )))
+        .unwrap();
+
+        let mut counter = Counter(0);
+
+        counter.visit_item_stmt(&mut stmt);
+
+        assert_eq!(counter.0, 1);
+    }
+
+    #[test]
+    fn group() {
+        struct Counter(usize);
+
+        impl<I> Visitor<I> for Counter
+        where
+            I: UnsynInput,
+        {
+            fn visit_expr_paren(&mut self, _: &mut Paren<I, Box<Expr<I>>>) {
+                self.0 += 1;
+            }
+        }
+
+        let mut stmt = Stmt::parse(&mut Chars::new(include_str!(
+            "../spec/stmt/unsyn(1351,1525).syn"
+        )))
+        .unwrap();
+
+        let mut counter = Counter(0);
+
+        counter.visit_item_stmt(&mut stmt);
+
+        assert_eq!(counter.0, 2);
+    }
+
+    #[test]
+    fn or() {
+        struct Counter(usize);
+
+        impl<I> Visitor<I> for Counter
+        where
+            I: UnsynInput,
+        {
+            fn visit_punct_or(&mut self, _: &mut Or<I>) {
+                self.0 += 1;
+            }
+        }
+
+        let mut stmt = Stmt::parse(&mut Chars::new(include_str!(
+            "../spec/stmt/unsyn(1351,1525).syn"
+        )))
+        .unwrap();
+
+        let mut counter = Counter(0);
+
+        counter.visit_item_stmt(&mut stmt);
+
+        assert_eq!(counter.0, 5);
+    }
+
+    #[test]
+    fn tilde() {
+        struct Counter(usize);
+
+        impl<I> Visitor<I> for Counter
+        where
+            I: UnsynInput,
+        {
+            fn visit_expr_tilde(&mut self, _: &mut Tilde<I>, _: &mut Box<ExprWithoutSuffix<I>>) {
+                self.0 += 1;
+            }
+        }
+
+        let mut stmt = Stmt::parse(&mut Chars::new(include_str!(
+            "../spec/stmt/unsyn(1351,1525).syn"
+        )))
+        .unwrap();
+
+        let mut counter = Counter(0);
+
+        counter.visit_item_stmt(&mut stmt);
+
+        assert_eq!(counter.0, 2);
+    }
+
+    #[test]
+    fn set() {
+        struct Counter(usize);
+
+        impl<I> Visitor<I> for Counter
+        where
+            I: UnsynInput,
+        {
+            fn visit_expr_set(&mut self, _: &mut Bracket<I, Punctuated<SetItem<I>, Comma<I>>>) {
+                self.0 += 1;
+            }
+        }
+
+        let mut stmt = Stmt::parse(&mut Chars::new(include_str!(
+            "../spec/stmt/unsyn(1351,1525).syn"
+        )))
+        .unwrap();
+
+        let mut counter = Counter(0);
+
+        counter.visit_item_stmt(&mut stmt);
+
+        assert_eq!(counter.0, 2);
+    }
+
+    #[test]
+    fn set_item() {
+        struct Counter(usize);
+
+        impl<I> Visitor<I> for Counter
+        where
+            I: UnsynInput,
+        {
+            fn visit_expr_set_item(&mut self, _: &mut SetItem<I>) {
+                self.0 += 1;
+            }
+        }
+
+        let mut stmt = Stmt::parse(&mut Chars::new(include_str!(
+            "../spec/stmt/unsyn(1351,1525).syn"
+        )))
+        .unwrap();
+
+        let mut counter = Counter(0);
+
+        counter.visit_item_stmt(&mut stmt);
+
+        assert_eq!(counter.0, 3);
+    }
+
+    #[test]
+    fn lit_str() {
+        struct Counter(usize);
+
+        impl<I> Visitor<I> for Counter
+        where
+            I: UnsynInput,
+        {
+            fn visit_lit_str(&mut self, _: &mut LitStr<I>) {
+                self.0 += 1;
+            }
+        }
+
+        let mut stmt = Stmt::parse(&mut Chars::new(include_str!(
+            "../spec/stmt/unsyn(2122,2278).syn"
+        )))
+        .unwrap();
+
+        let mut counter = Counter(0);
+
+        counter.visit_item_stmt(&mut stmt);
+
+        assert_eq!(counter.0, 9);
+    }
+
+    #[test]
+    fn chars() {
+        struct Counter(usize);
+
+        impl<I> Visitor<I> for Counter
+        where
+            I: UnsynInput,
+        {
+            fn visit_chars_with_exception(&mut self, segment: &mut I) {
+                self.0 += segment.len();
+            }
+        }
+
+        let mut stmt = Stmt::parse(&mut Chars::new(include_str!(
+            "../spec/stmt/unsyn(1655,1714).syn"
+        )))
+        .unwrap();
+
+        let mut counter = Counter(0);
+
+        counter.visit_item_stmt(&mut stmt);
+
+        assert_eq!(counter.0, 4);
+    }
 }
