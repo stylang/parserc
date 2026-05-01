@@ -46,7 +46,7 @@
               },
               "content": [
                 {
-                  "CharWithException": {
+                  "CharsWithException": {
                     "offset": 25,
                     "segment": "lexer",
                     "_marker": null
@@ -93,7 +93,7 @@
                   },
                   "content": [
                     {
-                      "CharWithException": {
+                      "CharsWithException": {
                         "offset": 39,
                         "segment": "syntax",
                         "_marker": null
@@ -140,7 +140,7 @@
                   },
                   "content": [
                     {
-                      "CharWithException": {
+                      "CharsWithException": {
                         "offset": 54,
                         "segment": "followed",
                         "_marker": null
@@ -187,7 +187,7 @@
                   },
                   "content": [
                     {
-                      "CharWithException": {
+                      "CharsWithException": {
                         "offset": 71,
                         "segment": "except",
                         "_marker": null
@@ -234,7 +234,7 @@
                   },
                   "content": [
                     {
-                      "CharWithException": {
+                      "CharsWithException": {
                         "offset": 86,
                         "segment": "super",
                         "_marker": null
@@ -281,7 +281,7 @@
                   },
                   "content": [
                     {
-                      "CharWithException": {
+                      "CharsWithException": {
                         "offset": 100,
                         "segment": "crate",
                         "_marker": null

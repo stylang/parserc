@@ -103,7 +103,7 @@
                             },
                             "content": [
                               {
-                                "CharWithException": {
+                                "CharsWithException": {
                                   "offset": 68,
                                   "segment": "*",
                                   "_marker": null
@@ -150,7 +150,7 @@
                                 },
                                 "content": [
                                   {
-                                    "CharWithException": {
+                                    "CharsWithException": {
                                       "offset": 82,
                                       "segment": "?",
                                       "_marker": null
@@ -197,7 +197,7 @@
                                 },
                                 "content": [
                                   {
-                                    "CharWithException": {
+                                    "CharsWithException": {
                                       "offset": 96,
                                       "segment": "+",
                                       "_marker": null
@@ -244,7 +244,7 @@
                                 },
                                 "content": [
                                   {
-                                    "CharWithException": {
+                                    "CharsWithException": {
                                       "offset": 110,
                                       "segment": "{",
                                       "_marker": null
@@ -298,7 +298,7 @@
                                     },
                                     "content": [
                                       {
-                                        "CharWithException": {
+                                        "CharsWithException": {
                                           "offset": 121,
                                           "segment": "}",
                                           "_marker": null
@@ -373,7 +373,7 @@
                       },
                       "content": [
                         {
-                          "CharWithException": {
+                          "CharsWithException": {
                             "offset": 157,
                             "segment": "concat",
                             "_marker": null
@@ -465,7 +465,7 @@
                       },
                       "content": [
                         {
-                          "CharWithException": {
+                          "CharsWithException": {
                             "offset": 203,
                             "segment": "followed",
                             "_marker": null
@@ -557,7 +557,7 @@
                       },
                       "content": [
                         {
-                          "CharWithException": {
+                          "CharsWithException": {
                             "offset": 251,
                             "segment": "except",
                             "_marker": null

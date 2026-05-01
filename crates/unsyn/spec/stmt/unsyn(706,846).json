@@ -149,7 +149,7 @@
                                               },
                                               "content": [
                                                 {
-                                                  "CharWithException": {
+                                                  "CharsWithException": {
                                                     "offset": 46,
                                                     "segment": "\"",
                                                     "_marker": null

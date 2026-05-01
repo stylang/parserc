@@ -105,7 +105,7 @@
                       },
                       "content": [
                         {
-                          "CharWithException": {
+                          "CharsWithException": {
                             "offset": 54,
                             "segment": "..",
                             "_marker": null
@@ -188,7 +188,7 @@
                   },
                   "content": [
                     {
-                      "CharWithException": {
+                      "CharsWithException": {
                         "offset": 78,
                         "segment": "..",
                         "_marker": null

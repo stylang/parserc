@@ -46,7 +46,7 @@
               },
               "content": [
                 {
-                  "CharWithException": {
+                  "CharsWithException": {
                     "offset": 26,
                     "segment": "use",
                     "_marker": null
