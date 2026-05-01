@@ -1588,4 +1588,29 @@ mod tests {
 
         assert_eq!(counter.0, 4);
     }
+
+    #[test]
+    fn expr_no_top_alts() {
+        struct Counter(usize);
+
+        impl<I> Visitor<I> for Counter
+        where
+            I: UnsynInput,
+        {
+            fn visit_expr_no_top_alt(&mut self, _: &mut ExprNoTopAlt<I>) {
+                self.0 += 1;
+            }
+        }
+
+        let mut stmt = Stmt::parse(&mut Chars::new(include_str!(
+            "../spec/stmt/unsyn(2999,3102).syn"
+        )))
+        .unwrap();
+
+        let mut counter = Counter(0);
+
+        counter.visit_item_stmt(&mut stmt);
+
+        assert_eq!(counter.0, 6);
+    }
 }
