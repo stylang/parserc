@@ -1613,4 +1613,33 @@ mod tests {
 
         assert_eq!(counter.0, 6);
     }
+
+    #[test]
+    fn escapes() {
+        struct Counter(usize);
+
+        impl<I> Visitor<I> for Counter
+        where
+            I: UnsynInput,
+        {
+            fn visit_quote_escape(&mut self, _: &mut QuoteEscape<I>) {
+                self.0 += 1;
+            }
+
+            fn visit_ascii_escape(&mut self, _: &mut ASCIIEscape<I>) {
+                self.0 += 1;
+            }
+        }
+
+        let mut stmt = Stmt::parse(&mut Chars::new(include_str!(
+            "../spec/stmt/unsyn(706,846).syn"
+        )))
+        .unwrap();
+
+        let mut counter = Counter(0);
+
+        counter.visit_item_stmt(&mut stmt);
+
+        assert_eq!(counter.0, 3);
+    }
 }
