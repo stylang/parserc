@@ -4,6 +4,7 @@
 
 pub mod errors;
 pub mod input;
+pub mod semantics;
 pub mod syntax;
 pub mod token;
 pub mod visit;

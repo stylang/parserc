@@ -9,7 +9,7 @@ use parserc::{
 };
 use unsyn::{
     input::Chars,
-    syntax::{File, Item, ModuleDeclaration, OuterDoc, Stmt, UseDeclaration},
+    syntax::{Item, Module, ModuleDeclaration, OuterDoc, Stmt, UseDeclaration},
     token::punct::Semi,
 };
 
@@ -32,7 +32,7 @@ fn main() {
     let mut input = Chars::new(&buf);
 
     // parse file.
-    let file = File::parse(&mut input).unwrap();
+    let file = Module::parse(&mut input).unwrap();
 
     let spec_root_dir = args.output;
 

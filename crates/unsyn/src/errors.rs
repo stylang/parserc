@@ -162,6 +162,8 @@ pub enum SemanticsKind {
     EmptySet,
     #[error("invalid set item")]
     SetItem,
+    #[error("Name collision")]
+    NameCollision(Span),
 }
 
 impl SemanticsKind {

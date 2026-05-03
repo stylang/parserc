@@ -66,6 +66,38 @@ where
     },
 }
 
+impl<I> Stmt<I>
+where
+    I: UnsynInput,
+{
+    /// Get ident of the statement.
+    pub fn ident(&self) -> &Ident<I> {
+        match self {
+            Stmt::Whitespace {
+                keyword: _,
+                ident,
+                arrow_right: _,
+                expr: _,
+                semi: _,
+            } => ident,
+            Stmt::Lexer {
+                keyword: _,
+                ident,
+                arrow_right: _,
+                expr: _,
+                semi: _,
+            } => ident,
+            Stmt::Syntax {
+                keyword: _,
+                ident,
+                arrow_right: _,
+                expr: _,
+                semi: _,
+            } => ident,
+        }
+    }
+}
+
 /// Node definition expression.
 #[derive(Debug, PartialEq, Eq, PartialOrd, Ord, Clone, Syntax)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]

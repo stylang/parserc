@@ -3,10 +3,9 @@
 use parserc::syntax::Punctuated;
 
 use crate::{
-    errors::UnsynError,
     input::UnsynInput,
     syntax::{
-        Expr, ExprNoTopAlt, ExprNoTopAlts, ExprWithSuffix, ExprWithoutSuffix, File,
+        Expr, ExprNoTopAlt, ExprNoTopAlts, ExprWithSuffix, ExprWithoutSuffix, Module,
         ModuleDeclaration, OuterDoc, Path, PathSegment, Range, Repeat, SetItem, Stmt,
         UseDeclaration, UseTree,
     },
@@ -23,16 +22,6 @@ use crate::{
     },
 };
 
-/// V `CST` node processable by the **semantic visitor**.
-pub trait Visit<I>
-where
-    I: UnsynInput,
-{
-    fn analyze<V>(&self, visitor: &mut V) -> Result<(), UnsynError>
-    where
-        V: Visitor<I>;
-}
-
 /// Semantic visitor for the `unsyn` language.
 pub trait Visitor<I>
 where
@@ -40,7 +29,7 @@ where
 {
     /// visit the `File` node.
     #[inline(always)]
-    fn visit_file(&mut self, node: &mut File<I>) {
+    fn visit_module(&mut self, node: &mut Module<I>) {
         visit_file(self, node);
     }
 
@@ -577,7 +566,7 @@ where
 
 /// Call this function in [`visit_file`](Analyzer::visit_file) to recurse into child nodes.
 #[inline]
-pub fn visit_file<V, I>(visitor: &mut V, node: &mut File<I>)
+pub fn visit_file<V, I>(visitor: &mut V, node: &mut Module<I>)
 where
     I: UnsynInput,
     V: Visitor<I> + ?Sized,

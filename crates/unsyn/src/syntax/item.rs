@@ -49,7 +49,7 @@ where
 /// The output of one source file.
 #[derive(Debug, PartialEq, Eq, PartialOrd, Ord, Clone, Syntax)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
-pub struct File<I>
+pub struct Module<I>
 where
     I: UnsynInput,
 {
