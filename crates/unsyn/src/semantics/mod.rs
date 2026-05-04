@@ -5,3 +5,6 @@ pub use findsym::*;
 
 mod finduse;
 pub use finduse::*;
+
+mod linksym;
+pub use linksym::*;

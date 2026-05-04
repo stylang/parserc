@@ -36,7 +36,7 @@ where
 
 /// locate all use statements within a module.
 #[inline]
-pub fn find_use_stmts<I, F>(module: &mut Module<I>, f: F) -> Result<(), Vec<UnsynError>>
+pub fn finduse<I, F>(module: &mut Module<I>, f: F) -> Result<(), Vec<UnsynError>>
 where
     I: UnsynInput,
     F: FnMut(UseDeclaration<I>) -> Result<(), UnsynError>,
@@ -69,7 +69,7 @@ mod tests {
 
         let mut counter = 0;
 
-        find_use_stmts(&mut module, |_| {
+        finduse(&mut module, |_| {
             counter += 1;
             Ok(())
         })

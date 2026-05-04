@@ -26,7 +26,7 @@ where
 
 /// locate all symbols defined in a module.
 #[inline]
-pub fn find_symbols<I, F>(module: &mut Module<I>, f: F) -> Result<(), Vec<UnsynError>>
+pub fn findsym<I, F>(module: &mut Module<I>, f: F) -> Result<(), Vec<UnsynError>>
 where
     I: UnsynInput,
     F: FnMut(Stmt<I>) -> Result<(), UnsynError>,
@@ -59,7 +59,7 @@ mod tests {
 
         let mut counter = 0;
 
-        find_symbols(&mut module, |_| {
+        findsym(&mut module, |_| {
             counter += 1;
             Ok(())
         })
