@@ -54,3 +54,27 @@ where
         Err(find.errors)
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use parserc::syntax::Syntax;
+
+    use crate::{input::Chars, syntax::Module};
+
+    use super::*;
+
+    #[test]
+    fn find_use() {
+        let mut module = Module::parse(&mut Chars::new(include_str!("../../unsyn.syn"))).unwrap();
+
+        let mut counter = 0;
+
+        find_use_stmts(&mut module, |_| {
+            counter += 1;
+            Ok(())
+        })
+        .unwrap();
+
+        assert_eq!(counter, 1)
+    }
+}
