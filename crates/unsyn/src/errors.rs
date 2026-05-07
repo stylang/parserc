@@ -1,5 +1,7 @@
 //! error types for `unsyn` parsers.
 
+use std::{io, path::PathBuf};
+
 use parserc::{ControlFlow, ParseError, sourceinput::Span};
 
 /// Error for punct tokens.
@@ -50,8 +52,8 @@ pub enum PunctKind {
 impl PunctKind {
     /// Map error to `punct` error.
     #[inline]
-    pub fn map(self) -> impl FnOnce(UnsynError) -> UnsynError {
-        |err: UnsynError| UnsynError::Punct(self, err.control_flow(), err.to_span())
+    pub fn map(self) -> impl FnOnce(CompileError) -> CompileError {
+        |err: CompileError| CompileError::Punct(self, err.control_flow(), err.to_span())
     }
 }
 
@@ -87,8 +89,8 @@ pub enum KeywordKind {
 impl KeywordKind {
     /// Map error to `punct` error.
     #[inline]
-    pub fn map(self) -> impl FnOnce(UnsynError) -> UnsynError {
-        |err: UnsynError| UnsynError::Keyword(self, err.control_flow(), err.to_span())
+    pub fn map(self) -> impl FnOnce(CompileError) -> CompileError {
+        |err: CompileError| CompileError::Keyword(self, err.control_flow(), err.to_span())
     }
 }
 
@@ -130,14 +132,14 @@ pub enum SyntaxKind {
 impl SyntaxKind {
     /// Map error to `syntax` error.
     #[inline]
-    pub fn map(self) -> impl FnOnce(UnsynError) -> UnsynError {
-        |err: UnsynError| UnsynError::Syntax(self, err.control_flow(), err.to_span())
+    pub fn map(self) -> impl FnOnce(CompileError) -> CompileError {
+        |err: CompileError| CompileError::Syntax(self, err.control_flow(), err.to_span())
     }
 
     /// Map error to `syntax` fatal error.
     #[inline]
-    pub fn map_into_fatal(self) -> impl FnOnce(UnsynError) -> UnsynError {
-        |err: UnsynError| UnsynError::Syntax(self, ControlFlow::Fatal, err.to_span())
+    pub fn map_into_fatal(self) -> impl FnOnce(CompileError) -> CompileError {
+        |err: CompileError| CompileError::Syntax(self, ControlFlow::Fatal, err.to_span())
     }
 }
 
@@ -164,19 +166,21 @@ pub enum SemanticsKind {
     SetItem,
     #[error("Name collision")]
     NameCollision(Span),
+    #[error("Unparsing content")]
+    Unparsing,
 }
 
 impl SemanticsKind {
     /// Map error to `semantic` error.
     #[inline]
-    pub fn map(self) -> impl FnOnce(UnsynError) -> UnsynError {
-        |err: UnsynError| UnsynError::Semantics(self, err.to_span())
+    pub fn map(self) -> impl FnOnce(CompileError) -> CompileError {
+        |err: CompileError| CompileError::Semantics(self, err.to_span())
     }
 }
 
 /// Error information container for `unsyn` parsing.
 #[derive(Debug, thiserror::Error, PartialEq, Eq)]
-pub enum UnsynError {
+pub enum CompileError {
     /// Unhandle parserc `Errors`.
     #[error(transparent)]
     Kind(#[from] parserc::Kind),
@@ -198,45 +202,58 @@ pub enum UnsynError {
     Semantics(SemanticsKind, Span),
 }
 
-impl ParseError for UnsynError {
+impl ParseError for CompileError {
     #[inline]
     fn to_span(&self) -> Span {
         match self {
-            UnsynError::Kind(kind) => kind.to_span(),
-            UnsynError::Syntax(_, _, span) => span.clone(),
-            UnsynError::Punct(_, _, span) => span.clone(),
-            UnsynError::Keyword(_, _, span) => span.clone(),
-            UnsynError::Semantics(_, span) => span.clone(),
+            CompileError::Kind(kind) => kind.to_span(),
+            CompileError::Syntax(_, _, span) => span.clone(),
+            CompileError::Punct(_, _, span) => span.clone(),
+            CompileError::Keyword(_, _, span) => span.clone(),
+            CompileError::Semantics(_, span) => span.clone(),
         }
     }
 
     #[inline]
     fn control_flow(&self) -> parserc::ControlFlow {
         match self {
-            UnsynError::Kind(kind) => kind.control_flow(),
-            UnsynError::Syntax(_, control_flow, _) => *control_flow,
-            UnsynError::Punct(_, control_flow, _) => *control_flow,
-            UnsynError::Keyword(_, control_flow, _) => *control_flow,
-            UnsynError::Semantics(_, _) => ControlFlow::Fatal,
+            CompileError::Kind(kind) => kind.control_flow(),
+            CompileError::Syntax(_, control_flow, _) => *control_flow,
+            CompileError::Punct(_, control_flow, _) => *control_flow,
+            CompileError::Keyword(_, control_flow, _) => *control_flow,
+            CompileError::Semantics(_, _) => ControlFlow::Fatal,
         }
     }
 
     #[inline]
     fn into_fatal(self) -> Self {
         match self {
-            UnsynError::Kind(kind) => Self::Kind(kind.into_fatal()),
-            UnsynError::Syntax(syntax_kind, _, span) => {
+            CompileError::Kind(kind) => Self::Kind(kind.into_fatal()),
+            CompileError::Syntax(syntax_kind, _, span) => {
                 Self::Syntax(syntax_kind, ControlFlow::Fatal, span)
             }
-            UnsynError::Punct(punct_kind, _, span) => {
-                UnsynError::Punct(punct_kind, ControlFlow::Fatal, span)
+            CompileError::Punct(punct_kind, _, span) => {
+                CompileError::Punct(punct_kind, ControlFlow::Fatal, span)
             }
-            UnsynError::Keyword(punct_kind, _, span) => {
-                UnsynError::Keyword(punct_kind, ControlFlow::Fatal, span)
+            CompileError::Keyword(punct_kind, _, span) => {
+                CompileError::Keyword(punct_kind, ControlFlow::Fatal, span)
             }
-            UnsynError::Semantics(semantics_kind, span) => {
-                UnsynError::Semantics(semantics_kind, span)
+            CompileError::Semantics(semantics_kind, span) => {
+                CompileError::Semantics(semantics_kind, span)
             }
         }
     }
+}
+
+/// Error information container for `unsyn` parsing.
+#[derive(Debug, thiserror::Error)]
+pub enum UnsynError {
+    #[error(transparent)]
+    IoError(#[from] io::Error),
+
+    #[error("parsing error. {0}")]
+    CompileErrors(PathBuf, Vec<CompileError>),
+
+    #[error("parsing error. {0}")]
+    CompileError(PathBuf, CompileError),
 }

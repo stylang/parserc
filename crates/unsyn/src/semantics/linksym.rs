@@ -1,18 +1,18 @@
 use crate::{
-    errors::UnsynError, input::UnsynInput, syntax::Module, token::ident::Ident, visit::Visitor,
+    errors::CompileError, input::UnsynInput, syntax::Module, token::ident::Ident, visit::Visitor,
 };
 
 /// A visitor to locate ident within a module.
 #[derive(Default)]
 struct LinkModule<F> {
     f: F,
-    errors: Vec<UnsynError>,
+    errors: Vec<CompileError>,
 }
 
 impl<I, F> Visitor<I> for LinkModule<F>
 where
     I: UnsynInput,
-    F: FnMut(Ident<I>) -> Result<(), UnsynError>,
+    F: FnMut(Ident<I>) -> Result<(), CompileError>,
 {
     fn visit_item_s(&mut self, _: &mut crate::token::S<I>) {}
 
@@ -68,10 +68,10 @@ where
 }
 
 /// Resolve symbols for a module.
-pub fn linksym<I, F>(module: &mut Module<I>, f: F) -> Result<(), Vec<UnsynError>>
+pub fn linksym<I, F>(module: &mut Module<I>, f: F) -> Result<(), Vec<CompileError>>
 where
     I: UnsynInput,
-    F: FnMut(Ident<I>) -> Result<(), UnsynError>,
+    F: FnMut(Ident<I>) -> Result<(), CompileError>,
 {
     let mut find = LinkModule {
         f,

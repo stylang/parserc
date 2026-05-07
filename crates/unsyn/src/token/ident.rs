@@ -9,7 +9,7 @@ use parserc::{
 use unicode_ident::{is_xid_continue, is_xid_start};
 
 use crate::{
-    errors::{SemanticsKind, SyntaxKind, UnsynError},
+    errors::{SemanticsKind, SyntaxKind, CompileError},
     input::UnsynInput,
 };
 
@@ -39,7 +39,7 @@ where
         match content.as_str() {
             "whitespace" | "lexer" | "syntax" | "followed" | "concat" | "except" | "use"
             | "super" | "crate" | "as" | "self" | "mod" => {
-                return Err(UnsynError::Semantics(
+                return Err(CompileError::Semantics(
                     SemanticsKind::Keyword,
                     content.to_span(),
                 ));
@@ -61,7 +61,7 @@ mod tests {
     use parserc::{sourceinput::Span, syntax::SyntaxExt};
 
     use crate::{
-        errors::{SemanticsKind, UnsynError},
+        errors::{SemanticsKind, CompileError},
         input::Chars,
         token::ident::Ident,
     };
@@ -86,7 +86,7 @@ mod tests {
         for kw in keywords {
             assert_eq!(
                 Chars::new(kw).parse::<Ident<_>>(),
-                Err(UnsynError::Semantics(
+                Err(CompileError::Semantics(
                     SemanticsKind::Keyword,
                     Span::from(0..kw.len()),
                 ))

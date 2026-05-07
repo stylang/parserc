@@ -8,7 +8,7 @@ use parserc::{
 };
 
 use crate::{
-    errors::{PunctKind, SemanticsKind, SyntaxKind, UnsynError},
+    errors::{PunctKind, SemanticsKind, SyntaxKind, CompileError},
     input::UnsynInput,
 };
 
@@ -36,7 +36,7 @@ where
 }
 
 #[inline]
-fn parse_7bit_char<I>(input: &mut I) -> Result<I, UnsynError>
+fn parse_7bit_char<I>(input: &mut I) -> Result<I, CompileError>
 where
     I: UnsynInput,
 {
@@ -49,28 +49,28 @@ where
     let buf = input.as_bytes();
 
     if buf.len() < 2 {
-        return Err(UnsynError::Semantics(
+        return Err(CompileError::Semantics(
             SemanticsKind::Char7BitEscapeTooShort,
             input.to_span(),
         ));
     }
 
     if !buf[0].is_ascii_hexdigit() {
-        return Err(UnsynError::Semantics(
+        return Err(CompileError::Semantics(
             SemanticsKind::HexDigit,
             input.to_span_with(1),
         ));
     }
 
     if !matches!(buf[0], b'0'..=b'7') {
-        return Err(UnsynError::Semantics(
+        return Err(CompileError::Semantics(
             SemanticsKind::Char7BitEscapeOutOfRange,
             input.to_span_with(1),
         ));
     }
 
     if !buf[1].is_ascii_hexdigit() {
-        return Err(UnsynError::Semantics(
+        return Err(CompileError::Semantics(
             SemanticsKind::HexDigit,
             input.to_span_with(2),
         ));
@@ -102,7 +102,7 @@ where
 }
 
 #[inline]
-fn parse_unicode_hex_digits<I>(input: &mut I) -> Result<I, UnsynError>
+fn parse_unicode_hex_digits<I>(input: &mut I) -> Result<I, CompileError>
 where
     I: UnsynInput,
 {
@@ -135,12 +135,12 @@ where
 }
 
 #[inline]
-fn parse_str_item_with_exception<I>(input: &mut I) -> Result<I, UnsynError>
+fn parse_str_item_with_exception<I>(input: &mut I) -> Result<I, CompileError>
 where
     I: UnsynInput,
 {
     if input.is_empty() {
-        return Err(UnsynError::Syntax(
+        return Err(CompileError::Syntax(
             SyntaxKind::StrContent,
             ControlFlow::Recovable,
             input.to_span_with(1),
@@ -153,14 +153,14 @@ where
         match iter.next() {
             Some((offset, '\r')) => {
                 input.split_to(offset);
-                return Err(UnsynError::Semantics(
+                return Err(CompileError::Semantics(
                     SemanticsKind::StrContent,
                     input.to_span_with(1),
                 ));
             }
             Some((offset, '\'' | '\\')) => {
                 if offset == 0 {
-                    return Err(UnsynError::Syntax(
+                    return Err(CompileError::Syntax(
                         SyntaxKind::StrContent,
                         ControlFlow::Recovable,
                         input.to_span_with(1),
@@ -217,12 +217,12 @@ where
         let digits = take_while_range(4..=6, |c: char| c.is_ascii_hexdigit())
             .parse(input)
             .map_err(|err| {
-                UnsynError::Semantics(SemanticsKind::Unicode, prefix.to_span() + err.to_span())
+                CompileError::Semantics(SemanticsKind::Unicode, prefix.to_span() + err.to_span())
             })?;
 
         if let Some(c) = input.iter().next() {
             if c.is_ascii_hexdigit() {
-                return Err(UnsynError::Semantics(
+                return Err(CompileError::Semantics(
                     SemanticsKind::Unicode,
                     prefix.to_span() + input.to_span_with(1),
                 ));
@@ -277,7 +277,7 @@ mod tests {
     use super::*;
 
     use crate::{
-        errors::{SemanticsKind, UnsynError},
+        errors::{SemanticsKind, CompileError},
         input::Chars,
     };
 
@@ -300,14 +300,14 @@ mod tests {
 
         assert_eq!(
             Chars::new("U+1").parse::<LitUnicode<_>>(),
-            Err(UnsynError::Semantics(
+            Err(CompileError::Semantics(
                 SemanticsKind::Unicode,
                 Span::from(0..3)
             ))
         );
         assert_eq!(
             Chars::new("U+1123411").parse::<LitUnicode<_>>(),
-            Err(UnsynError::Semantics(
+            Err(CompileError::Semantics(
                 SemanticsKind::Unicode,
                 Span::from(0..9)
             ))

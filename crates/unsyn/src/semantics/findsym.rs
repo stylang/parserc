@@ -1,5 +1,5 @@
 use crate::{
-    errors::UnsynError,
+    errors::CompileError,
     input::UnsynInput,
     syntax::{Module, Stmt},
     visit::Visitor,
@@ -8,13 +8,13 @@ use crate::{
 /// File-level symbol analyzer
 struct FindStmts<F> {
     f: F,
-    errors: Vec<UnsynError>,
+    errors: Vec<CompileError>,
 }
 
 impl<F, I> Visitor<I> for FindStmts<F>
 where
     I: UnsynInput,
-    F: FnMut(Stmt<I>) -> Result<(), UnsynError>,
+    F: FnMut(Stmt<I>) -> Result<(), CompileError>,
 {
     #[inline]
     fn visit_item_stmt(&mut self, stmt: &mut Stmt<I>) {
@@ -26,10 +26,10 @@ where
 
 /// locate all symbols defined in a module.
 #[inline]
-pub fn findsym<I, F>(module: &mut Module<I>, f: F) -> Result<(), Vec<UnsynError>>
+pub fn findsym<I, F>(module: &mut Module<I>, f: F) -> Result<(), Vec<CompileError>>
 where
     I: UnsynInput,
-    F: FnMut(Stmt<I>) -> Result<(), UnsynError>,
+    F: FnMut(Stmt<I>) -> Result<(), CompileError>,
 {
     let mut find = FindStmts {
         f,

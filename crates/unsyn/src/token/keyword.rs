@@ -27,7 +27,7 @@ macro_rules! define_keyword {
 
                 if let Some(c) = input.iter().next() {
                     if c.is_alphanumeric() || c == '_' {
-                        return Err(crate::errors::UnsynError::Keyword(
+                        return Err(crate::errors::CompileError::Keyword(
                             crate::errors::KeywordKind::$ident,
                             parserc::ControlFlow::Recovable,
                             keyword.to_span(),

@@ -4,7 +4,7 @@ use parserc::{
 };
 
 use crate::{
-    errors::{PunctKind, SemanticsKind, UnsynError},
+    errors::{PunctKind, SemanticsKind, CompileError},
     input::UnsynInput,
     syntax::Path,
     token::{
@@ -111,10 +111,10 @@ where
 }
 
 #[inline]
-fn map_expr_err(err: UnsynError) -> UnsynError {
+fn map_expr_err(err: CompileError) -> CompileError {
     match err {
-        UnsynError::Semantics(SemanticsKind::Keyword, span) => {
-            UnsynError::Punct(PunctKind::Semi, ControlFlow::Fatal, span)
+        CompileError::Semantics(SemanticsKind::Keyword, span) => {
+            CompileError::Punct(PunctKind::Semi, ControlFlow::Fatal, span)
         }
         _ => err,
     }

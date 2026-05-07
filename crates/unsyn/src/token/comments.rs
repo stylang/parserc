@@ -8,7 +8,7 @@ use parserc::{
 };
 
 use crate::{
-    errors::{SyntaxKind, UnsynError},
+    errors::{SyntaxKind, CompileError},
     input::UnsynInput,
 };
 
@@ -33,7 +33,7 @@ where
 
         match header.len() {
             0 | 1 | 3 => {
-                return Err(UnsynError::Syntax(
+                return Err(CompileError::Syntax(
                     SyntaxKind::LineComment,
                     ControlFlow::Recovable,
                     header.to_span(),
@@ -41,7 +41,7 @@ where
             }
             2 => match input.iter().next() {
                 Some('!') | Some('\n') => {
-                    return Err(UnsynError::Syntax(
+                    return Err(CompileError::Syntax(
                         SyntaxKind::LineComment,
                         ControlFlow::Recovable,
                         content.to_span_with(3),
@@ -115,7 +115,7 @@ where
         keyword("///").parse(input)?;
 
         if let Some('/') = input.iter().next() {
-            return Err(UnsynError::Syntax(
+            return Err(CompileError::Syntax(
                 SyntaxKind::OuterLineDoc,
                 ControlFlow::Recovable,
                 content.to_span_with(4),
@@ -158,7 +158,7 @@ where
 
         match iter.next() {
             Some('!') => {
-                return Err(UnsynError::Syntax(
+                return Err(CompileError::Syntax(
                     SyntaxKind::BlockComment,
                     ControlFlow::Recovable,
                     content.to_span_with(3),
@@ -168,7 +168,7 @@ where
                 Some('*') => {}
                 Some('/') => return Ok(Self(content.split_to(4))),
                 _ => {
-                    return Err(UnsynError::Syntax(
+                    return Err(CompileError::Syntax(
                         SyntaxKind::BlockComment,
                         ControlFlow::Recovable,
                         content.to_span_with(3),
@@ -191,7 +191,7 @@ where
             offset += rest.len();
 
             if input.is_empty() {
-                return Err(UnsynError::Syntax(
+                return Err(CompileError::Syntax(
                     SyntaxKind::BlockComment,
                     ControlFlow::Recovable,
                     content.to_span_with(offset),
@@ -249,7 +249,7 @@ where
             offset += rest.len();
 
             if input.is_empty() {
-                return Err(UnsynError::Syntax(
+                return Err(CompileError::Syntax(
                     SyntaxKind::InnerBlockDoc,
                     ControlFlow::Recovable,
                     content.to_span_with(offset),
@@ -295,7 +295,7 @@ where
             .map_err(SyntaxKind::OuterBlockDoc.map())?;
 
         if let Some('*') = input.iter().next() {
-            return Err(UnsynError::Syntax(
+            return Err(CompileError::Syntax(
                 SyntaxKind::OuterBlockDoc,
                 ControlFlow::Recovable,
                 content.to_span_with(3),
@@ -315,7 +315,7 @@ where
             offset += rest.len();
 
             if input.is_empty() {
-                return Err(UnsynError::Syntax(
+                return Err(CompileError::Syntax(
                     SyntaxKind::OuterBlockDoc,
                     ControlFlow::Recovable,
                     content.to_span_with(offset),
@@ -369,7 +369,7 @@ mod tests {
     use parserc::{ControlFlow, syntax::SyntaxExt};
 
     use crate::{
-        errors::{SyntaxKind, UnsynError},
+        errors::{SyntaxKind, CompileError},
         input::Chars,
     };
 
@@ -399,7 +399,7 @@ mod tests {
         for (input, unexpect) in non_line_comments {
             assert_eq!(
                 Chars::new(input).parse::<LineComment<_>>(),
-                Err(UnsynError::Syntax(
+                Err(CompileError::Syntax(
                     SyntaxKind::LineComment,
                     ControlFlow::Recovable,
                     Span::from(0..unexpect.len())
@@ -409,7 +409,7 @@ mod tests {
 
         assert_eq!(
             Chars::new("").parse::<LineComment<_>>(),
-            Err(UnsynError::Syntax(
+            Err(CompileError::Syntax(
                 SyntaxKind::LineComment,
                 ControlFlow::Recovable,
                 Span::from(0..0)
@@ -437,7 +437,7 @@ mod tests {
         for (input, unexpect) in none_inner_line_docs {
             assert_eq!(
                 Chars::new(input).parse::<InnerLineDoc<_>>(),
-                Err(UnsynError::Syntax(
+                Err(CompileError::Syntax(
                     SyntaxKind::InnerLineDoc,
                     ControlFlow::Recovable,
                     Span::from(0..unexpect.len())
@@ -485,7 +485,7 @@ mod tests {
         for (input, unexpect) in non_block_comments {
             assert_eq!(
                 Chars::new(input).parse::<BlockComment<_>>(),
-                Err(UnsynError::Syntax(
+                Err(CompileError::Syntax(
                     SyntaxKind::BlockComment,
                     ControlFlow::Recovable,
                     Span::from(0..unexpect.len())
@@ -513,7 +513,7 @@ mod tests {
         for (input, unexpect) in non_outer_block_docs {
             assert_eq!(
                 Chars::new(input).parse::<OuterBlockDoc<_>>(),
-                Err(UnsynError::Syntax(
+                Err(CompileError::Syntax(
                     SyntaxKind::OuterBlockDoc,
                     ControlFlow::Recovable,
                     Span::from(0..unexpect.len())

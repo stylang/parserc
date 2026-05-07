@@ -2,13 +2,13 @@
 
 use parserc::sourceinput::{self, CharsInput, SplitTo};
 
-use crate::errors::UnsynError;
+use crate::errors::CompileError;
 
 /// Source code segement for `unsyn` parser.
-pub type Chars<'a> = sourceinput::Chars<'a, UnsynError>;
+pub type Chars<'a> = sourceinput::Chars<'a, CompileError>;
 
 /// `input` type for `unsyn` parser.
-pub trait UnsynInput: CharsInput<UnsynError> + SplitTo {}
+pub trait UnsynInput: CharsInput<CompileError> + SplitTo {}
 
 /// impl [`UnsynInput`] for `Chars<'a, UnsynError>`
 impl<'a> UnsynInput for Chars<'a> {}

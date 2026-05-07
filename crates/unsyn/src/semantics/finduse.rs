@@ -1,5 +1,5 @@
 use crate::{
-    errors::UnsynError,
+    errors::CompileError,
     input::UnsynInput,
     syntax::{Module, UseDeclaration},
     visit::Visitor,
@@ -9,13 +9,13 @@ use crate::{
 #[derive(Default)]
 struct FindUse<F> {
     f: F,
-    errors: Vec<UnsynError>,
+    errors: Vec<CompileError>,
 }
 
 impl<I, F> Visitor<I> for FindUse<F>
 where
     I: UnsynInput,
-    F: FnMut(UseDeclaration<I>) -> Result<(), UnsynError>,
+    F: FnMut(UseDeclaration<I>) -> Result<(), CompileError>,
 {
     fn visit_item_use(
         &mut self,
@@ -36,10 +36,10 @@ where
 
 /// locate all use statements within a module.
 #[inline]
-pub fn finduse<I, F>(module: &mut Module<I>, f: F) -> Result<(), Vec<UnsynError>>
+pub fn finduse<I, F>(module: &mut Module<I>, f: F) -> Result<(), Vec<CompileError>>
 where
     I: UnsynInput,
-    F: FnMut(UseDeclaration<I>) -> Result<(), UnsynError>,
+    F: FnMut(UseDeclaration<I>) -> Result<(), CompileError>,
 {
     let mut find = FindUse {
         f,
@@ -75,6 +75,6 @@ mod tests {
         })
         .unwrap();
 
-        assert_eq!(counter, 1)
+        assert_eq!(counter, 1);
     }
 }

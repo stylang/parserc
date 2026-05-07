@@ -2,6 +2,7 @@
 
 #![cfg_attr(docsrs, feature(doc_cfg))]
 
+pub mod crates;
 pub mod errors;
 pub mod input;
 pub mod semantics;
