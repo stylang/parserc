@@ -1,6 +1,11 @@
 //! The `crate` is the minimal compilation unit of `unsyn`
 
-use std::{collections::HashMap, fs, mem::transmute, path::Path};
+use std::{
+    collections::HashMap,
+    fs,
+    mem::transmute,
+    path::{Path, PathBuf},
+};
 
 use parserc::{
     sourceinput::{Length, Source, Span, ToSpan},
@@ -8,7 +13,7 @@ use parserc::{
 };
 
 use crate::{
-    errors::{CompileError, SemanticsKind, SyntaxKind, UnsynError},
+    errors::{CompileError, SemanticsKind, UnsynError},
     input::Chars,
     semantics::finduse,
     syntax::{self, UseDeclaration},
@@ -85,8 +90,9 @@ impl Module {
 
 /// The minimal compilation unit of `unsyn`
 #[allow(unused)]
-#[derive(Default)]
 pub struct Crate {
+    /// entry path
+    entry: PathBuf,
     /// loaded source files.
     modules: HashMap<String, Module>,
     /// symbols within the scope of this crate
@@ -99,19 +105,36 @@ impl Crate {
     where
         P: AsRef<Path>,
     {
-        let mut c = Crate::default();
+        let mut c = Crate {
+            entry: entry.as_ref().to_owned(),
+            modules: Default::default(),
+            symbols: Default::default(),
+        };
 
-        c.load(entry)?;
+        c.load_module(entry)?;
 
         Ok(c)
     }
 
-    fn load<P: AsRef<Path>>(&mut self, path: P) -> Result<(), UnsynError> {
-        let module = Module::parse(&path)?;
+    /// load a module.
+    fn load_module<P: AsRef<Path>>(&mut self, path: P) -> Result<(), UnsynError> {
+        let mut module = Module::parse(&path)?;
+
+        self.analyze_mod_stmts(&mut module)?;
+
+        self.analyze_use_stmts(&mut module)?;
 
         self.modules
             .insert(path.as_ref().to_str().unwrap().to_owned(), module);
 
+        Ok(())
+    }
+
+    fn analyze_mod_stmts(&mut self, _module: &mut Module) -> Result<(), UnsynError> {
+        Ok(())
+    }
+
+    fn analyze_use_stmts(&mut self, _module: &mut Module) -> Result<(), UnsynError> {
         Ok(())
     }
 }
