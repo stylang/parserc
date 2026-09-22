@@ -2,27 +2,27 @@ use std::{cmp, fmt::Debug};
 
 use crate::{ParseError, Span};
 
-/// An extension trait provides extra `starts_with` func to `Input`.
+/// Extension trait matching a `needle` at the start of an [`Input`].
 pub trait StartWith<Needle> {
-    /// Convert the input type to a byte slice
+    /// Returns the matched length when `self` starts with `needle`, otherwise `None`.
     fn starts_with(&self, needle: Needle) -> Option<usize>;
 }
 
-/// An extension trait providers extra `find` func to `Input`.
+/// Extension trait searching for a `needle` inside an [`Input`].
 pub trait Find<Needle> {
-    /// Returns the index of the first occurrence of the given needle.
+    /// Returns the offset of the first occurrence of `needle`, or `None`.
     fn find(&self, needle: Needle) -> Option<usize>;
 }
 
-/// Convert `Input` as `&[u8]`
+/// Exposes the remaining input as raw bytes.
 pub trait AsBytes {
-    /// Convert the input type to a byte slice
+    /// Returns the remaining input as a byte slice.
     fn as_bytes(&self) -> &[u8];
 }
 
-/// A trait to fetch item length.
+/// Reports the encoded length of an item.
 pub trait Length {
-    /// Returns item length.
+    /// Returns the encoded length in bytes.
     fn len(&self) -> usize;
 }
 
@@ -38,14 +38,15 @@ impl Length for &[u8] {
     }
 }
 
-/// Convert `Input` as `&str`
+/// Exposes the remaining input as a `&str`.
 pub trait AsStr {
-    /// Convert the input type to a str slice
+    /// Returns the remaining input as a `&str` slice.
     fn as_str(&self) -> &str;
 }
 
-/// The item type of the input sequence.
+/// A single item of an [`Input`] sequence.
 pub trait Item: PartialEq + Clone + Copy + Debug {
+    /// Returns the encoded length of this item in bytes.
     fn len(&self) -> usize;
 }
 
@@ -63,9 +64,9 @@ impl Item for char {
     }
 }
 
-/// Input sequence for source code.
+/// A source code stream consumed by parsers.
 pub trait Input: PartialEq + Debug {
-    /// Sequeue item.
+    /// Sequence item of this stream.
     type Item: Item;
     /// Parsing error type.
     type Error: ParseError;
@@ -74,23 +75,25 @@ pub trait Input: PartialEq + Debug {
     /// Iterator type returns by [`iter_indices`](Input::iter_indices).
     type IterIndices: Iterator<Item = (usize, Self::Item)>;
 
-    // Returns current input sequence length.
+    /// Returns the remaining length of the input in bytes.
     fn len(&self) -> usize;
 
-    /// Split the input into two at the given index.
+    /// Splits the input at `at`, consuming and returning the prefix `[0, at)`.
     ///
-    /// Afterwards self contains elements [at, len), and the returned BytesMut contains elements [0, at).
+    /// Afterwards `self` contains elements `[at, len)` and the returned `Self`
+    /// contains elements `[0, at)`.
     fn split_to(&mut self, at: usize) -> Self;
 
-    /// Split the input into two at the given index.
+    /// Splits the input at `at`, keeping the prefix `[0, at)` and returning the rest.
     ///
-    /// Afterwards self contains elements [0, at), and the returned `Self` contains elements [at, capacity).
+    /// Afterwards `self` contains elements `[0, at)` and the returned `Self`
+    /// contains elements `[at, len)`.
     fn split_off(&mut self, at: usize) -> Self;
 
-    /// Returns an immutable iterator over source code chars.
+    /// Returns an iterator over the remaining items.
     fn iter(&self) -> Self::Iter;
 
-    /// Returns an immutable iterator over source code chars.
+    /// Returns an iterator over `(offset, item)` pairs of the remaining input.
     fn iter_indices(&self) -> Self::IterIndices;
 
     /// Returns the start position of this input in the whole source code.
@@ -111,16 +114,17 @@ pub trait Input: PartialEq + Debug {
         Span::Range(self.start()..self.end())
     }
 
-    /// Returns the region from `start` of this input to `at` position.
+    /// Returns a span covering `at` bytes from the start of this input,
+    /// clamped to its end.
     #[inline]
     fn to_span_at(&self, at: usize) -> Span {
         Span::Range(self.start()..cmp::min(self.start() + at, self.end()))
     }
 }
 
-/// A trait provides `to_span` func.
+/// Extension trait exposing [`to_span`](ToSpan::to_span).
 pub trait ToSpan {
-    /// Returns the regiion of this input.
+    /// Returns the region of this input.
     fn to_span(&self) -> Span;
 }
 
@@ -137,7 +141,7 @@ where
     }
 }
 
-/// bytes input implementation.
+/// Byte-oriented input implementations.
 #[cfg(feature = "input")]
 pub mod bytes {
     use std::{iter::Enumerate, marker::PhantomData, str::Bytes};
@@ -147,7 +151,7 @@ pub mod bytes {
     use crate::Kind;
 
     use super::*;
-    /// Input for bytes.
+    /// [`Input`] over [`u8`] items with byte search helpers.
     pub trait BytesInput:
         Input<Item = u8>
         + AsBytes
@@ -162,15 +166,15 @@ pub mod bytes {
     {
     }
 
-    /// `BytesInput` implementation.
+    /// A `&str`-backed [`Input`] over [`u8`] items that tracks its absolute offset.
     #[derive(Eq, PartialOrd, Ord, Hash)]
     #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
     pub struct TokenStream<'a, Error = Kind> {
-        /// offset in the whole token stream.
+        /// Absolute offset of this stream inside the whole source.
         pub offset: usize,
-        /// current segement string int the whole token stream.
+        /// The remaining segment of the source.
         pub value: &'a str,
-        /// Error for this input.
+        /// Marker for the error type of this stream.
         _marker: PhantomData<Error>,
     }
 
@@ -353,7 +357,7 @@ pub mod bytes {
     impl<'a, E> BytesInput for TokenStream<'a, E> where E: ParseError + Clone {}
 }
 
-/// chars input implementation.
+/// [`char`] input implementations.
 #[cfg(feature = "input")]
 pub mod chars {
     use std::{
@@ -366,7 +370,7 @@ pub mod chars {
     use crate::Kind;
 
     use super::*;
-    /// Input for bytes.
+    /// [`Input`] over [`char`] items with search helpers.
     pub trait CharsInput:
         Input<Item = char>
         + AsBytes
@@ -379,15 +383,15 @@ pub mod chars {
     {
     }
 
-    /// `BytesInput` implementation.
+    /// A `&str`-backed [`Input`] over [`char`] items that tracks its absolute offset.
     #[derive(Eq, PartialOrd, Ord, Hash)]
     #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
     pub struct TokenStream<'a, Error = Kind> {
-        /// offset in the whole token stream.
+        /// Absolute offset of this stream inside the whole source.
         pub offset: usize,
-        /// current segement string int the whole token stream.
+        /// The remaining segment of the source.
         pub value: &'a str,
-        /// Error for this input.
+        /// Marker for the error type of this stream.
         _marker: PhantomData<Error>,
     }
 
@@ -568,4 +572,164 @@ pub mod chars {
     }
 
     impl<'a, E> CharsInput for TokenStream<'a, E> where E: ParseError + Clone {}
+}
+
+// The `TokenStream` inputs live behind the `input` feature.
+#[cfg(all(test, feature = "input"))]
+mod tests {
+    use super::*;
+
+    type Bytes = bytes::TokenStream<'static>;
+    type Chars = chars::TokenStream<'static>;
+
+    #[test]
+    fn length_and_item_sizes_follow_the_encoding() {
+        let text: &str = "abc";
+        let raw: &[u8] = b"abc";
+
+        assert_eq!(Length::len(&text), 3);
+        assert_eq!(Length::len(&raw), 3);
+
+        assert_eq!(Item::len(&b'a'), 1);
+        assert_eq!(Item::len(&'a'), 1);
+        assert_eq!(Item::len(&'é'), 2);
+    }
+
+    #[test]
+    fn bytes_stream_tracks_absolute_offsets() {
+        let input = Bytes::from("abc");
+
+        assert_eq!(input.start(), 0);
+        assert_eq!(input.end(), 3);
+        assert_eq!(input.len(), 3);
+        assert_eq!(input.to_span(), Span::Range(0..3));
+
+        let input = Bytes::from((5, "abc"));
+
+        assert_eq!(input.start(), 5);
+        assert_eq!(input.end(), 8);
+        assert!(!input.is_empty());
+        assert!(Bytes::from("").is_empty());
+    }
+
+    #[test]
+    fn split_to_returns_the_prefix_and_moves_the_rest() {
+        let mut input = Bytes::from((5, "abcd"));
+
+        let prefix = input.split_to(2);
+
+        assert_eq!(prefix.as_str(), "ab");
+        assert_eq!(prefix.start(), 5);
+        assert_eq!(prefix.end(), 7);
+        assert_eq!(input.as_str(), "cd");
+        assert_eq!(input.start(), 7);
+        assert_eq!(input.end(), 9);
+    }
+
+    #[test]
+    fn split_off_keeps_the_prefix() {
+        let mut input = Bytes::from((5, "abcd"));
+
+        let suffix = input.split_off(2);
+
+        assert_eq!(input.as_str(), "ab");
+        assert_eq!(input.start(), 5);
+        assert_eq!(suffix.as_str(), "cd");
+        assert_eq!(suffix.start(), 7);
+        assert_eq!(suffix.end(), 9);
+    }
+
+    #[test]
+    fn iterators_cover_the_remaining_items() {
+        let mut input = Bytes::from((5, "abc"));
+        input.split_to(1);
+
+        let items: Vec<u8> = input.iter().collect();
+        let indexed: Vec<(usize, u8)> = input.iter_indices().collect();
+
+        assert_eq!(items, b"bc".to_vec());
+        // Indices are relative to the remaining slice, offsets stay absolute.
+        assert_eq!(indexed, vec![(0, b'b'), (1, b'c')]);
+        assert_eq!(input.start(), 6);
+    }
+
+    #[test]
+    fn views_expose_bytes_and_str() {
+        let input = Bytes::from("abc");
+
+        assert_eq!(input.as_bytes(), &b"abc"[..]);
+        assert_eq!(input.as_str(), "abc");
+    }
+
+    #[test]
+    fn starts_with_reports_the_matched_length() {
+        let input = Bytes::from("abc");
+
+        assert_eq!(StartWith::<&str>::starts_with(&input, "ab"), Some(2));
+        assert_eq!(StartWith::<&str>::starts_with(&input, "z"), None);
+        assert_eq!(StartWith::<&[u8]>::starts_with(&input, &b"ab"[..]), Some(2));
+        assert_eq!(StartWith::<&[u8]>::starts_with(&input, &b"bc"[..]), None);
+        assert_eq!(StartWith::<&[u8; 2]>::starts_with(&input, b"ab"), Some(2));
+    }
+
+    #[test]
+    fn find_reports_the_first_slice_relative_offset() {
+        let input = Bytes::from((5, "abcabc"));
+
+        assert_eq!(Find::<&str>::find(&input, "bc"), Some(1));
+        assert_eq!(Find::<&str>::find(&input, "z"), None);
+        assert_eq!(Find::<&[u8]>::find(&input, &b"ca"[..]), Some(2));
+        assert_eq!(Find::<&[u8; 2]>::find(&input, b"ca"), Some(2));
+    }
+
+    #[test]
+    fn to_span_at_clamps_to_the_end() {
+        let input = Bytes::from((5, "a"));
+
+        assert_eq!(input.to_span_at(0), Span::Range(5..5));
+        assert_eq!(input.to_span_at(3), Span::Range(5..6));
+        assert_eq!(Bytes::from((5, "abc")).to_span_at(2), Span::Range(5..7));
+    }
+
+    #[test]
+    fn to_span_of_an_optional_input_is_none_without_a_value() {
+        let input = Bytes::from((5, "abc"));
+
+        assert_eq!(Some(input).to_span(), Span::Range(5..8));
+        assert_eq!(Option::<Bytes>::None.to_span(), Span::None);
+    }
+
+    #[test]
+    fn chars_stream_splits_on_char_boundaries() {
+        let mut input = Chars::from((5, "é!"));
+
+        let prefix = input.split_to(2);
+
+        assert_eq!(prefix.as_str(), "é");
+        assert_eq!(prefix.to_span(), Span::Range(5..7));
+        assert_eq!(input.as_str(), "!");
+        assert_eq!(input.start(), 7);
+    }
+
+    #[test]
+    fn chars_stream_iterates_over_chars() {
+        let input = Chars::from("éa");
+
+        let items: Vec<char> = input.iter().collect();
+        let indexed: Vec<(usize, char)> = input.iter_indices().collect();
+
+        assert_eq!(items, vec!['é', 'a']);
+        // Char indices carry byte offsets inside the remaining slice.
+        assert_eq!(indexed, vec![(0, 'é'), (2, 'a')]);
+    }
+
+    #[test]
+    fn chars_stream_searches_with_str_needles() {
+        let input = Chars::from("héllo");
+
+        // Needle lengths and offsets are measured in bytes.
+        assert_eq!(StartWith::<&str>::starts_with(&input, "hé"), Some(3));
+        assert_eq!(StartWith::<&str>::starts_with(&input, "x"), None);
+        assert_eq!(Find::<&str>::find(&input, "ll"), Some(3));
+    }
 }

@@ -1,7 +1,7 @@
 //! literal tokens.
 
 use parserc::{
-    ControlFlow, ParseError, Parser, keyword, next_if, syntax::Syntax, take_while, take_while_range,
+    ControlFlow, ParseError, Parser, keyword, next_if, syntax::Syntax, take_while, take_while_with,
 };
 
 use crate::{
@@ -103,7 +103,7 @@ fn parse_unicode_hex_digits<I>(input: &mut I) -> Result<I, UnsynError>
 where
     I: UnsynInput,
 {
-    take_while_range(1..7, |c: char| c.is_ascii_hexdigit())
+    take_while_with(1..7, |c: char| c.is_ascii_hexdigit())
         .parse(input)
         .map_err(SemanticsKind::UnicodeEscape.map())
 }
@@ -211,7 +211,7 @@ where
             .parse(input)
             .map_err(SyntaxKind::Unicode.map())?;
 
-        take_while_range(4..5, |c: char| c.is_ascii_hexdigit())
+        take_while_with(4..5, |c: char| c.is_ascii_hexdigit())
             .parse(input)
             .map_err(|err| {
                 UnsynError::Semantics(SemanticsKind::Unicode, prefix.to_span() + err.to_span())

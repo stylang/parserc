@@ -1,18 +1,23 @@
 use crate::Span;
 
-/// A variant type to control error handle.
+/// Controls how an error affects the parsing process.
 #[derive(Debug, PartialEq, Eq, PartialOrd, Ord, Clone, Copy, Hash)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub enum ControlFlow {
-    /// A fatal error must broke the parsing process.
+    /// The parsing process cannot continue; backtracking combinators propagate
+    /// this error instead of trying alternatives.
     Fatal,
-    /// A recovable error generally lead to a retrospective parsing process.
+    /// The parser did not match; an alternative parser may still succeed.
+    ///
+    /// (The variant name keeps the crate's historical spelling of "recoverable".)
     Recovable,
-    /// This error means that the parsing process failed because it reached the end of the input stream.
+    /// The input stream ended before the parser could finish.
     Incomplete,
 }
 
-/// Error kind returns by builtin parser combinators.
+/// Error kind returned by the built-in parser combinators.
+///
+/// Every variant carries its [`ControlFlow`] code and the [`Span`] it points to.
 #[derive(thiserror::Error, Debug, PartialEq, Eq, Hash, Clone)]
 pub enum Kind {
     #[error("Error from `next` combinator")]
@@ -43,16 +48,16 @@ pub enum Kind {
     LeftRecursion(ControlFlow, Span),
 }
 
-/// A error type returns by parser combinators.
+/// Error type returned by parser combinators.
 pub trait ParseError: From<Kind> {
-    /// Returns the span of this error indicates to.
+    /// Returns the [`Span`] this error points to.
     fn to_span(&self) -> Span;
-    /// Returns `ControlFlow` code of this error.
+    /// Returns the [`ControlFlow`] code of this error.
     fn control_flow(&self) -> ControlFlow;
-    /// Ensure this error is an fatal error.
+    /// Converts this error into a [`ControlFlow::Fatal`] one.
     fn into_fatal(self) -> Self;
 
-    /// Returns true if it's `control_flow == ControlFlow::Fatal`
+    /// Returns `true` when `control_flow() == ControlFlow::Fatal`.
     #[inline]
     fn is_fatal(&self) -> bool {
         self.control_flow() == ControlFlow::Fatal
@@ -112,5 +117,76 @@ impl ParseError for Kind {
             Kind::LimitsFrom(_, span) => span.clone(),
             Kind::LeftRecursion(_, span) => span.clone(),
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    const FLOWS: [ControlFlow; 3] = [
+        ControlFlow::Fatal,
+        ControlFlow::Recovable,
+        ControlFlow::Incomplete,
+    ];
+
+    fn span() -> Span {
+        Span::Range(3..7)
+    }
+
+    /// Builds one `Kind` per enum case, all carrying `flow` and `span()`.
+    fn all_kinds(flow: ControlFlow) -> Vec<Kind> {
+        vec![
+            Kind::Next(flow, span()),
+            Kind::NextIf(flow, span()),
+            Kind::Keyword(flow, span()),
+            Kind::Syntax("node", flow, span()),
+            Kind::Token("token", flow, span()),
+            Kind::LimitsTo(flow, span()),
+            Kind::Limits(flow, span()),
+            Kind::LimitsFrom(flow, span()),
+            Kind::TakeUntil(flow, span()),
+            Kind::TakeWhileRange(flow, span()),
+            Kind::TakeWhileFrom(flow, span()),
+            Kind::TakeWhileTo(flow, span()),
+            Kind::LeftRecursion(flow, span()),
+        ]
+    }
+
+    #[test]
+    fn control_flow_returns_the_attached_code() {
+        for flow in FLOWS {
+            for kind in all_kinds(flow) {
+                assert_eq!(kind.control_flow(), flow);
+            }
+        }
+    }
+
+    #[test]
+    fn to_span_returns_the_attached_span() {
+        for flow in FLOWS {
+            for kind in all_kinds(flow) {
+                assert_eq!(kind.to_span(), span());
+            }
+        }
+    }
+
+    #[test]
+    fn into_fatal_promotes_every_kind() {
+        for flow in FLOWS {
+            for kind in all_kinds(flow) {
+                let fatal = kind.into_fatal();
+
+                assert!(fatal.is_fatal());
+                assert_eq!(fatal.to_span(), span());
+            }
+        }
+    }
+
+    #[test]
+    fn is_fatal_matches_the_fatal_flow() {
+        assert!(Kind::Next(ControlFlow::Fatal, span()).is_fatal());
+        assert!(!Kind::Next(ControlFlow::Recovable, span()).is_fatal());
+        assert!(!Kind::Next(ControlFlow::Incomplete, span()).is_fatal());
     }
 }

@@ -1,4 +1,4 @@
-//！ `span` is a region of source code
+//! Source code regions ([`Span`]) shared by the `parserc` toolchain.
 #![cfg_attr(docsrs, feature(doc_cfg))]
 
 use std::{
@@ -50,9 +50,9 @@ impl<Idx> Span<Idx>
 where
     Idx: Ord + Copy,
 {
-    /// Create a range between two `span`s.
+    /// Returns the region lying between the two spans.
     ///
-    /// If two spans intersect, returns `Span::None`.
+    /// Returns [`Span::None`] when the two spans intersect.
     #[inline]
     pub fn between(&self, other: &Self) -> Span<Idx> {
         match (self, other) {
@@ -128,7 +128,7 @@ where
         }
     }
 
-    /// Union two range.
+    /// Merges the two spans into the smallest span covering both.
     #[inline]
     pub fn union(&self, other: &Self) -> Self {
         match (self, other) {

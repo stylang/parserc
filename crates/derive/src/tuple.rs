@@ -1,3 +1,6 @@
+//! Implementation of the `derive_tuple_syntax!` macro: emits `Syntax` impls for
+//! tuples of increasing arity.
+
 use proc_macro::TokenStream;
 use quote::quote;
 use syn::{Error, LitInt, parse_macro_input};
