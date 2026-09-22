@@ -9,6 +9,10 @@ Note: In this file, do not use the hard wrap in the middle of a sentence for
 compatibility with GitHub comment style markdown rendering.
 -->
 
+## [0.13.0] - 2026-09-22
+
+- take_while_*: now `non-greedy` matching alogrithem.
+
 ## [0.12.7] - 2026-01-02
 
 - fixed `semantic` option derive bug.

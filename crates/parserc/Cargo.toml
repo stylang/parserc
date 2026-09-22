@@ -21,3 +21,21 @@ default = ["serde","syntax","input"]
 input = ["memchr"]
 serde = ["dep:serde","serde/derive", "sourcespan/serde"]
 syntax = ["parserc-derive"]
+
+[dev-dependencies]
+divan = "0.1.21"
+
+[[bench]]
+name = "input"
+harness = false
+required-features = ["input"]
+
+[[bench]]
+name = "combinators"
+harness = false
+required-features = ["input"]
+
+[[bench]]
+name = "syntax"
+harness = false
+required-features = ["syntax", "input"]
