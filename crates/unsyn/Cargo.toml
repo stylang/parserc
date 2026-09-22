@@ -11,7 +11,7 @@ version.workspace = true
 thiserror = "2.0.17"
 unicode-ident = "1.0.22"
 serde = { version = "1.0.228", optional = true }
-parserc = { path = "../parserc", version = "^0.12", default-features = false, features = ["syntax","input"] }
+parserc = { path = "../parserc", version = "^0.13", default-features = false, features = ["syntax","input"] }
 
 [dev-dependencies]
 walkdir = "2"
