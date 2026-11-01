@@ -1,0 +1,21 @@
+[package]
+description = "A Rust code generation framework for opcode tables, instruction visitors, and dispatch logic"
+documentation = "https://docs.rs/opgen"
+edition = "2024"
+license = "MIT"
+name = "opgen"
+repository = "https://github.com/stylang/stylang/crates/opgen"
+version.workspace = true
+
+[dependencies]
+thiserror = "2.0.17"
+unicode-ident = "1.0.22"
+serde = { version = "1.0.228", optional = true }
+parserc = { path = "../parserc", version = "^0.13", default-features = false, features = ["syntax","input"] }
+
+[dev-dependencies]
+walkdir = "2"
+
+[features]
+default = ["serde"]
+serde = ["dep:serde","parserc/serde"]
