@@ -1,0 +1,45 @@
+/// Virtual keyboard / IME input mode.
+enum InputMode {
+    /// No virtual keyboard.
+    None,
+    /// Default text input.
+    Text,
+    /// Search input.
+    Search,
+    /// Email address input.
+    Email,
+    /// URL input.
+    Url,
+    /// Telephone number input.
+    Tel,
+    /// Numeric input (digits only).
+    Numeric,
+    /// Decimal input (digits + decimal separator).
+    Decimal,
+    /// Messaging / chat input.
+    Chat,
+}
+
+/// Enter/Return key semantic hint.
+enum EnterKeyHint {
+    Enter,
+    Done,
+    Go,
+    Next,
+    Previous,
+    Search,
+    Send,
+}
+
+/// Bitmask for IME composition, autocorrect, and capitalization policies.
+#[bitflags]
+enum ImeOptions {
+    AutocorrectOn,
+    AutocorrectOff,
+    SpellcheckOn,
+    SpellcheckOff,
+    AutocapitalizeSentences,
+    AutocapitalizeWords,
+    AutocapitalizeChars,
+    InlineCandidates,
+}

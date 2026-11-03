@@ -1,0 +1,373 @@
+/// The layout mode of an element — payload for `Attr::DISPLAY`.
+enum Display {
+    /// Flexbox layout.
+    Flex,
+    /// CSS Grid layout.
+    Grid,
+    /// Element is hidden and does not participate in layout.
+    None,
+}
+
+/// Flex container main axis direction.
+enum FlexDirection {
+    /// Left-to-right (horizontal).
+    Row,
+
+    /// Right-to-left (horizontal).
+    RowReverse,
+
+    /// Top-to-bottom (vertical).
+    Column,
+
+    /// Bottom-to-top (vertical).
+    ColumnReverse,
+}
+
+/// Whether flex items wrap onto multiple lines.
+enum FlexWrap {
+    /// Items stay on a single line.
+    NoWrap,
+
+    /// Items wrap onto multiple lines (top-to-bottom).
+    Wrap,
+
+    /// Items wrap onto multiple lines (bottom-to-top).
+    WrapReverse,
+}
+
+/// Alignment of items along the flex container's main axis.
+enum JustifyContent {
+    /// Pack items toward the start of the main axis.
+    Start,
+
+    /// Pack items toward the end of the main axis.
+    End,
+
+    /// Center items along the main axis.
+    Center,
+
+    /// Distribute items with equal space between them.
+    SpaceBetween,
+
+    /// Distribute items with equal space around them.
+    SpaceAround,
+
+    /// Distribute items with equal space between and around them.
+    SpaceEvenly,
+}
+
+/// Alignment of items along the flex container's cross axis.
+enum AlignItems {
+    /// Pack items toward the start of the cross axis.
+    Start,
+
+    /// Pack toward the end of the cross axis.
+    End,
+
+    /// Center items along the cross axis.
+    Center,
+
+    /// Align items to the baseline.
+    Baseline,
+
+    /// Stretch items to fill the container's cross axis.
+    Stretch,
+}
+
+/// Alignment of *lines* within a multi-line flex container.
+enum AlignContent {
+    /// Pack lines toward the start of the cross axis.
+    Start,
+
+    /// Pack lines toward the end of the cross axis.
+    End,
+
+    /// Center lines along the cross axis.
+    Center,
+
+    /// Distribute lines with equal space between them.
+    SpaceBetween,
+
+    /// Distribute lines with equal space around them.
+    SpaceAround,
+
+    /// Stretch lines to fill the container's cross axis.
+    Stretch,
+}
+
+/// Alignment of a single flex item on the cross axis.
+enum AlignSelf {
+    /// Inherit the parent's [`AlignItems`] value.
+    Auto,
+
+    /// Pack toward the start of the cross axis.
+    Start,
+
+    /// Pack toward the end of the cross axis.
+    End,
+
+    /// Center along the cross axis.
+    Center,
+
+    /// Align to the baseline.
+    Baseline,
+
+    /// Stretch to fill the cross axis.
+    Stretch,
+}
+
+/// Per-child alignment inside a **stack** container — payload for
+/// `Attr::STACK_ALIGN` (1 byte, inline).
+///
+/// Jetpack parity (the `Box` alignment model, decision 5): the nine
+/// anchors are the cartesian product of a horizontal and a vertical
+/// placement (Jetpack's `BiasAlignment(-1..1, -1..1)` grid), and [`Fill`]
+/// is Jetpack's `matchParentSize` — a child that stretches to the stack's
+/// final size without contributing to the stack's hug. Absence of the
+/// attribute on a child means [`StackAlign::TopStart`], exactly `Box`'s
+/// default `contentAlignment`.
+///
+/// Stacking order (which child paints and receives input on top) is **not**
+/// carried here: it follows the children's order in the tree, the same
+/// convention `Attr::OVERLAY` documents — no z-index channel exists.
+enum StackAlign {
+    /// Anchor the child's top-left corner at the stack's top-left (Jetpack
+    /// `Alignment.TopStart`).
+    TopStart,
+
+    /// Anchor the child's top edge to the stack's top, centered
+    /// horizontally (Jetpack `Alignment.TopCenter`).
+    TopCenter,
+
+    /// Anchor the child's top-right corner at the stack's top-right
+    /// (Jetpack `Alignment.TopEnd`).
+    TopEnd,
+
+    /// Anchor the child's left edge to the stack's start, centered
+    /// vertically (Jetpack `Alignment.CenterStart`).
+    CenterStart,
+
+    /// Center the child on both axes (Jetpack `Alignment.Center`).
+    Center,
+
+    /// Anchor the child's right edge to the stack's end, centered
+    /// vertically (Jetpack `Alignment.CenterEnd`).
+    CenterEnd,
+
+    /// Anchor the child's bottom-left corner at the stack's bottom-left
+    /// (Jetpack `Alignment.BottomStart`).
+    BottomStart,
+
+    /// Anchor the child's bottom edge to the stack's bottom, centered
+    /// horizontally (Jetpack `Alignment.BottomCenter`).
+    BottomCenter,
+
+    /// Anchor the child's bottom-right corner at the stack's bottom-right
+    /// (Jetpack `Alignment.BottomEnd`).
+    BottomEnd,
+
+    /// Stretch the child to the stack's final size on both axes and place
+    /// it at the stack's origin (Jetpack's `matchParentSize`): measured
+    /// tight at the settled stack size and excluded from the stack's hug,
+    /// so a full-bleed scrim never grows the box it covers.
+    Fill,
+}
+
+/// Payload for `Attr::FLEX_ITEM` — per-child flex configuration.
+///
+/// Layout: 3 × `f32` = 12 bytes, zero padding, naturally 4-byte aligned.
+struct FlexItem {
+    /// Growth factor. How much this item should grow relative to others when
+    /// there is extra space along the main axis. `0.0` means no growth.
+    grow: f32,
+    /// Shrink factor. How much this item should shrink relative to others
+    /// when there is not enough space along the main axis. `0.0` means no
+    /// shrink.
+    shrink: f32,
+    /// Basis in logical pixels; `0.0` means auto (content size).
+    /// Corresponds to CSS `flex-basis`.
+    basis: f32,
+}
+
+/// Which intrinsic answer a node pins one axis of its measured size to —
+/// payload for `Attr::INTRINSIC_SIZE` (1 byte, inline).
+///
+/// The style-level carrier of the intrinsic-size pin (design:
+/// `.tmp_test_work/INTRINSIC_API.md`, §5-4). As an attribute it rides the
+/// usual attr diff into the instruction stream, which is what lets
+/// **native-layout backends** — where the frontend `layout()` pass is
+/// skipped (`ComposerBuilder::native_layout_support`) — apply the same pin
+/// semantics (see the design decisions in `AGENTS.md`). Both axes × both
+/// content flavors, mirroring the four `Layout::*_intrinsic_*` queries.
+///
+/// # Who consumes it
+///
+/// Only **native-layout backends**: the attribute rides attr diff into the
+/// instruction stream, and the backend — which owns layout where the
+/// frontend `layout()` pass is skipped — executes the pin. The frontend's
+/// framework measure path never reads it (decision 4, Jetpack discipline:
+/// intrinsic is a query API invoked only inside layout algorithms that
+/// need content sizes, e.g. flex bases / grid track sizing); a frontend
+/// layout that needs content-driven sizing queries
+/// `Layout::*_intrinsic_*` inside its own `measure`.
+///
+/// Set it on a node whose marked axis **cannot be derived from the
+/// incoming constraints** — i.e. the node's content decides its own size
+/// (mirroring Compose's `Modifier.intrinsicSize`).
+enum IntrinsicSize {
+    /// `width: max-content` — pin the width to the roomiest natural width
+    /// the content would take without wrapping.
+    MaxWidth,
+
+    /// `width: min-content` — pin the width to the tightest width the
+    /// content still works at (longest word / widest row).
+    MinWidth,
+
+    /// `height: max-content` — pin the height to the tallest stack before
+    /// wrapping.
+    MaxHeight,
+
+    /// `height: min-content` — pin the height to the shortest stack the
+    /// content still works at.
+    MinHeight,
+}
+
+/// Min/max constraints on both axes — payload for `Attr::SIZE_MIN_MAX`.
+///
+/// Each axis can be set independently using [`Length`], supporting
+/// auto/px/percent units. Layout: 4 × `Length` = 32 bytes, zero padding.
+struct MinMaxSize {
+    min_width: Length,
+    max_width: Length,
+    min_height: Length,
+    max_height: Length,
+}
+
+/// Inner spacing on each side — payload for `Attr::PADDING`.
+///
+/// Layout: 4 × `f32` = 16 bytes, zero padding. Pixels only — percentages
+/// are intentionally excluded.
+struct Padding {
+    top: f32,
+    right: f32,
+    bottom: f32,
+    left: f32,
+}
+
+/// Row and column gap between children — payload for `Attr::GAP`.
+///
+/// Layout: 2 × `f32` = 8 bytes, zero padding.
+struct Gap {
+    row: f32,
+    column: f32,
+}
+
+/// Whether overflowing content is visible, clipped, or scrollable.
+enum Overflow {
+    /// Content is visible and may overflow the container bounds.
+    Visible,
+
+    /// Overflowing content is clipped.
+    Hidden,
+
+    /// Content is clipped but scrollable.
+    Scroll,
+}
+
+/// Positioning scheme relative to the parent.
+///
+/// SVG has no equivalent (its children are always parent-relative
+/// coordinates — see the `coords` module); this selects between normal flow
+/// and parent-edge positioning ([`Inset`] supplies the edges).
+enum Position {
+    /// Element follows normal document flow.
+    Relative,
+
+    /// Element is removed from normal flow and positioned relative to its
+    /// nearest positioned ancestor.
+    Absolute,
+}
+
+/// Offsets from each edge of the containing block — payload for
+/// `Attr::POSITION_INSET` (32 bytes: top, right, bottom, left).
+struct Inset {
+    /// Top offset; [`DimensionUnit::AUTO`] means not set.
+    top: Length,
+    /// Right offset; [`DimensionUnit::AUTO`] means not set.
+    right: Length,
+    /// Bottom offset; [`DimensionUnit::AUTO`] means not set.
+    bottom: Length,
+    /// Left offset; [`DimensionUnit::AUTO`] means not set.
+    left: Length,
+}
+
+/// Payload for `Attr::FLEX_ALIGN` — the three alignment enums packed into a
+/// single 3-byte inline value (field-level flex alignment update).
+struct FlexAlign {
+    justify_content: JustifyContent,
+    align_items: AlignItems,
+    align_content: AlignContent,
+}
+
+/// Payload for `Attr::FLEX_CONFIG` — initial flex-container setup: five
+/// one-byte decisions packed into a single 5-byte inline value.
+///
+/// The alignment triple is embedded [`FlexAlign`] rather than restating its
+/// fields — the two types stay byte-compatible by construction.
+struct FlexConfig {
+    direction: FlexDirection,
+    wrap: FlexWrap,
+    align: FlexAlign,
+}
+
+/// Payload for `Attr::SPACING` — the padding and gap boxes in one value
+/// (24 bytes; IL: "padding + gap packed, or side-table").
+///
+/// Over the 12-byte inline limit — the side-table route.
+struct Spacing {
+    padding: Padding,
+    gap: Gap,
+}
+
+/// Sizing function of a [`GridTrack`] — packed into `GridConfig`.
+enum GridTrackKind {
+    /// Fit the largest child in the track (the solver default).
+    Auto,
+    /// Fixed logical pixels (value carries them).
+    Px,
+    /// Fractional share of the leftover space inside the bound (value
+    /// carries the unit).
+    Fr,
+}
+
+/// One grid track (column or row) — element of [`GridConfig`]'s track lists.
+///
+/// Layout: kind (1) + pad (3) + value (4) = 8 bytes, zero padding — the byte
+/// image `GridConfig`'s blob carries for each entry.
+struct GridTrack {
+    kind: GridTrackKind,
+    /// `px` length or `fr` unit; ignored (`0.0`) for `auto`.
+    value: f32,
+}
+
+/// Grid container configuration — payload for `Attr::GRID_CONFIG`.
+///
+/// Track lists are dynamic, so the value is not a POD: the wire serializes it
+/// as a side-table blob in exactly this byte order (counts as `u32`
+/// little-endian; tracks and gap as raw POD bytes; the two alignment enums as
+/// single bytes):
+///
+/// ```text
+/// columns_len | columns: GridTrack × columns_len
+/// rows_len    | rows:    GridTrack × rows_len
+/// gap: Gap (8 B) | justify_items: u8 | align_items: u8
+/// ```
+///
+/// Empty track lists mean the solver derives implicit auto tracks.
+struct GridConfig {
+    columns: Vec<GridTrack>,
+    rows: Vec<GridTrack>,
+    gap: Gap,
+    justify_items: JustifyContent,
+    align_items: AlignItems,
+}

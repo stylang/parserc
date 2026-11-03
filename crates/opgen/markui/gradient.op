@@ -1,0 +1,39 @@
+/// A single color stop within a gradient.
+///
+/// `color` and `opacity` stay orthogonal (same rule as the `Rgb`/`Opacity`
+/// split): the per-stop alpha is SVG §14.5 `stop-opacity`, independent of
+/// the stop's color. `1.0` (the default) is fully opaque — gradients fade
+/// by driving this to `0` (the canonical mask/fade idiom, SVG `mask01`
+/// example).
+struct GradientStop {
+    /// Position along the gradient ramp, `0.0..=1.0`.
+    offset: f32,
+    /// Stop color (no alpha channel by design).
+    color: Rgb,
+    /// Per-stop alpha — SVG `stop-opacity`, clamped to `0.0..=1.0`.
+    opacity: f32,
+}
+
+/// Spatial geometry of a gradient.
+enum GradientKind {
+    Linear,
+    Radial,
+    Conic,
+}
+
+const MAX_GRADIENT_STOPS: usize = 8;
+
+/// Complete gradient paint definition.
+///
+/// The geometry fields describe the gradient in its own coordinate
+/// system; `transform` (SVG ch.14.5 `gradientTransform`) maps that system
+/// into user space.
+struct Gradient {
+    pub tile: u8,
+    pub kind: GradientKind,
+    pub start_or_center: Offset,
+    pub end: Offset,
+    pub radius_or_angle: f32,
+    pub transform: Transform,
+    pub stops: [GradientStop; MAX_GRADIENT_STOPS],
+}

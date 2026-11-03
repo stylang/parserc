@@ -1,0 +1,78 @@
+use crate::{TextAlign, TextDecoration};
+
+/// Font family declaration (POD, no heap allocation).
+///
+/// Uses cross-platform generic families that are mapped to system fonts
+/// at runtime. For arbitrary font names, resolve them to one of these
+/// generics during asset loading.
+enum FontFamily {
+    /// System default font (platform-chosen fallback).
+    SystemDefault,
+    /// Sans-serif (e.g. Segoe UI / San Francisco / Noto Sans).
+    SansSerif,
+    /// Serif (e.g. Times New Roman / New York / Noto Serif).
+    Serif,
+    /// Monospace (e.g. Consolas / SF Mono / Noto Mono).
+    Monospace,
+    /// UI font (system interface typeface).
+    Ui,
+    /// UI monospace (code editors, terminals).
+    UiMonospace,
+}
+
+/// Font weight (100–900).
+enum FontWeight {
+    Thin,
+    ExtraLight,
+    Light,
+    Normal,
+    Medium,
+    SemiBold,
+    Bold,
+    ExtraBold,
+    Black,
+}
+
+/// Glyph slant (upright / italic / oblique) — `Attr::FONT_VARIANT` field.
+enum FontSlant {
+    /// Upright glyphs.
+    Normal,
+    /// True italics (distinct glyphs where the family provides them).
+    Italic,
+    /// Synthetic slant of the upright face.
+    Oblique,
+}
+
+/// Horizontal glyph width scale (condensed ↔ expanded) —
+/// `Attr::FONT_VARIANT` field. Steps follow the CSS `font-stretch`
+/// keywords.
+enum FontStretch {
+    Normal,
+    UltraCondensed,
+    ExtraCondensed,
+    Condensed,
+    SemiCondensed,
+    SemiExpanded,
+    Expanded,
+    ExtraExpanded,
+    UltraExpanded,
+}
+
+/// Payload for `Attr::FONT_VARIANT` — weight + slant + stretch packed into
+/// one 4-byte inline value ("initial font variant setup").
+struct FontVariant {
+    weight: FontWeight,
+    slant: FontSlant,
+    stretch: FontStretch,
+}
+
+/// Complete typographic styling.
+struct Typography {
+    align: TextAlign,
+    decoration: TextDecoration,
+    family: FontFamily,
+    weight: FontWeight,
+    size: f32,
+    line_height: f32,
+    letter_spacing: f32,
+}

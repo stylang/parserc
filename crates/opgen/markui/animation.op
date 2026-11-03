@@ -1,0 +1,220 @@
+/// Animation property kind.
+///
+/// Each variant represents a CSS-like animatable property and carries
+/// a hint about which pipeline stages it may affect.
+enum AnimProperty {
+    /// Opacity (alpha). Composite-only; never triggers layout.
+    Opacity,
+
+    /// Horizontal translation. Composite-only.
+    TranslateX,
+
+    /// Vertical translation. Composite-only.
+    TranslateY,
+
+    /// X-axis scale factor. Composite-only.
+    ScaleX,
+
+    /// Y-axis scale factor. Composite-only.
+    ScaleY,
+
+    /// Rotation in radians, clockwise positive. Composite-only.
+    Rotation,
+
+    /// Fill / foreground color. Paint-only.
+    Color,
+
+    /// Width dimension. Layout-affecting.
+    Width,
+
+    /// Height dimension. Layout-affecting.
+    Height,
+
+    /// Padding. Layout-affecting.
+    Padding,
+
+    /// Border radius. Paint-only.
+    BorderRadius,
+
+    /// Shadow offset / blur. Paint-only.
+    Shadow,
+}
+
+
+/// Easing function kind used by animation curves.
+///
+/// Variants without parameters map to fixed easing curves.
+/// `CubicBezier` carries explicit control-point data for custom curves.
+enum Easing {
+    /// Linear interpolation: result = start + (end - start) * t
+    Linear,
+
+    /// Ease-in (accelerate): slow start, fast end
+    EaseIn,
+
+    /// Ease-out (decelerate): fast start, slow end
+    EaseOut,
+
+    /// Ease-in-out: slow start and end, fast middle
+    EaseInOut,
+
+    /// Custom cubic bezier defined by two control points (p1, p2).
+    ///
+    /// `p0` is always `(0, 0)` and `p3` is always `(1, 1)`.
+    /// The stored values are `[p1x, p1y, p2x, p2y]`.
+    CubicBezier {
+        /// First control point x.
+        p1x: f32,
+
+        /// First control point y.
+        p1y: f32,
+
+        /// Second control point x.
+        p2x: f32,
+
+        /// Second control point y.
+        p2y: f32,
+    },
+}
+
+
+/// Animation fill mode: determines how styles are applied before/after
+/// the animation's active interval.
+///
+/// Mirrors CSS `animation-fill-mode` and SMIL `fill` semantics so that
+/// both Web and Native backends can map to their native equivalents
+/// without loss of intent.
+enum AnimFillMode {
+    /// Revert to pre-animation value immediately when the animation ends.
+    /// No styles are retained outside the active interval.
+    None,
+
+    /// Retain the final keyframe value after the animation completes.
+    /// Essential for enter/exit transitions that must hold their end state.
+    Forwards,
+
+    /// Apply the first keyframe value during the delay period (before the
+    /// animation starts). Prevents a visual pop from the base style to the
+    /// start keyframe when `ANIM_DELAY > 0`.
+    Backwards,
+
+    /// Combine `FORWARDS` + `BACKWARDS`: apply first keyframe during delay
+    /// *and* retain final keyframe after completion.
+    Both,
+}
+
+/// Animation playback direction per iteration.
+///
+/// Works orthogonally with `ANIM_REPEAT`: a repeat count of 3 with
+/// `ALTERNATE` produces forward → backward → forward.
+///
+/// Mirrors CSS `animation-direction`.
+enum AnimDirection {
+    /// Every iteration plays forward (start → end).
+    Normal,
+
+    /// Every iteration plays backward (end → start).
+    Reverse,
+
+    /// Odd iterations forward, even iterations backward.
+    /// First iteration is forward.
+    Alternate,
+
+    /// Odd iterations backward, even iterations forward.
+    /// First iteration is backward.
+    AlternateReverse,
+}
+
+/// Animation execution backend preference.
+///
+/// Allows the producer to hint whether an animation should run on the
+/// platform compositor (GPU) or be driven frame-by-frame on the CPU.
+/// Backends treat this as a *hint*, not a mandate: they may fall back
+/// to CPU if the property is not compositor-friendly.
+enum AnimMode {
+    /// Prefer the platform compositor (Core Animation, WinUI Composition,
+    /// CSS `will-change` / Web Animations API). Runs off the main thread;
+    /// no per-frame callbacks to application code.
+    Native,
+
+    /// Force CPU-driven, application-ticked interpolation. Use when you
+    /// need precise intermediate values, custom per-frame logic, or when
+    /// animating a property the compositor cannot handle natively.
+    Cpu,
+}
+
+// ---------------------------------------------------------------------------
+// Dirty flags
+// ---------------------------------------------------------------------------
+
+/// Dirty mask indicating which pipeline stage must be invalidated
+/// when an animated property changes.
+///
+/// This lets the backend skip unnecessary work:
+/// - composite-only animations (opacity, transform) skip layout and paint
+/// - paint-only animations (color, shadow) skip layout
+/// - layout-affecting animations (size, padding) trigger full re-layout
+#[bitflags]
+enum AnimDirtyFlag {
+    /// No invalidation needed — fully compositor-managed.
+    ///
+    /// Distinct from the attr being *absent* in a batch:
+    /// - **Absent**: backend infers dirty scope from `ANIM_PROPERTY` using its own mapping table.
+    /// - **Explicit None**: producer guarantees no application-side invalidation is required;
+    ///   backend must not infer or override this decision.
+    None,
+
+    /// Composite-only invalidation (transform, opacity) — cheapest path.
+    /// Backend only updates layer properties; display list is reused.
+    Composite,
+
+    /// Paint invalidation (color, shadow, border) — middle cost.
+    /// Backend re-recording paint commands for the affected node.
+    Paint,
+
+    /// Layout invalidation (size, padding, margin) — most expensive.
+    /// Backend must re-run layout solver and rebuild display list.
+    Layout,
+}
+
+
+struct Spring {
+    /// Restoring force per unit of displacement.
+    stiffness: f32,
+    /// Velocity damping — higher settles faster without oscillating.
+    damping: f32,
+    /// Moving mass — larger responds more slowly.
+    mass: f32,
+}
+
+
+/// The kind of transition effect played when a view appears or disappears.
+enum TransitionKind {
+    /// No movement; the view just appears/disappears.
+    None,
+
+    /// Cross-fade through opacity.
+    Opacity,
+
+    /// Slides in/out from the nearest edge.
+    Slide,
+
+    /// Scales up/down from zero.
+    Scale,
+
+    /// Pushes the sibling aside (navigation-style).
+    Push,
+
+    /// Travels to its final position from the container edge.
+    Move,
+}
+
+
+struct Transition {
+    /// Effect when the view enters the tree.
+    insert: TransitionKind,
+    /// Effect when it leaves the tree.
+    remove: TransitionKind,
+    /// Transition duration in milliseconds (0 = default).
+    duration: f32,
+}

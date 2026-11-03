@@ -1,0 +1,242 @@
+/// Mouse cursor style when hovering over an element.
+///
+/// Corresponds to the CSS `cursor` property. On touch-only devices, this is
+/// typically ignored unless a hardware mouse/trackpad is connected.
+enum CursorStyle {
+    /// The platform default cursor (usually an arrow).
+    Auto,
+    /// The default arrow cursor.
+    Default,
+    /// A pointing hand, indicating a clickable link or button.
+    Pointer,
+    /// An I-beam, indicating selectable or editable text.
+    Text,
+    /// A four-way arrow, indicating something can be dragged/moved.
+    Move,
+    /// A slashed circle, indicating an action is not allowed.
+    NotAllowed,
+    /// An open hand, indicating something can be grabbed.
+    Grab,
+    /// A closed hand, indicating something is currently being grabbed.
+    Grabbing,
+    /// A crosshair, used for precise selection or drawing.
+    Crosshair,
+    /// A wait indicator (e.g., hourglass or spinner), indicating the app is busy.
+    Wait,
+    /// A progress indicator (e.g., arrow with spinner), indicating background activity.
+    Progress,
+    /// A question mark, indicating help information is available.
+    Help,
+    /// A magnifying glass with a plus sign.
+    ZoomIn,
+    /// A magnifying glass with a minus sign.
+    ZoomOut,
+    /// Vertical resize (North-South).
+    ResizeNs,
+    /// Horizontal resize (East-West).
+    ResizeEw,
+    /// Diagonal resize (NorthEast-SouthWest).
+    ResizeNeSw,
+    /// Diagonal resize (NorthWest-SouthEast).
+    ResizeNwSe,
+    /// Column resize (horizontal split pane).
+    ColResize,
+    /// Row resize (vertical split pane).
+    RowResize,
+}
+
+/// Controls whether an element receives pointer/touch events.
+///
+/// Corresponds to CSS `pointer-events`. Crucial for overlay elements,
+/// decorative layers, or click-through containers.
+enum PointerEvents {
+    /// The element behaves normally and can be the target of pointer events.
+    Auto,
+    /// The element is never the target of pointer events; events pass through
+    /// to elements underneath.
+    None,
+}
+
+/// Controls whether the user can select text or elements.
+///
+/// Corresponds to CSS `user-select`.
+enum UserSelect {
+    /// Default platform behavior (text is selectable, UI controls are not).
+    Auto,
+    /// Selection is explicitly disabled.
+    None,
+    /// The element's text content is selectable.
+    Text,
+    /// The entire element and its children are selected as a single unit.
+    All,
+}
+
+/// Bitmask defining allowed touch gestures on an element.
+///
+/// Corresponds to CSS `touch-action`. Essential for preventing browser/OS
+/// default gestures (like pull-to-refresh or swipe-to-go-back) from interfering
+/// with custom canvas drawing or drag interactions.
+enum TouchAction {
+    /// All default platform touch behaviors (panning, zooming) are allowed.
+    Auto,
+    /// All default touch behaviors are disabled. The element handles all touches.
+    None,
+    /// Horizontal panning is allowed.
+    PanX,
+    /// Vertical panning is allowed.
+    PanY,
+    /// Both horizontal and vertical panning are allowed.
+    Pan,
+    /// Pinch-to-zoom is allowed.
+    PinchZoom,
+    /// Panning and pinch-to-zoom are allowed.
+    Manipulation,
+}
+
+/// Auxiliary visibility state that preserves layout space.
+///
+/// Corresponds to CSS `visibility`. Unlike `Display::NONE`, this keeps the
+/// element's bounding box in the layout tree.
+enum Visibility {
+    /// The element is visible and painted.
+    Visible,
+    /// The element is invisible but still occupies layout space.
+    Hidden,
+    /// For table rows/columns or flex items: hidden and its space is collapsed,
+    /// but it still participates in layout calculations for its track.
+    Collapse,
+}
+
+/// Keyboard focus participation and tab order.
+///
+/// Maps to HTML `tabindex` and native `Focusable` / `IsTabStop` properties.
+struct TabIndex(i16);
+
+/// Complete declarative configuration for element interaction and auxiliary states.
+///
+/// This struct aggregates all interaction-related policies into a single
+/// 8-byte payload, ideal for the `INTERACTION` attribute.
+///
+/// Layout:
+/// - `cursor`: 1 byte
+/// - `pointer_events`: 1 byte
+/// - `user_select`: 1 byte
+/// - `visibility`: 1 byte
+/// - `touch_action`: 1 byte
+/// - `tab_index`: 2 bytes (i16)
+/// - `_padding`: 1 byte
+///
+/// Total: 8 bytes, zero implicit padding, naturally 4-byte aligned.
+struct InteractionConfig {
+    /// Mouse cursor style.
+    cursor: CursorStyle,
+    /// Pointer event hit-testing policy.
+    pointer_events: PointerEvents,
+    /// Text/element selection policy.
+    user_select: UserSelect,
+    /// Auxiliary visibility (preserves layout space).
+    visibility: Visibility,
+    /// Allowed touch gestures.
+    touch_action: TouchAction,
+    /// Keyboard focus tab order.
+    tab_index: TabIndex,
+}
+
+/// Payload for `Attr::STATE_FLAGS` — the element states as a bitmask:
+/// `disabled | readonly | selected | checked | focused | expanded`
+/// (1 byte, inline).
+#[bitflags]
+enum StateFlags {
+    /// User cannot activate or edit the element.
+    Disabled,
+    /// Text/contents cannot be modified (still focusable).
+    Readonly,
+    /// Chosen within a list/selector.
+    Selected,
+    /// Toggled on (checkbox, switch).
+    Checked,
+    /// Holds keyboard focus.
+    Focused,
+    /// Expanded open state — a disclosure group / collapsible section that
+    /// currently shows its content. Appended for P3 (`P3-D3`); bits are
+    /// append-only on the wire, so old readers ignore it.
+    Expanded,
+}
+
+/// Payload for `Attr::OVERLAY` — flags describing an element that renders
+/// as a floating layer (dialog, toast, popover, dropdown menu, …)
+/// (1 byte, inline).
+///
+/// Stacking and clipping are **not** carried here: paint/hit order follows
+/// the element's **attachment position in the tree** (later attachment
+/// draws and receives input on top), and attaching the overlay at scene
+/// level escapes ancestor clips. This payload only carries interaction
+/// semantics; future bits are append-only.
+enum OverlayFlags {
+    None,
+    Modal,
+}
+
+/// Semantic role override (`Attr::ACCESSIBILITY` field) — an open-ended
+/// `u8` namespace of ARIA roles (WAI-ARIA 1.2), following
+/// [`ForegroundRole`](crate::ForegroundRole)'s pattern: new roles cost
+/// nothing on the wire, unknown values pass through to the backend intact.
+///
+/// `0` means "no override" — the backend derives the default role from the
+/// element's `Elem` kind.
+#[bitflags]
+enum Role {
+    /// No override — derive the role from the element kind.
+    None,
+    Button,
+    Link,
+    Checkbox,
+    Radio,
+    Switch,
+    Textbox,
+    Searchbox,
+    Combobox,
+    Listbox,
+    Menuitem,
+    Tab,
+    Menu,
+    Menubar,
+    Tablist,
+    Dialog,
+    Alert,
+    Slider,
+    Spinbutton,
+    Progressbar,
+    Treeitem,
+}
+
+/// Live-region politeness policy (`Attr::ACCESSIBILITY` field) — WAI-ARIA
+/// `aria-live` (1 byte, inline).
+enum LiveRegion {
+    /// No announcements (the initial value).
+    Off,
+    /// Announce after idle pauses, never interrupt.
+    Polite,
+    /// Interrupt current speech.
+    Assertive,
+}
+
+/// Payload for `Attr::ACCESSIBILITY` — the semantic/a11y override bundle:
+/// role + accessible-label index + live-region policy (8 bytes, inline).
+///
+/// ```text
+/// role (1) + live (1) + pad (2) + label (4)
+/// ```
+///
+/// `label` is a side-table UTF-8 string index (`0` = none), resolved like
+/// `TEXT_CONTENT`'s string — but *inside* this inline payload (precedent:
+/// `Pattern::content`). Absence of the whole attr means "element-kind
+/// defaults": the backend derives role and label from `Elem` + `TEXT_CONTENT`.
+struct Accessibility {
+    /// Role override ([`Role`]); [`Role::NONE`] = inherit.
+    role: Role,
+    /// Live-region politeness ([`LiveRegion`]).
+    live: LiveRegion,
+    /// Side-table accessible-label string index; `0` = none.
+    label: u32,
+}

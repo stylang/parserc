@@ -1,0 +1,30 @@
+/// Presentation style of a date picker — 1-byte field of
+/// `Attr::DATE_PICKER_CONFIG` (SwiftUI `datePickerStyle`).
+enum DatePickerStyle {
+    /// Let the backend choose the platform-appropriate style (SwiftUI
+    /// `automatic`) — the default.
+    Automatic,
+
+    /// Compact inline control (a button that reveals a popover).
+    Compact,
+
+    /// Full calendar grid.
+    Graphical,
+
+    /// Scrolling wheel / picker columns (mobile).
+    Wheel,
+}
+
+/// Which fields a date picker shows — 1-byte field of
+/// `Attr::DATE_PICKER_CONFIG`.
+#[repr(transparent)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord, Zeroable, Pod)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+enum DateGranularity {
+    /// Calendar date only (day granularity) — date forms, booking ranges.
+    Date,
+    /// Time of day only — clocks, schedules.
+    Time,
+    /// Date and time together — appointment pickers.
+    DateAndTime,
+}

@@ -1,0 +1,132 @@
+/// A `<length>`: value + unit (SVG ch.7.10).
+///
+/// The atomic coordinate quantity used across coordinates, layout and
+/// painting. `auto` carries no meaningful magnitude (the field is zero).
+///
+/// Layout: `u32` unit + `f32` value = 8 bytes, zero padding (the `u32`
+/// unit is what keeps the pair naturally 4-byte aligned).
+enum Length {
+    /// Auto — size determined by content.
+    Auto(f32),
+
+    /// Logical pixels.
+    Px(f32),
+
+    /// Percentage of the parent's corresponding dimension.
+    Percent(f32),
+}
+
+/// A point in user space — an offset in the x and y directions.
+///
+/// Represents a translation (ch.7.4 `translate(tx ty)`) or any coordinate
+/// pair; both components are `<length>`s so they may mix units.
+struct Offset {
+    dx: Length,
+    dy: Length,
+}
+
+/// A rectangle: origin + size.
+///
+/// The same four numbers as a `viewBox` (SVG ch.7.7 `<min-x> <min-y>
+/// <width> <height>`) or a nested viewport's `x y width height` (ch.7.9) —
+/// but deliberately **not** the viewport itself: a viewport also has
+/// min/max size constraints (`MinMaxSize`) plus an origin, and we don't
+/// model one. The canvas stays fixed within its element's bounds; UI
+/// elements go through the layout algorithm and relative offsets.
+struct Bounds {
+    dx: Length,
+    dy: Length,
+    width: Length,
+    heigth: Length,
+}
+
+/// Image sizing behavior within its layout box.
+///
+/// Mirrors CSS `object-fit` and SVG `preserveAspectRatio` semantics.
+enum ImageFit {
+    /// Stretch to the box, ignoring aspect ratio (CSS `fill`).
+    Fill,
+
+    /// Largest size that fits inside the box (CSS `contain`, SVG `meet`).
+    Contain,
+
+    /// Smallest size that covers the box (CSS `cover`, SVG `slice`).
+    Cover,
+
+    /// Keep intrinsic size, no scaling (CSS `none`).
+    None,
+}
+
+/// Payload for `Attr::TRANSFORM` — a 2D affine matrix in SVG ch.7.6
+/// `matrix(a, b, c, d, e, f)` field order (24 bytes), field-for-field
+/// identical to SVG's `SVGMatrix`. Values are `<number>`s (unitless,
+/// ch.7.6) acting on user-space coordinates — never device pixels:
+///
+/// ```text
+/// | a c e |     maps (x, y) → (a·x + c·y + e, b·x + d·y + f)
+/// | b d f |
+/// | 0 0 1 |
+/// ```
+///
+/// `Default` is the identity transform (`a = d = 1`), not all-zeros — an
+/// all-zero matrix collapses everything to the origin.
+///
+/// Note: 24 bytes exceeds the 12-byte inline limit, so `TRANSFORM` needs
+/// the side-table route (same allowlist caveat as `SPACING`).
+struct Transform {
+    a: f32,
+    b: f32,
+    c: f32,
+    d: f32,
+    e: f32,
+    f: f32,
+}
+
+/// SVG `translate(<tx> [<ty>])` — payload for `Attr::TRANSFORM_TRANSLATE`
+/// (8 bytes, inline).
+///
+/// Components are `<number>`s in **user-space units** (see the module doc
+/// on numbers vs. lengths); SVG omits `ty` when it is 0, which maps to
+/// `dy = 0`.
+struct Translate {
+    /// Translation along x (`tx`).
+    dx: f32,
+    /// Translation along y (`ty`); defaults to `0`.
+    dy: f32,
+}
+
+/// SVG `scale(<sx> [<sy>])` — payload for `Attr::TRANSFORM_SCALE`
+/// (8 bytes, inline).
+///
+/// Components are `<number>`s (unitless scale factors); SVG omits `sy`
+/// when it equals `sx`, which maps to `sy = sx`.
+struct Scale {
+    /// Horizontal scale factor (`sx`).
+    pub sx: f32,
+    /// Vertical scale factor (`sy`); SVG defaults it to `sx`.
+    pub sy: f32,
+}
+
+/// SVG `rotate(<angle>)` — payload for `Attr::TRANSFORM_ROTATE`
+/// (4 bytes, inline).
+///
+/// The wire value is in **radians** (Canvas2D convention; the SVG
+/// presentation attribute's degrees are converted at the edge). The
+/// rotation origin comes from `Attr::TRANSFORM_ORIGIN`, SVG's
+/// `rotate(angle, cx, cy)` form.
+struct Rotate(
+    /// Rotation angle in radians, clockwise-positive in screen space.
+    f32,
+);
+
+/// SVG `skewX(<angle>)` + `skewY(<angle>)` — payload for
+/// `Attr::TRANSFORM_SKEW` (8 bytes, inline).
+///
+/// The two skew axes share one payload (SVG's transform *list* applies
+/// them together). Values are in radians, like [`Rotate`].
+struct Skew {
+    /// `skewX` angle in radians — shears x by `tan(angle)` per unit y.
+    x: f32,
+    /// `skewY` angle in radians — shears y by `tan(angle)` per unit x.
+    y: f32,
+}

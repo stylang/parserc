@@ -1,0 +1,137 @@
+use crate::{DimensionUnit, ImageFit, Length, Rgb};
+
+/// A single corner's radius (x/y pair, `<length>` units).
+///
+/// The per-corner value of the CSS `border-radius` shorthand (the slash
+/// syntax's horizontal / vertical radii) and, reinterpreted, the `rx`/`ry`
+/// of an SVG rect (SVG ch.9). A zero pair is a square corner; unequal
+/// x/y produce an elliptical arc. Recombined into the four-corner
+/// [`BorderRadius`] payload. Layout: 2 × `Length` = 16 bytes, zero padding.
+#[derive(Default, Debug, Clone, Copy, PartialEq, PartialOrd, Zeroable, Pod)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+#[repr(C)]
+struct Radius {
+    x: Length,
+    y: Length,
+}
+
+/// Border rendering style.
+///
+/// Mirrors CSS `border-style` semantics. `Hidden` is distinct from `None`
+/// only for table border-collapsing rules.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[repr(u8)]
+pub enum BorderStyle {
+    /// No visible border (`none`).
+    None,
+
+    /// Continuous line (`solid`).
+    Solid,
+
+    /// Repeating dashes (`dashed`).
+    Dashed,
+
+    /// Repeating dots (`dotted`).
+    Dotted,
+
+    /// Two parallel lines (`double`); total width is three times
+    /// `Border::width`.
+    Double,
+
+    /// Sunken appearance (`groove`), derived from the border color.
+    Groove,
+
+    /// Raised appearance (`ridge`), the inverse of `Groove`.
+    Ridge,
+
+    /// Inset appearance (`inset`), as if the whole element is pressed in.
+    Inset,
+
+    /// Outset appearance (`outset`), as if the whole element is raised.
+    Outset,
+
+    /// Hidden like [`None`](Self::None); kept distinct only because CSS
+    /// defines it as a separate keyword (relevant to table border
+    /// collapsing).
+    Hidden,
+}
+
+/// Payload for `Attr::BORDER` — the CSS `border` shorthand packed into one
+/// value: width, line style, color (20 bytes).
+///
+/// Distinct from [`StrokeStyle`](crate::StrokeStyle): that describes *path*
+/// stroke geometry (cap/join/dash), this describes the *box* border of an
+/// element. The same border applies to all four sides (the `border-width` /
+/// `-style` / `-color` per-side longhands are resolved upstream).
+/// 20 bytes exceeds the 12-byte inline limit — rides the side table.
+struct Border {
+    width: Length,
+    style: BorderStyle,
+    color: Rgb,
+}
+
+/// Payload for `Attr::BORDER_RADIUS` — the CSS `border-radius` shorthand:
+/// all four corner radii packed into one value (64 bytes; side-table
+/// route).
+///
+/// Each corner is an elliptical [`Radius`]; interpolation between adjacent
+/// corners (CSS §5.1 corner-overlap adjustment) is the renderer's job.
+/// Distinct from [`Radius`], which describes a *single* corner.
+struct BorderRadius {
+    top_left: Radius,
+    top_right: Radius,
+    bottom_right: Radius,
+    bottom_left: Radius,
+}
+
+/// Background tiling behavior along each axis.
+///
+/// Mirrors CSS `background-repeat` semantics.
+enum BackgroundRepeat {
+    /// Tile in both axes (CSS `repeat`, the initial value).
+    Repeat,
+
+    /// Tile horizontally only (CSS `repeat-x`).
+    RepeatX,
+
+    /// Tile vertically only (CSS `repeat-y`).
+    RepeatY,
+
+    /// Single copy, no tiling (CSS `no-repeat`).
+    NoRepeat,
+}
+
+/// Payload for `Attr::BACKGROUND_IMAGE` — the bitmap paint server of
+/// `background-image: url(...)` (css-backgrounds-3 §2.1), the third
+/// background-image source alongside `GRADIENT` (56) and `PATTERN` (71).
+/// 8 bytes: inline.
+///
+/// ```text
+/// source (4) + repeat (1) + fit (1) + pad (2)
+/// ```
+///
+/// `source` is a side-table asset/URL index (`0` = none), resolved exactly
+/// like `MEDIA_SOURCE`'s string — but *inside* this inline payload rather
+/// than as a `push_index` whole-payload index (precedent: `Pattern::content`).
+/// The other background-image geometry (`-position`/`-origin`/`-clip`)
+/// stays layout-pipeline territory, as for gradient/pattern layers.
+struct BackgroundImage {
+    /// Side-table asset/URL string index; `0` means no image.
+    source: u32,
+    /// Tiling in the two axes ([`BackgroundRepeat`]).
+    repeat: BackgroundRepeat,
+    /// Scale-to-fit policy — CSS `background-size: cover/contain/none`
+    /// (`ImageFit::COVER`/`CONTAIN`/`NONE`; `FILL` = stretch to the box).
+    fit: ImageFit,
+}
+
+/// Payload for `Attr::BACKGROUND` — the `background-color` layer of the
+/// CSS `background` shorthand (12 bytes, inline).
+///
+/// Absence of the attr means *transparent*; [`Background::default`] is
+/// [`Rgb::BLACK`] to stay consistent with [`Rgb`]'s default. The other
+/// CSS background layers are documented in the module docs.
+enum Background {
+    Color(Rgb),
+    Image(BackgroundImage),
+}

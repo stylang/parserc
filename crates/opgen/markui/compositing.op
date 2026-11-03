@@ -1,0 +1,44 @@
+use crate::Blur;
+
+/// Represents opacity, strictly constrained to `[0.0, 1.0]`.
+/// Used as an independent parameter alongside `Rgb` rather than embedded in color.
+struct Opacity(f32);
+
+/// Standard layer blend modes.
+///
+/// Maps 1:1 from the original `enum BlendMode` variant order.
+/// Stored as a single `u8` so it can sit inside IL payloads without padding.
+enum BlendMode {
+    Normal,
+    Multiply,
+    Screen,
+    Overlay,
+    Darken,
+    Lighten,
+    ColorDodge,
+    ColorBurn,
+    HardLight,
+    SoftLight,
+    Difference,
+    Exclusion,
+}
+
+/// SVG §14.2 / CSS `color-interpolation` — payload for
+/// `Attr::COLOR_INTERPOLATION` (1 byte, inline).
+///
+/// The color space gradients, masks (luminance extraction), filters and
+/// compositing operations compute in. SVG's initial value is `SRGB`;
+/// choosing `LINEAR_RGB` matches the spec's linear-light compositing
+/// pipeline but is generally slower — backends pick per value, never per
+/// default, so every track renders identically.
+enum ColorInterpolation {
+    SRgb,
+    LinearRgb,
+}
+
+/// Payload for `Attr::VISUAL_EFFECTS` — Gaussian blur + blend mode packed
+/// into one value (12 bytes, inline).
+struct VisualEffects {
+    blur: Blur,
+    blend: BlendMode,
+}

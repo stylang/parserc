@@ -1,0 +1,14 @@
+/// A pure sRGB color without an alpha channel.
+///
+/// This type is intentionally opaque to opacity; alpha is always handled
+/// separately via [`crate::Opacity`] to keep the in-memory representation
+/// a tight 12-byte POD suitable for GPU upload and shared memory IPC.
+struct Rgb {
+    /// Red component in `[0.0, 1.0]`. Values outside this range are not
+    /// clamped at construction time; callers must validate if needed.
+    r: f32,
+    /// Green component in `[0.0, 1.0]`.
+    g: f32,
+    /// Blue component in `[0.0, 1.0]`.
+    b: f32,
+}
