@@ -1,0 +1,173 @@
+/// SVG `text-anchor` — payload for `Attr::TEXT_ANCHOR` (1 byte, inline).
+///
+/// Aligns each text *chunk* (§10.7.1) relative to its initial current text
+/// position. This is direction-dependent (`start` is the left edge for
+/// `direction: ltr`, the right edge for `rtl`) and therefore distinct from
+/// [`TextAlign`], which is the box-relative line alignment of wrapped text.
+enum TextAnchor {
+    /// Start of the chunk at the anchor point (SVG initial value).
+    #[default]
+    Start,
+    /// Geometric middle of the chunk at the anchor point.
+    Middle,
+    /// End of the chunk at the anchor point.
+    End,
+}
+
+/// SVG `writing-mode` — payload for `Attr::WRITING_MODE` (1 byte, inline).
+///
+/// Sets the initial inline-progression-direction of a `text` element
+/// (§10.7.2); SVG ignores it on `tspan`-level sub-elements. The short
+/// spellings `lr`/`rl`/`tb` are aliases of the three compound values.
+enum WritingMode {
+    /// Left-to-right, top-to-bottom (SVG initial value; Latin scripts).
+    #[default]
+    Lrtb,
+    /// Right-to-left, top-to-bottom (Arabic, Hebrew).
+    RltB,
+    /// Top-to-bottom, right-to-left (Chinese, Japanese vertical text).
+    Tbrl,
+}
+
+/// `baseline-shift` selector — 1-byte field of [`BaselineShift`].
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord, Default)]
+#[repr(u8)]
+pub enum BaselineShiftKind {
+    /// No shift; the dominant baseline stays put (SVG initial value).
+    #[default]
+    Baseline,
+    /// Shift to the font's subscript position (§10.9.2 `sub`).
+    Sub,
+    /// Shift to the font's superscript position (§10.9.2 `super`).
+    Super,
+    /// Explicit shift — use [`BaselineShift::shift`] (a `<length>` or
+    /// `<percentage>`; `0` is equivalent to `baseline`).
+    Length,
+}
+
+/// SVG `baseline-shift` — payload for `Attr::BASELINE_SHIFT` (12 bytes,
+/// inline).
+///
+/// Repositions the dominant baseline relative to the parent's (§10.9.2):
+/// `sub`/`super` derive their offset from the nominal font's data; with
+/// [`BaselineShiftKind::LENGTH`] the `shift` field carries an explicit
+/// `<length>`/`<percentage>` (`Length::percent` — SVG resolves percentages
+/// against the `text` element's `font-size`). Nested shifts add up, and a
+/// shift never affects the current text position or glyph advance.
+///
+/// ```text
+/// kind (1) + pad (3) + shift (8)
+/// ```
+struct BaselineShift {
+    /// Which kind of shift this is.
+    kind: BaselineShiftKind,
+    /// Explicit shift amount, used iff `kind == LENGTH`.
+    shift: Length,
+}
+
+/// SVG `direction` — payload for `Attr::DIRECTION` (1 byte, inline).
+///
+/// Base writing direction for the Unicode bidirectional algorithm
+/// (§10.7.4); affects `text-anchor: start/end` interpretation.
+enum Direction {
+    /// Left-to-right (SVG initial value).
+    #[default]
+    Ltr,
+    /// Right-to-left (Arabic, Hebrew).
+    Rtl,
+}
+
+/// SVG `unicode-bidi` — payload for `Attr::UNICODE_BIDI` (1 byte, inline).
+///
+/// Explicit bidi control (§10.7.4). `EMBED`/`BIDI_OVERRIDE` are required
+/// for `direction` to take effect on an element that does not itself start
+/// a new text chunk.
+enum UnicodeBidi {
+    /// Resolve via the Unicode algorithm alone (SVG initial value).
+    #[default]
+    Normal,
+    /// Enter an embedding level for the embedded direction.
+    Embed,
+    /// Force the element's direction onto its contents.
+    bidiOverride,
+}
+
+/// SVG `lengthAdjust` — payload for `Attr::LENGTH_ADJUST` (1 byte, inline).
+///
+/// How the user agent stretches or compresses text to meet
+/// `Attr::TEXT_LENGTH` (§10.4).
+enum LengthAdjust {
+    /// Adjust advance values only; glyphs keep their shapes (SVG default).
+    #[default]
+    Spacing,
+    /// Adjust advances *and* stretch/compress glyph outlines along the
+    /// inline progression.
+    SpacingAndGlyphs,
+}
+
+/// SVG `glyph-orientation-horizontal` / `-vertical` angle — 1-byte field of
+/// [`GlyphOrientations`] (§10.7.3). The spec restricts angles to
+/// 0/90/180/270 degrees and rounds to the nearest.
+enum GlyphAngle {
+    /// 0 degrees — glyph top toward the reference orientation.
+    #[default]
+    Deg0,
+    /// 90 degrees clockwise from the reference orientation.
+    Deg90,
+    /// 180 degrees.
+    Deg180,
+    /// 270 degrees.
+    Deg270,
+    /// `auto` — only legal for the *vertical* orientation: fullwidth
+    /// ideographic text stays at 0°, other text rotates 90°.
+    Auto,
+}
+
+/// SVG `glyph-orientation-horizontal` + `glyph-orientation-vertical` —
+/// payload for `Attr::GLYPH_ORIENTATION` (2 bytes, inline; §10.7.3).
+///
+/// The horizontal value applies to horizontal `writing-mode`s and the
+/// vertical value to vertical ones. `vertical: AUTO` is the SVG initial
+/// value; `AUTO` is invalid for `horizontal` (its initial is `DEG_0`).
+struct GlyphOrientations {
+    /// `glyph-orientation-horizontal` — 0/90/180/270 degrees.
+    horizontal: GlyphAngle,
+    /// `glyph-orientation-vertical` — 0/90/180/270 degrees or `AUTO`.
+    vertical: GlyphAngle,
+}
+
+/// Line-clamp policy (the `clamp` field of [`TextLayout`]).
+///
+/// CSS multi-line truncation (`-webkit-line-clamp` semantics): cap the
+/// block at `max_lines` lines and cut the overflow. `max_lines == 0`
+/// disables clamping (the initial value).
+struct TextClamp {
+    /// Maximum rendered lines; `0` = no clamp.
+    max_lines: u8,
+    /// Replace the overflow with an ellipsis on the last line:
+    /// `1` = on, `0` = hard cut (the initial value).
+    ellipsis: u8,
+}
+
+/// Payload for `Attr::TEXT_LAYOUT` — the inline text-layout facet bundle:
+/// alignment, line clamp, decoration, and line height (8 bytes, inline).
+///
+/// ```text
+/// align (1) + decoration (1) + clamp (2) + line_height (4)
+/// ```
+///
+/// The facet-level sibling of [`Typography`](crate::Typography)
+/// (`TYPOGRAPHY_TOKEN`, 10): that one is the complete token (family /
+/// weight / size included, 20 B → side table), this one overrides only the
+/// layout facets on an element that already has its type. `line_height`
+/// follows `Typography`'s convention (`0.0` = `normal`, i.e. font-driven).
+struct TextLayout {
+    /// Horizontal alignment ([`TextAlign`]).
+    align: TextAlign,
+    /// Decoration line ([`TextDecoration`]).
+    decoration: TextDecoration,
+    /// Multi-line truncation ([`TextClamp`]).
+    clamp: TextClamp,
+    /// Line height in logical px; `0.0` = `normal` (font metrics).
+    line_height: f32,
+}

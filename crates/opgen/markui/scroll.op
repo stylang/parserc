@@ -1,0 +1,184 @@
+/// Allowed scroll axes for a scrollable container.
+///
+/// Controls which directions the user is permitted to scroll.
+#[bitflags]
+enum ScrollAxis {
+    /// Scrolling is disabled in both directions.
+    #[default]
+    None,
+    /// Scrolling is allowed only along the horizontal axis.
+    Horizontal,
+    /// Scrolling is allowed only along the vertical axis.
+    Vertical,
+    /// Scrolling is allowed in both directions.
+    Both,
+}
+
+/// Visibility policy for scrollbars.
+///
+/// Maps to CSS `scrollbar-width`/`scrollbar-color` or native scrollbar
+/// visibility APIs.
+enum ScrollbarVisibility {
+    /// Scrollbars appear only when needed and supported by the platform.
+    #[default]
+    Auto = 0,
+    /// Scrollbars are always visible, taking up layout space if applicable.
+    Always = 1,
+    /// Scrollbars are never visible, even if content overflows.
+    Never = 2,
+    /// Scrollbars appear only when the user hovers over or interacts with the
+    /// container.
+    OnHover = 3,
+}
+
+/// Behavior when a scrollable container reaches its scrolling boundary.
+///
+/// Maps to CSS `overscroll-behavior` or native chaining/bouncing policies.
+/// Crucial for nested scroll views (e.g., a horizontal carousel inside a
+/// vertical feed).
+enum OverscrollBehavior {
+    /// Default platform behavior. Scroll chaining is allowed; parent scrolls
+    /// when child reaches its boundary.
+    #[default]
+    Auto,
+    /// Prevent scroll chaining. The parent container will not scroll when the
+    /// child reaches its boundary, but boundary glow/bounce effects on the
+    /// child are still allowed.
+    Contain,
+    /// Prevent both scroll chaining and boundary effects (glow/bounce) on the
+    /// child container.
+    None,
+}
+
+/// Elastic bounce effect at scroll boundaries.
+///
+/// Maps to iOS `UIScrollView.bounces` or Android `edgeEffect` / `overScrollMode`.
+enum ScrollBounce {
+    /// Use the platform's default bounce behavior (e.g., enabled on iOS,
+    /// disabled on Windows).
+    #[default]
+    Auto,
+    /// Force enable elastic bounce / rubber-band effect at boundaries.
+    Enabled,
+    /// Force disable elastic bounce. Hard stop at boundaries.
+    Disabled,
+}
+
+/// Defines the axis and strictness of scroll snapping.
+///
+/// Maps to CSS `scroll-snap-type`.
+enum ScrollSnapType {
+    /// No scroll snapping.
+    #[default]
+    None,
+    /// Snap along the horizontal axis.
+    X,
+    /// Snap along the vertical axis.
+    Y,
+    /// Snap along both axes.
+    Both,
+}
+
+/// How strictly the scroll container must snap to snap points.
+///
+/// Maps to CSS `scroll-snap-type` strictness modifier (`proximity` | `mandatory`).
+enum ScrollSnapStrictness {
+    /// Snap to the nearest snap point if the scroll position is close enough.
+    #[default]
+    Proximity,
+    /// Always snap to the exact snap point at the end of a scroll interaction.
+    Mandatory,
+}
+
+/// Bitmask for miscellaneous scroll configuration flags.
+///
+/// Using `u32` ensures 4-byte alignment for the overall [`ScrollConfig`] struct
+/// without introducing implicit padding.
+enum ScrollFlags {
+    /// No flags set.
+    #[default]
+    Empty,
+    /// If set, the scroll container participates in keyboard scrolling
+    /// (e.g., arrow keys, Page Up/Down, Spacebar).
+    KeyboardScrollable,
+    /// If set, horizontal scrolling is inverted (e.g., natural scrolling on
+    /// trackpads).
+    InvertHorizontal,
+    /// If set, vertical scrolling is inverted.
+    InvertVertical,
+    /// If set, momentum/inertia scrolling is explicitly disabled. The scroll
+    /// stops immediately when the user lifts their finger/mouse.
+    DisableMomentum,
+}
+
+/// Complete declarative configuration for a scrollable container.
+///
+/// This struct aggregates all low-frequency scroll policies into a single
+/// 8-byte payload. It is intentionally separated from the high-frequency
+/// `SCROLL_OFFSET` attribute to prevent static configuration changes from
+/// interfering with per-frame offset updates.
+///
+/// Layout:
+/// - `axis`: 1 byte
+/// - `scrollbar_visibility`: 1 byte
+/// - `overscroll`: 1 byte
+/// - `bounce`: 1 byte
+/// - `snap_type`: 1 byte
+/// - `snap_strictness`: 1 byte
+/// - `flags`: 2 bytes (using `u16` here to keep total size at 8 bytes,
+///   or use `u32` and pad to 12 bytes. Let's use `u16` for compact 8-byte layout).
+///
+/// *Correction for alignment*: To ensure natural 4-byte alignment and zero padding,
+/// we will use `u16` for flags, making the total exactly 8 bytes.
+struct ScrollConfig {
+    /// Allowed scroll axes.
+    axis: ScrollAxis,
+    /// Scrollbar visibility policy.
+    scrollbar_visibility: ScrollbarVisibility,
+    /// Boundary overscroll chaining behavior.
+    overscroll: OverscrollBehavior,
+    /// Elastic bounce effect policy.
+    bounce: ScrollBounce,
+    /// Scroll snap axis.
+    snap_type: ScrollSnapType,
+    /// Scroll snap strictness.
+    snap_strictness: ScrollSnapStrictness,
+    /// Miscellaneous behavior flags.
+    flags: ScrollFlags16,
+}
+
+/// 16-bit bitmask for miscellaneous scroll flags.
+///
+/// Used inside [`ScrollConfig`] to maintain a compact 8-byte layout.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Default)]
+#[repr(u8)]
+pub enum ScrollFlags16 {
+    /// No flags set.
+    #[default]
+    Empty,
+    /// Container participates in keyboard scrolling.
+    KeyboardScrollable,
+    /// Invert horizontal scroll direction.
+    InvertHorizontal,
+    /// Invert vertical scroll direction.
+    InvertVertical,
+    /// Disable momentum/inertia scrolling.
+    DisableMomentum,
+}
+
+/// A scrollbar's visual geometry (thickness + thumb corner rounding) —
+/// payload for `Attr::SCROLLBAR_STYLE` (8 bytes, inline).
+///
+/// A scrollbar has no element of its own, so its *colors* do not ride a
+/// box's `FOREGROUND`/`BACKGROUND`: they are the dedicated pair
+/// `Attr::SCROLLBAR_BACKGROUND` (track) and `Attr::SCROLLBAR_FOREGROUND`
+/// (thumb). Show/hide policy lives in [`ScrollConfig`]. This struct
+/// focuses purely on geometry.
+struct ScrollbarStyle {
+    /// Thickness of the scrollbar track/thumb in logical pixels.
+    /// `0.0` means use platform default.
+    thickness: f32,
+    /// Border radius of the scrollbar thumb in logical pixels.
+    /// `0.0` means sharp corners.
+    radius: f32,
+}

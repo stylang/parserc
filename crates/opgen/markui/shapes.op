@@ -1,0 +1,77 @@
+/// SVG `rect` — a rectangle at (`x`, `y`) with `width` × `height`
+/// (SVG §9.1).
+///
+/// Defaults per spec: `x`/`y`/`rx`/`ry` are `0`. A negative `width`,
+/// `height`, `rx` or `ry` is an error; zero `width` or `height` renders
+/// nothing. When only one of `rx`/`ry` is specified the other copies it;
+/// both are clamped to at most half the box (`width`/2, `height`/2). Zero
+/// radii give sharp corners.
+///
+/// Layout: 6 × `Length` = 48 bytes — side-table route.
+struct Rect {
+    /// Left edge (`x`).
+    x: Length,
+    /// Top edge (`y`).
+    y: Length,
+    /// Horizontal extent; `0` renders nothing, negatives are an error.
+    width: Length,
+    /// Vertical extent; `0` renders nothing, negatives are an error.
+    height: Length,
+    /// Horizontal corner radius; defaults to `ry` when unset.
+    rx: Length,
+    /// Vertical corner radius; defaults to `rx` when unset.
+    ry: Length,
+}
+
+/// SVG `circle` — a circle centered at (`cx`, `cy`) with radius `r`
+/// (SVG §9.2).
+///
+/// Defaults per spec: `cx`/`cy` are `0`. A negative `r` is an error;
+/// `r = 0` renders nothing.
+///
+/// Layout: 3 × `Length` = 24 bytes — side-table route.
+struct Circle {
+    /// Center's horizontal coordinate; defaults to `0`.
+    cx: Length,
+    /// Center's vertical coordinate; defaults to `0`.
+    cy: Length,
+    /// Radius; `0` renders nothing, negatives are an error.
+    r: Length,
+}
+
+/// SVG `ellipse` — an ellipse centered at (`cx`, `cy`) with radii
+/// `rx` × `ry` (SVG §9.3).
+///
+/// Defaults per spec: `cx`/`cy` are `0`. A negative `rx` or `ry` is an
+/// error; either axis being `0` renders nothing.
+///
+/// Layout: 4 × `Length` = 32 bytes — side-table route.
+struct Ellipse {
+    /// Center's horizontal coordinate; defaults to `0`.
+    cx: Length,
+    /// Center's vertical coordinate; defaults to `0`.
+    cy: Length,
+    /// Horizontal radius; `0` renders nothing, negatives are an error.
+    rx: Length,
+    /// Vertical radius; `0` renders nothing, negatives are an error.
+    ry: Length,
+}
+
+/// SVG `line` — a straight segment from (`x1`, `y1`) to (`x2`, `y2`)
+/// (SVG §9.4).
+///
+/// Defaults per spec: all four coordinates are `0`. A line is an open
+/// path: **it is never filled**, only stroked (`stroke` properties from
+/// the `paint` module); `fill` has no effect on it.
+///
+/// Layout: 4 × `Length` = 32 bytes — side-table route.
+struct Line {
+    /// Start point's horizontal coordinate; defaults to `0`.
+    x1: Length,
+    /// Start point's vertical coordinate; defaults to `0`.
+    y1: Length,
+    /// End point's horizontal coordinate; defaults to `0`.
+    x2: Length,
+    /// End point's vertical coordinate; defaults to `0`.
+    y2: Length,
+}

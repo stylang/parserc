@@ -1,0 +1,57 @@
+/// Coordinate system for a [`Pattern`]'s numbers.
+///
+/// Payload for `patternUnits` and `patternContentUnits`
+/// (SVG ch.15.4 / ch.15.5, 1 byte, inline).
+///
+/// Note: the two attributes have *different* defaults —
+/// `patternUnits` defaults to [`PatternUnits::ObjectBoundingBox`],
+/// while `patternContentUnits` defaults to
+/// [`PatternUnits::UserSpaceOnUse`].
+enum PatternUnits {
+    /// `objectBoundingBox`: `x`/`y`/`width`/`height` are fractions of the
+    /// painted element's bounding box — `1.0` = 100%.
+    ObjectBoundingBox,
+    /// `userSpaceOnUse`: values are user-space coordinates and lengths in the
+    /// current user coordinate system (ch.7.3).
+    UserSpaceOnUse,
+}
+
+/// Payload for `Attr::PATTERN` — the tiling frame of an SVG `<pattern>`
+/// (ch.15). 64 bytes: over the 12-byte inline limit, so it rides the
+/// frame's side table as an index-carrying `PUSH`.
+///
+/// ```text
+/// units/content_units (2) + pad (2) + origin (16) + size (16)
+///   + patternTransform (24) + content ref (4)
+/// ```
+///
+/// Geometry follows the `<pattern>` element: `origin` is `x`/`y` (tile
+/// offset) and `size` is `width`/`height` (tile extent), both `<length>`s
+/// interpreted in the system [`PatternUnits`] selects — fractions of the
+/// bounding box by default, user-space lengths under `USER_SPACE_ON_USE`.
+/// `Default` matches SVG: origin `0,0`, tile `100% × 100%` (the whole
+/// bounding box, i.e. no visible repetition under the default units).
+///
+/// Deliberately not modeled: `viewBox`/`preserveAspectRatio` on
+/// `<pattern>` — the referenced content establishes its own coordinate
+/// system; and `xlink:href` pattern inheritance — resolve the referenced
+/// pattern before pushing.
+struct Pattern {
+    /// `patternUnits` — how `origin`/`size` are interpreted.
+    units: PatternUnits,
+    /// `patternContentUnits` — the same choice for the tile *content*'s
+    /// coordinates.
+    content_units: PatternUnits,
+    /// `x`/`y` — the tile's offset within the fill area.
+    origin: Offset,
+    /// `width`/`height` — one tile's extent; the content repeats across
+    /// this grid.
+    size: Size,
+    /// SVG ch.15.7 `patternTransform` — the tile's own affine deformation
+    /// (translate/scale/rotate/skew/matrix) applied before tiling; the
+    /// identity matrix tiles untransformed.
+    transform: Transform,
+    /// Reference to the tile's content (an element subtree or a
+    /// side-table blob — the consumer resolves the kind); `0` means none.
+    content: u32,
+}

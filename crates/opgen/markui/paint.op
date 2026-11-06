@@ -1,0 +1,54 @@
+/// Polygon fill rules.
+///
+/// Corresponds to SVG/CSS `fill-rule`.
+///
+/// - [`FillRule::Nonzero`]: a point is inside if the signed winding number
+///   (clockwise crossings count as +1, counter-clockwise as -1) is non-zero.
+///   This is the SVG/Canvas default.
+/// - [`FillRule::Evenodd`]: a point is inside if the number of path crossings
+///   along a ray is odd.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default)]
+enum FillRule {
+    #[default]
+    Nonzero,
+    Evenodd,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default, PartialOrd, Ord)]
+#[repr(u8)]
+enum LineCap {
+    #[default]
+    Butt = 0,
+    Round = 1,
+    Square = 2,
+}
+
+/// Stroke corner-join styles.
+///
+/// Corresponds to SVG/CSS `stroke-linejoin`.
+///
+/// - [`LineJoin::Miter`]: outer edges are extended until they meet, forming a
+///   sharp corner. Subject to `miter-limit`; falls back to `Bevel` when exceeded.
+///   This is the SVG/Canvas default.
+/// - [`LineJoin::Round`]: a circular arc of radius `stroke-width / 2` joins the
+///   segments.
+/// - [`LineJoin::Bevel`]: the gap is closed with a flat triangular fill.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default, PartialOrd, Ord)]
+#[repr(u8)]
+enum LineJoin {
+    #[default]
+    Miter = 0,
+    Round = 1,
+    Bevel = 2,
+}
+
+/// Complete stroke configuration.
+struct StrokeStyle {
+    pub width: f32,
+    pub miter_limit: f32,
+    pub cap: LineCap,
+    pub join: LineJoin,
+    /// 0 means no dash.
+    pub dash_count: u8,
+    pub dash: DashPattern,
+}
