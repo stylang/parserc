@@ -1,0 +1,237 @@
+/// Semantic UI element type.
+///
+/// # Safety & ABI
+///
+/// `#[repr(u8)]` guarantees that any byte value is safe to read from shared memory.
+/// An unrecognized byte is **never UB**; backends must skip unknown elements gracefully
+/// and optionally log a diagnostic.
+///
+/// # Extensibility
+///
+/// New elements are appended with incrementing discriminants. Existing values
+/// are **never** renumbered or removed. Backends compiled against an older
+/// version of this crate will simply skip newer element types.
+///
+/// # Semantic mapping
+///
+/// Each backend maps these intents to platform-optimal constructs. The IL
+/// does not prescribe how an element is rendered — only what it *means*.
+/// For example, `Elem::BUTTON` maps to `NSButton` on macOS, `<button>` on
+/// Web, and `android.widget.Button` on Android.
+enum Elem {
+    // --- Adaptive Layout & Structure ---
+    /// Generic flexbox/grid container. Foundational building block.
+    #[default]
+    View = 0,
+    /// Scrollable viewport with momentum, bouncing, snap-to-item.
+    ScrollView = 1,
+    /// Inset area avoiding system UI (notches, taskbar, dynamic island).
+    SafeArea = 2,
+    /// Visual separator line.
+    Divider = 3,
+    /// Flexible space filling available main-axis space.
+    Spacer = 4,
+
+    // pub const GRID: Self = Elem(5);  // reserved / removed
+
+    // --- Navigation & App Shell ---
+    // (removed pre-launch) `NAVIGATION_SPLIT_VIEW`: responsive adaptation
+    // (split view -> stack on compact widths) is a frontend/producer concern:
+    // the IL carries no conditional/breakpoint semantics.
+    /// Tabbed navigation (bottom bar mobile, sidebar/top desktop).
+    Tabs = 6,
+    /// Native toolbar / navigation bar / app bar.
+    Toolbar = 7,
+    /// Modal dialog blocking background interaction.
+    Dialog = 8,
+    /// Non-blocking floating hint anchored to a target.
+    Tooltip = 9,
+    /// Context menu triggered by long-press / right-click.
+    Menu = 10,
+
+    // --- Semantic Grouping & Forms ---
+    /// Platform-native form container with grouped styling.
+    Form = 11,
+    /// Content section with optional sticky header/footer.
+    Section = 12,
+    /// Visual grouping box with optional title.
+    GroupBox = 13,
+    /// Collapsible/expandable content section.
+    DisclosureGroup = 14,
+
+    // --- Content & Media ---
+    /// Styled text run with inline formatting.
+    Text = 15,
+    /// Raster/vector image with aspect-ratio preservation.
+    Image = 16,
+    /// Vector icon/symbol (tinted, no intrinsic aspect ratio).
+    Icon = 17,
+    /// Custom 2D drawing surface.
+    Canvas = 18,
+    /// Embedded web view or native platform bridge.
+    Embed = 19,
+
+    // --- Interactive Controls ---
+    Button = 20,
+    Link = 21,
+    TextInput = 22,
+    TextArea = 23,
+    Switch = 24,
+    Checkbox = 25,
+    Radio = 26,
+    Slider = 27,
+    Select = 28,
+    Stepper = 29,
+    SearchField = 30,
+
+    // --- Indicators & Feedback ---
+    Progress = 31,
+    Spinner = 32,
+    Toast = 33,
+    ActionSheet = 34,
+
+    // --- Data & Collections ---
+    List = 35,
+    Table = 36,
+    Carousel = 37,
+
+    // ========================================================================
+    // Canvas Drawing Primitives
+    // ========================================================================
+    //
+    // These elements are ONLY valid as direct children of Elem::CANVAS.
+    // Using them outside a CANVAS parent is a protocol violation; backends
+    // must silently skip them.
+    //
+    // Canvas children do NOT participate in flex/grid layout. They are
+    // rendered in document order as a painter's algorithm stack (later
+    // siblings paint on top of earlier ones). Positioning is absolute
+    // within the canvas coordinate space via Attr::POSITION / Attr::SIZE.
+    //
+    // Each drawing primitive maps to a single backend draw call. Complex
+    // shapes are composed by grouping multiple primitives under a
+    // CanvasGroup rather than nesting arbitrary layout elements.
+    /// Filled closed path. Shape defined by Attr::PATH_DATA (side-table index).
+    /// Fill paint via Attr::FILL, fill rule via Attr::FILL_RULE, alpha via
+    /// Attr::FILL_OPACITY.
+    CanvasPath = 38,
+
+    /// Stroked open or closed path. Shape via Attr::PATH_DATA.
+    /// Stroke style via Attr::STROKE_STYLE, paint via Attr::STROKE, alpha
+    /// via Attr::STROKE_OPACITY.
+    CanvasStroke = 39,
+
+    /// Axis-aligned filled rectangle. Optimized fast-path that avoids
+    /// path tessellation. Position/size via Attr::SIZE + Attr::POSITION.
+    /// Corner radius via Attr::BORDER_RADIUS. Fill paint via Attr::FILL.
+    CanvasRect = 40,
+
+    /// Filled circle or ellipse. Center + radii via Attr::SIZE + Attr::POSITION.
+    /// Fill paint via Attr::FILL. Backends may use native ellipse primitives
+    /// for sub-pixel accuracy instead of bezier approximation.
+    CanvasCircle = 41,
+
+    /// Text rendered at a fixed user-space canvas position (not laid out).
+    /// Content via Attr::TEXT_CONTENT, typography via Attr::TYPOGRAPHY_TOKEN.
+    /// Horizontal anchor via Attr::TEXT_LAYOUT, vertical anchor via
+    /// Attr::TEXT_BASELINE.
+    CanvasText = 42,
+
+    /// Raster/vector image blitted at an absolute canvas position.
+    /// Source via Attr::MEDIA_SOURCE, bounds via Attr::SIZE + Attr::POSITION.
+    /// Scale-to-fit via Attr::IMAGE_FIT. Supports opacity, blend mode, and
+    /// clip mask like other canvas primitives.
+    CanvasImage = 43,
+
+    /// Logical grouping container for canvas primitives. Does not render
+    /// anything itself. Used to apply shared transforms (Attr::TRANSFORM),
+    /// clip regions, opacity, or blend modes to all children atomically.
+    /// Children are still canvas primitives only — no layout elements allowed.
+    CanvasGroup = 44,
+
+    /// Clip region definition. Must be the FIRST child of a CANVAS_GROUP.
+    /// Defines the clipping path (via Attr::PATH_DATA or Attr::SIZE for rect clip)
+    /// applied to all subsequent siblings within the same group.
+    /// Ignored if not the first child or if outside CANVAS_GROUP.
+    CanvasClip = 45,
+
+    // ========================================================================
+    // 46-55: View elements (appended).
+    //
+    // Coverage audit against SwiftUI — see `ELEM_COVERAGE.md` for the full
+    // comparison table and the excluded cases (system-integration buttons,
+    // lazy stacks, `*Style` modifiers).
+    // ========================================================================
+    /// Password / secret text entry — SwiftUI `SecureField`.
+    /// The masking variant of `TextInput`; shares its `TextContent`,
+    /// `Placeholder`, and IME attrs.
+    SecureInput = 46,
+
+    /// Icon + title line — SwiftUI `Label`.
+    /// The standard row of list items, menu entries, and setting rows:
+    /// `Icon` + `TextContent` in one laid-out unit (label styles map to
+    /// `TextLayout`).
+    Label = 47,
+
+    /// Empty / unavailable / error content — SwiftUI
+    /// `ContentUnavailableView`.
+    /// Centered icon + title + description (+ optional action button) for
+    /// empty lists, no-search-results, and error states.
+    EmptyState = 48,
+
+    /// Push/pop stack navigation container — SwiftUI
+    /// `NavigationStack`/`NavigationView`.
+    /// The mobile-default navigation form. Back affordance
+    /// and title flow are layout concerns of the container.
+    NavigationStack = 49,
+
+    /// Content modal sheet — SwiftUI `Sheet` (page sheet / bottom sheet).
+    /// A draggable modal presenting a focused view; distinct from
+    /// `ActionSheet` (a list of actions) and `Dialog` (a compact alert).
+    Sheet = 50,
+
+    /// Date / time selection — SwiftUI `DatePicker` / `MultiDatePicker`.
+    /// Calendar, wheel, and compact styles are presentation variants;
+    /// range vs. instant selection rides value attrs (payload TBD in a
+    /// dedicated attr round).
+    DatePicker = 51,
+
+    /// Context menu — SwiftUI `ContextMenu`.
+    /// Triggered by right-click / long-press rather than an anchor button
+    /// (`Menu`); renders as the same menu surface.
+    ContextMenu = 52,
+
+    /// Anchor popover — SwiftUI `Popover`.
+    /// Content surface anchored to a reference view, distinct from
+    /// `Tooltip` (plain hint text) and `Sheet` (full modal).
+    Popover = 53,
+
+    /// Color selection — SwiftUI `ColorPicker`.
+    /// System color well / spectrum / wheel; selected color flows through
+    /// the `Foreground`-style color attrs.
+    ColorPicker = 54,
+
+    /// Value gauge — maps to SwiftUI `Gauge`.
+    ///
+    /// Renders circular, linear, or accessory-style meters for displaying a
+    /// scalar value within a known range (e.g., battery level, volume, storage
+    /// capacity). The current value and its valid range are conveyed through
+    /// the element's value attributes rather than child nodes.
+    Gauge = 55,
+
+    /// Flex container — maps to CSS Flexbox / SwiftUI `HStack` / `VStack`.
+    ///
+    /// Lays out children along a single axis with configurable direction,
+    /// justification, alignment, wrapping, and gap spacing. Children can
+    /// declare flex grow/shrink factors and basis sizes to participate in
+    /// flexible space distribution.
+    Flex = 56,
+
+    /// Grid container — maps to CSS Grid / SwiftUI `LazyVGrid` / `LazyHGrid`.
+    ///
+    /// Arranges children into a two-dimensional grid defined by explicit row
+    /// and column tracks. Supports fixed-size, flexible (`fr`), and
+    /// content-adaptive track sizing, as well as item spanning across
+    /// multiple rows or columns.
+    Grid = 57,
+}

@@ -1,0 +1,434 @@
+/// Semantic attribute key.
+///
+/// # POD constraint
+///
+/// Closed 1-byte `Pod` key for zero-copy shared-memory ring buffers.
+/// Open-ended names and non-POD payloads are **never** inline; use
+/// [`Instruction::push_index`] with a side-table reference instead.
+///
+/// # Attr-indexed side-table entries
+///
+/// Only the following attrs accept side-table indices via `push_index`:
+/// - [`Attr::TextContent`]: UTF-8 string index
+/// - [`Attr::MediaSource`]: asset/URL string index
+/// - [`Attr::Placeholder`]: hint string index
+/// - [`Attr::Override`]: track-discriminated payload — `WEB`: CSS property
+///   name + value string pair index; `NATIVE`: backend-defined blob index
+///   (the format follows the instruction's `track`)
+/// - [`Attr::AnimCubicBezier`]: `[f32; 4]` control points array index
+///
+/// Using `push_index` with any other attr is a **protocol violation**.
+/// Backends may assert or silently drop the instruction.
+///
+/// # Whole-group vs field-level granularity
+///
+/// Some attrs represent complete bundles (e.g., [`Attr::TypographyToken`])
+/// while others target individual facets (e.g., [`Attr::FontSize`]).
+/// Backends should invalidate only the affected sub-scope for field-level
+/// attrs to avoid unnecessary re-measurement. See crate-level docs for
+/// partial refresh semantics.
+#[kv]
+enum Attr {
+    /// `Size` (16 bytes: width + height).
+    Size = 0,
+    /// `Overflow` (1 byte). Visible/Hidden/Scroll.
+    Overflow = 1,
+    /// `Position` (1 byte). Relative/Absolute.
+    Position = 2,
+    /// Background color (`Background` payload, 12 bytes — inline). Gradients
+    /// are paint servers and go through `Gradient` instead.
+    Background = 3,
+    /// Foreground/text color.
+    Foreground = 4,
+    /// Opacity (f32).
+    Opacity = 5,
+    /// Border geometry + color packed.
+    Border = 6,
+    /// Border radius (4 corners packed).
+    BorderRadius = 7,
+    /// Shadow parameters packed.
+    Shadow = 8,
+    /// Visual effects (blur, blend modes).
+    VisualEffects = 9,
+    /// Complete typography token.
+    TypographyToken = 10,
+    /// Font family override.
+    FontFamily = 11,
+    /// Font size override (f32).
+    #[value = f32]
+    FontSize = 12,
+    /// Weight/style/stretch packed.
+    FontVariant = 13,
+    /// Alignment/clamp/decoration/line-height packed — payload `TextLayout`
+    /// (8 B, inline).
+    TextLayout = 14,
+    /// Side-table string index.
+    #[value = string]
+    TextContent = 15,
+    /// Side-table asset/URL index.
+    #[value = string]
+    MediaSource = 16,
+    /// Side-table hint string index.
+    #[value = string]
+    Placeholder = 17,
+    /// Packed bitmask: disabled|readonly|selected|checked|focused.
+    StateFlags = 18,
+    /// Role override + label index + live region policy packed — payload
+    /// `Accessibility` (8 B, inline).
+    Accessibility = 19,
+    Interaction = 20,
+    AnimProperty = 21,
+    AnimTarget = 22,
+    AnimDuration = 23,
+    AnimEasing = 24,
+    AnimRepeat = 25,
+    AnimDelay = 26,
+    AnimMode = 27,
+    AnimCubicBezier = 28,
+    AnimFillMode = 29,
+    AnimDirection = 30,
+    /// Per-frame invalidation scope bitmask (`AnimDirtyFlags`).
+    AnimDirtyFlags = 31,
+    PathData = 32,
+    FillRule = 33,
+    /// Composed 2D affine matrix — SVG `matrix(a, b, c, d, e, f)` as
+    /// `[f32; 6]` (24 bytes, side-table route). Hot-path updates use the
+    /// individual `TRANSFORM_*` attrs, which compose into this.
+    Transform = 34,
+    StrokeStyle = 35,
+    /// `Length` (8 bytes). Updates width only. Invalidates horizontal measure.
+    SizeWidth = 36,
+    /// `Length` (8 bytes). Updates height only. Invalidates vertical measure.
+    SizeHeight = 37,
+    /// `MinMaxSize` (32 bytes). Updates constraints without touching absolute size.
+    SizeMinMax = 38,
+    /// `Padding` (16 bytes). Invalidates inner layout only.
+    Padding = 40,
+    /// `FlexItem` (12 bytes: grow, shrink, basis) — per-child flex item
+    /// configuration, read by `markui-view`'s flex solver.
+    FlexItem = 105,
+    /// `LayoutChild` (16 bytes: `FlexItem` + `AlignSelf`) — per-child item
+    /// plus align-self override. Exceeds the 14-byte operand area, so it
+    /// rides the side table on the wire.
+    LayoutChild = 106,
+    /// `FlexAlign` (3 bytes: justify-content, align-items, align-content).
+    FlexAlign = 108,
+    /// `FlexConfig` (5 bytes: direction, wrap, and the `FlexAlign` triple).
+    FlexConfig = 109,
+    /// `Gap` (8 bytes: row + column gap), inline.
+    Gap = 110,
+    /// `FlexDirection` (1 byte: row / row-reverse / column / column-reverse).
+    FlexDirection = 111,
+    /// `FlexWrap` (1 byte: no-wrap / wrap / wrap-reverse).
+    FlexWrap = 112,
+    /// `Display` (1 byte: flex / grid / none — the container's layout mode).
+    Display = 113,
+    /// `Spacing` (24 bytes: padding + gap) — over the 14-byte operand
+    /// area, so it rides the side table on the wire.
+    Spacing = 114,
+    /// `LayoutItemOrder` (12 bytes: align-self + z-index + order), inline.
+    LayoutItemOrder = 115,
+    /// `GridConfig` (side-table blob): columns/rows track lists + gap +
+    /// justify-items/align-items.
+    GridConfig = 116,
+    /// `StackAlign` (1 byte, inline) — a stack child's anchor: the nine
+    /// horizontal × vertical anchors (Jetpack `Box` alignment model) plus
+    /// `Fill` (`matchParentSize`). Consumed by `markui-view`'s
+    /// `StackLayout`; absence means `TOP_START`. Stacking order is *not*
+    /// carried here — it follows the children's order in the tree (see
+    /// `Overlay`), so no z-index value exists.
+    StackAlign = 117,
+    /// `IntrinsicSize` (1 byte: max/min × width/height) — pin one axis of
+    /// the node's measured size to its subtree's intrinsic answer.
+    IntrinsicSize = 107,
+    /// `Inset` (32 bytes: top, right, bottom, left).
+    /// High-frequency update target for dragging absolutely positioned elements.
+    PositionInset = 41,
+    /// Scroll offset `[f32; 2]` (8 bytes: x, y).
+    /// Highest-frequency attribute; may update every frame.
+    /// Backend MUST optimize this to COMPOSITE or a dedicated scroll phase.
+    /// MUST NOT trigger LAYOUT invalidation.
+    ScrollOffset = 42,
+    /// Scroll configuration packed (direction lock, scrollbar visibility,
+    /// overscroll behavior, snap/bounce flags).
+    /// Low-to-medium frequency. Separated from ScrollOffset to prevent
+    /// static config changes from interfering with per-frame offset updates,
+    /// and to allow backends to cache scroll pipeline state independently.
+    ScrollConfig = 43,
+    /// `CursorStyle` (1 byte).
+    /// High-frequency update target for hover state changes.
+    CursorStyle = 44,
+    /// `Visibility` (1 byte).
+    /// Toggles paint/visibility without invalidating the layout tree.
+    Visibility = 45,
+    /// `PointerEvents` (1 byte).
+    /// Dynamically enables/disables hit-testing (e.g., during modal overlays).
+    PointerEvents = 46,
+    /// `TouchAction` (1 byte).
+    /// Locks/unlocks specific touch gestures dynamically.
+    TouchAction = 47,
+    /// `UserSelect` (1 byte).
+    /// Toggles text selection capability on the fly.
+    UserSelect = 48,
+    /// `TabIndex` (2 bytes, i16).
+    /// Updates keyboard navigation order dynamically.
+    TabIndex = 49,
+    /// Virtual keyboard type / IME input mode.
+    /// Maps to HTML `inputmode`, Android `inputType`, iOS `UIKeyboardType`.
+    InputMode = 50,
+    /// Enter/Return key action hint on virtual keyboard.
+    /// Maps to HTML `enterkeyhint`, Android `imeOptions.actionId`, iOS `returnKeyType`.
+    EnterKeyHint = 51,
+    /// IME composition & autocorrection policy.
+    /// Controls inline candidate display, autocomplete, spellcheck, autocapitalization.
+    ImeOptions = 52,
+    /// IME anchor / composition rect override.
+    /// Side-table index pointing to `[f32; 4]` (x, y, w, h) in local coords.
+    /// Tells the OS where to place the candidate popup when the default caret
+    /// rect is inaccurate (e.g., custom canvas text editors, transformed layers).
+    ImeAnchor = 53,
+    /// Shape fill paint (`Rgb`, 12 bytes — the widest inline value).
+    /// Gradients go through `Gradient` instead.
+    Fill = 54,
+    /// Stroke paint (`Rgb`, 12 bytes). Line geometry stays in
+    /// `StrokeStyle`; per-paint alpha is `StrokeOpacity`.
+    Stroke = 55,
+    /// `Gradient` payload (side-table index): linear/radial stops + tiling
+    /// + `gradientTransform` (SVG ch.14.5). **Slot**: shape-fill paint on a
+    ///   canvas element, `background-image` paint on a view element — the
+    ///   foreground slot is the separate `ForegroundGradient` (100).
+    Gradient = 56,
+    /// Fill alpha (f32, 4 bytes) — colors carry no alpha channel by design
+    /// (see `Opacity`'s rationale).
+    FillOpacity = 57,
+    /// Stroke alpha (f32, 4 bytes).
+    StrokeOpacity = 58,
+    /// Transform pivot `[f32; 2]` (8 bytes, user-space units: x, y) — the
+    /// point transforms rotate/scale around (SVG `transform-origin`).
+    TransformOrigin = 59,
+    /// Side-table index: clip shape (path bytes or element reference).
+    ClipPath = 60,
+    /// Side-table index: mask reference — the mask *definition* (shape or
+    /// alpha/luminance bitmap) rides in the referenced blob, where its
+    /// `maskUnits`/`maskContentUnits` and buffer rectangle also live. Mask
+    /// value semantics are SVG §14.4: **luminance(color) × alpha**, not
+    /// alpha alone (grayscale masks are the norm), computed in the element's
+    /// `ColorInterpolation` space.
+    Mask = 61,
+    /// Side-table index: filter chain descriptor — effects beyond the
+    /// inline `VisualEffects` (blur + blend) pair.
+    Filter = 62,
+    /// `Spring` payload (12 bytes: stiffness, damping, mass) — physics-based
+    /// animation, SwiftUI's default feel. Mutually exclusive with
+    /// `AnimEasing` (physics vs. precomputed curve).
+    AnimSpring = 63,
+    /// `Transition` payload (8 bytes) — enter/exit transition pair (insert +
+    /// remove kinds + duration): SwiftUI's `.transition(...)` equivalent.
+    Transition = 64,
+    /// SVG `translate(x, y)` — `[f32; 2]` (8 bytes: dx, dy).
+    TransformTranslate = 65,
+    /// SVG `scale(sx, sy)` — `[f32; 2]` (8 bytes).
+    TransformScale = 66,
+    /// SVG `rotate(angle)` — f32 (4 bytes, radians; pivot comes from
+    /// `TransformOrigin`).
+    TransformRotate = 67,
+    /// SVG `skewX(a)` + `skewY(b)` — `[f32; 2]` (8 bytes, radians).
+    TransformSkew = 68,
+    /// Vertical text anchor for `CANVAS_TEXT` — SVG `dominant-baseline` /
+    /// Canvas `textBaseline` (1 byte, `TextBaseline`).
+    TextBaseline = 69,
+    /// Image scale-to-fit policy for `CANVAS_IMAGE`/`IMAGE` — SVG
+    /// `preserveAspectRatio` / CSS `object-fit` (1 byte, `ImageFit`).
+    ImageFit = 70,
+    /// `Pattern` payload (side-table index): tile geometry +
+    /// `patternUnits` + `patternTransform` + content reference (SVG ch.15).
+    /// Paint servers pair with `Gradient` (ch.14) — both deform via their
+    /// own `*Transform` field before painting.
+    Pattern = 71,
+    /// `ScrollbarStyle` (8 bytes, inline): scrollbar track/thumb thickness
+    /// and thumb corner radius, in logical pixels. Visual appearance only —
+    /// the show/hide policy lives in `ScrollConfig`, the track/thumb *colors*
+    /// in `ScrollbarBackground` / `ScrollbarForeground` (a scrollbar has
+    /// no `Elem`, so it gets its own background/foreground pair instead of
+    /// borrowing the element's). Element state like every other scroll attr,
+    /// so outside the canvas-session allowlist.
+    ScrollbarStyle = 72,
+    /// `TextAnchor` (1 byte): SVG §10.9.1 `text-anchor` — chunk alignment
+    /// `start|middle|end` (direction-dependent; see the type's doc for why
+    /// it is not `TextLayout`'s box-relative `TextAlign`).
+    TextAnchor = 73,
+    /// `WritingMode` (1 byte): SVG §10.7.2 `writing-mode` —
+    /// `lr-tb|rl-tb|tb-rl`, the initial inline-progression-direction.
+    WritingMode = 74,
+    /// `BaselineShift` payload (12 bytes, inline): SVG §10.9.2
+    /// `baseline-shift` — `baseline|sub|super|<length>`.
+    BaselineShift = 75,
+    /// `Length` (8 bytes): SVG §10.11 `word-spacing` — extra space between
+    /// words; `auto` (the default `Length`) means normal spacing.
+    WordSpacing = 76,
+    /// `Length` (8 bytes): SVG §10.11 `kerning` — `auto` (the default
+    /// `Length`) enables font kerning tables; an explicit length disables
+    /// auto-kerning and sets inter-character spacing instead.
+    Kerning = 77,
+    /// `Direction` (1 byte): SVG §10.7.4 `direction` — base bidi direction
+    /// `ltr|rtl` (initial `ltr`).
+    Direction = 78,
+    /// `UnicodeBidi` (1 byte): SVG §10.7.4 `unicode-bidi` —
+    /// `normal|embed|bidi-override`.
+    UnicodeBidi = 79,
+    /// `Length` (8 bytes): SVG §10.4 `textLength` — the author's target
+    /// advance total for the text run; `auto` (the default `Length`) means
+    /// no adjustment. Negative values are an SVG error.
+    TextLength = 80,
+    /// `LengthAdjust` (1 byte): SVG §10.4 `lengthAdjust` —
+    /// `spacing|spacingAndGlyphs`, how `TextLength` is met.
+    LengthAdjust = 81,
+    /// `GlyphOrientations` (2 bytes): SVG §10.7.3
+    /// `glyph-orientation-horizontal` + `-vertical` (angles rounded to
+    /// 0/90/180/270; vertical may be `auto`).
+    GlyphOrientation = 82,
+    /// Scrollbar *track* color (`Rgb`, 12 bytes — inline) — the special
+    /// background of the scrollbar, which has no `Elem` of its own. Absence
+    /// means the platform's default scrollbar coloring; pushing this
+    /// overrides it. Pairs with `ScrollbarForeground` (thumb).
+    ScrollbarBackground = 83,
+    /// Scrollbar *thumb* color (`Rgb`, 12 bytes — inline) — the special
+    /// foreground of the scrollbar. Absence means the platform default;
+    /// pushing this overrides it. Pairs with `ScrollbarBackground` (track).
+    ScrollbarForeground = 84,
+    /// `f32` (4 bytes, inline): current value of a `GAUGE` element.
+    /// High-frequency (animated meters); clamped to `GaugeRange` by the
+    /// backend. Absence lets the backend infer from `GaugeRange`.
+    ///
+    /// The shared **scalar-value** channel since P3 (P3-D1): `SLIDER`,
+    /// `PROGRESS` and `STEPPER` carry their value here too — the backend
+    /// dispatches on the element type. Absence on a `PROGRESS` means
+    /// *indeterminate*.
+    GaugeValue = 85,
+    /// `[f32; 2]` (8 bytes, inline): `GAUGE` range as `[min, max]`.
+    /// Low-frequency configuration; absence means `0..=1`.
+    ///
+    /// The shared **scalar-range** channel since P3 (P3-D1): `SLIDER` and
+    /// `STEPPER` carry their bounds here (absence likewise `0..=1`).
+    GaugeRange = 86,
+    /// `GaugeStyle` (1 byte, inline): circular ring vs. linear bar meter.
+    GaugeStyle = 87,
+    /// `i64` (8 bytes, inline): selected instant for a `DATE_PICKER` —
+    /// **milliseconds since the Unix epoch, UTC** (exact integer wire
+    /// value; each backend converts to local display). Absence means no
+    /// value yet (backend shows its prompt/empty state).
+    DateValue = 88,
+    /// `[i64; 2]` (16 bytes → side table): `DATE_PICKER` bounds as
+    /// `[min, max]` epoch-millis; `0` on either end means unbounded.
+    /// Selection outside the range is a backend no-op.
+    DateRange = 89,
+    /// `DateGranularity` + `DatePickerStyle` packed (2 bytes, inline):
+    /// which fields the picker shows (`date|time|date_and_time`) and its
+    /// presentation (`automatic|compact|graphical|wheel`).
+    DatePickerConfig = 90,
+    /// `Rgb` (12 bytes, inline): the selected color of a `COLOR_PICKER`.
+    /// Kept distinct from `Foreground`/`Fill` — those are *applied* paint;
+    /// this is the control's value. The app applies it to a paint attr as
+    /// its own choosing.
+    ColorValue = 91,
+    /// Winding rule for the clip silhouette — payload is `FillRule`
+    /// (`nonzero` = 0 / `evenodd` = 1, initial `nonzero`; the value set is
+    /// defined by reference to `fill-rule`, SVG §14.3.5).
+    ///
+    /// Spec distinction preserved in our flattened model: `clip-rule`
+    /// belongs to the *shape that defines* the clipping path, not the
+    /// element referencing it — so this attr rides next to `ClipPath` and
+    /// governs how its path bytes / referenced shape are filled. Without
+    /// it, holes (donut clips) in an inline `ClipPath` would be
+    /// ambiguous.
+    ClipRule = 92,
+    /// `ColorInterpolation` (1 byte, inline): SVG §14.2
+    /// `color-interpolation` — `sRGB` (initial) or `linearRGB`. The color
+    /// space in which gradients, mask luminance (§14.4), filters and
+    /// compositing compute; pinning it per element keeps mask/filter
+    /// results identical across backends.
+    ColorInterpolation = 93,
+    /// `f32` (4 bytes, inline): per-layer alpha for the background paint
+    /// (`background-color`'s alpha) — the missing companion of
+    /// `FillOpacity`/`StrokeOpacity`. Needed because `Rgb` carries no
+    /// alpha (orthogonal by design) and the group-level `Opacity` (5)
+    /// would also fade the element's children. Absence = fully opaque.
+    BackgroundOpacity = 94,
+    /// `f32` (4 bytes, inline): per-layer alpha for the foreground/text
+    /// paint — e.g. SwiftUI `.foregroundStyle(.primary.opacity(0.6))`.
+    /// Same rationale as `BackgroundOpacity`; absence = fully opaque.
+    ForegroundOpacity = 95,
+    /// `f32` (4 bytes, inline): alpha of the `Shadow` paint — shadow colors
+    /// are almost always translucent (e.g. `rgba(0,0,0,0.35)`), while
+    /// `Rgb` carries no alpha. Absence = the `Shadow` color at full alpha.
+    ShadowOpacity = 96,
+    /// `Blur` payload (8 bytes, inline): backdrop blur — blurs what is
+    /// *behind* the element (CSS `backdrop-filter: blur(...)`; SwiftUI
+    /// `.ultraThinMaterial` family). Distinct from `VisualEffects`'s
+    /// blur, which blurs the element's *own* rendering. Pair with
+    /// `BackgroundOpacity` for translucent materials. Absence = none.
+    BackdropBlur = 97,
+    /// `BlendMode` (1 byte, inline): CSS `background-blend-mode` — how the
+    /// background *layers* (color/gradient/pattern) blend with each other.
+    /// Distinct from `VisualEffects`'s blend, which composites the whole
+    /// element against the canvas.
+    BackgroundBlend = 98,
+    /// `ForegroundRole` (1 byte, inline): semantic/hierarchical foreground
+    /// color (SwiftUI `foregroundStyle(.secondary)` / `.tint`) — the
+    /// backend resolves dark-mode-adaptive palette entries. Alternative to
+    /// a concrete `Foreground` color (see that type's precedence note).
+    ForegroundRole = 99,
+    /// `Gradient` payload (side-table index, 208 B): foreground paint
+    /// server (SwiftUI `foregroundStyle(LinearGradient…)`). Separate slot
+    /// from `Gradient` (56), whose slot is shape-fill (canvas) /
+    /// `background-image` (view) — the three gradient uses need
+    /// distinguishable keys.
+    ForegroundGradient = 100,
+    /// Side-table **track override** — the single escape hatch for payloads
+    /// the modeled attribute set doesn't cover (replaces the reserved pair
+    /// `CSS_OVERRIDE`/`NATIVE_OVERRIDE`). The payload format is determined
+    /// by the instruction's `track`:
+    ///
+    /// - `track = WEB` → CSS property name + value string pair (a DOM/CSS
+    ///   backend applies it directly);
+    /// - `track = NATIVE` → backend-defined opaque blob — must be
+    ///   **self-identifying**, since track granularity is coarser than
+    ///   backend identity (a sibling native backend drops what it didn't
+    ///   define).
+    ///
+    /// Requires a **non-`UNIVERSAL` track** (a concrete target must be
+    /// chosen). Track values override universal values and never merge —
+    /// see the README's Dual-Track Resolution. Prefer modeled attrs; use
+    /// this only for genuinely platform-specific or not-yet-modeled
+    /// semantics, or cross-backend portability silently breaks.
+    Override = 101,
+    /// Marks an element as a **floating overlay layer** (dialog, toast,
+    /// popover, dropdown menu, tooltip…) — payload is `OverlayFlags`
+    /// (1 byte, inline; `MODAL` = input to the content below is blocked).
+    ///
+    /// Stacking is *not* carried here: paint/hit order follows the
+    /// element's **attachment position in the tree** (later attachment
+    /// draws and receives input on top), and attaching the overlay at
+    /// scene level escapes ancestor clips — the position decides the
+    /// z-order, so no `Z_INDEX` value exists (deliberately deferred).
+    Overlay = 102,
+    /// `BackgroundImage` payload (8 bytes, inline): the bitmap paint server
+    /// of `background-image: url(...)` — side-table asset/URL index +
+    /// `background-repeat` tiling + fit policy (`background-size`
+    /// cover/contain). The third `background-image` source alongside
+    /// `Gradient` (56) and `Pattern` (71); absence = the layer is a
+    /// gradient/pattern or none.
+    BackgroundImage = 103,
+    /// `Offset` payload (12 bytes, inline: `unit` + `dx` + `dy`), the
+    /// `markui-style` geometry type — geometry never crosses the wire as a
+    /// bare pair: `unit` is `PX`, so `dx`/`dy` are logical pixels. The
+    /// layout engine's computed origin of this element **in its parent's
+    /// coordinate space** — the frontend's placement answer, for the
+    /// backend to draw at. Marshalled
+    /// by the compose render context while the element's `Place` bit is
+    /// set — that bit is only ever raised by the frontend layout phase, so
+    /// a native-layout backend never sees it. Never authored through a
+    /// modifier, never read back — `Attr::Offset` has no `Style` carrier
+    /// by design, so it never enters a style table.
+    Offset = 104,
+}

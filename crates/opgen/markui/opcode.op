@@ -1,0 +1,227 @@
+
+/// Stream operation selector.
+///
+/// # ABI stability
+///
+/// Numeric values are **wire-format ABI**. New opcodes are always appended
+/// with incrementing values. Existing values are never renumbered, reused,
+/// or removed. Backends encountering unknown opcodes must skip them and
+/// optionally log a diagnostic — never crash.
+///
+/// # Batch invariant
+///
+/// [`Opcode::NewOrUpdate`] opens an attribute batch. The producer **must**
+/// emit exactly `attrs` [`Opcode::Push`] records followed by exactly one
+/// [`Opcode::Pop`]. Violating this count corrupts the stream and causes
+/// cascading misparses in all subsequent instructions.
+enum Opcode {
+    /// Closes attribute batch opened by `NewOrUpdate`.
+    ///
+    /// Also closes a `REQ_FEED_BACK` request batch.
+    Pop = 0,
+    /// Sets one attribute in current batch. Layout: attr@0, unset flag@1 (=0), value@2..
+    Push = 1,
+    /// Attach node as last child. Operands: new@2..6, parent@6..10.
+    Append = 2,
+    /// Insert node before sibling. Operands: new@2..6, before@6..10.
+    Insert = 3,
+    /// Swap two siblings. Operands: first@2..6, second@6..10.
+    Swap = 4,
+    /// Detach node from graph. Operands: node@2..6.
+    Remove = 5,
+    /// Repaint without structural change. Operands: node@2..6.
+    /// Backends may coalesce redundant Draw within one frame.
+    Draw = 6,
+    /// Create/update node + open attr batch.
+    /// Operands: el@0, attrs_count@1, node@2..6.
+    /// Must be followed by exactly attrs_count Push + one Pop.
+    NewOrUpdate = 7,
+
+    /// Start tween animation.
+    /// Operands: property@0, easing@1, node@2..6, target(f32)@6..10, duration(u32)@10..14.
+    /// Operand values override declarative Attr counterparts.
+    /// Sentinel values in operands fall back to Attr or backend default.
+    AnimStart = 8,
+
+    /// Stop all animations on node. Operands: node@2..6.
+    AnimStop = 9,
+
+    /// Update running animation target. Continues from current interpolated value.
+    /// Operands: property@0, _reserved@1, node@2..6, target(f32)@6..10.
+    AnimSet = 10,
+
+    /// Pause/resume animation. Operands: paused(bool)@0, _reserved@1..2, node@2..6.
+    AnimPause = 11,
+
+    /// Detach a node from the node tree.
+    Detach = 12,
+
+    // ========================================================================
+    // 15–28: Canvas — scoped drawing sessions (immediate mode).
+    //
+    // Counterpart to the declarative `Elem::CANVAS_*` nodes. A session
+    // binds every following canvas record to one canvas node:
+    //
+    //     CanvasOpen(node) → path/paint/save-restore records → CanvasClose
+    //
+    // Element-level effects (placement transform, clip, paint) are
+    // attributes (`TRANSFORM_*`, `ClipPath`, `Fill`…) — only
+    // drawing-session state lives here. While a session is open, non-canvas
+    // records (Push, Draw, tree ops) are protocol errors. Paint/state
+    // attributes come from the canvas element's batch, set up before
+    // CanvasOpen.
+    //
+    // Coordinate values in these records are **user-space units** (SVG
+    // `<number>`, ch.7.6): they follow the current transformation matrix and
+    // equal device pixels only in the initial coordinate system (ch.7.3) —
+    // never treat them as absolute device pixels.
+    //
+    // Operand payloads start at byte 2 (record offset 4) so every f32 keeps
+    // 4-byte alignment inside the 16-byte record. Curves, arcs, and shapes
+    // exceed the 14-byte operand budget — they stay declarative via
+    // `Attr::PathData` / `Elem::CANVAS_RECT` / `Elem::CANVAS_CIRCLE`.
+    // ========================================================================
+
+    /// Start a new path, discarding the previous one (`beginPath`).
+    PathBegin = 15,
+    /// Move the current point. Operands: x@2..6, y@6..10 (f32, 8 bytes).
+    PathMoveTo = 16,
+    /// Line to a point. Operands: x@2..6, y@6..10 (f32, 8 bytes).
+    PathLineTo = 17,
+    /// Close the current sub-path (`closePath`).
+    PathClose = 18,
+
+    /// Fill the current path (`fill`). Paint/rule come from the canvas
+    /// element's `Fill` / `FillRule` / `FillOpacity` attributes.
+    FillPath = 19,
+    /// Stroke the current path (`stroke`). From `Stroke` / `StrokeStyle` /
+    /// `StrokeOpacity` attributes.
+    StrokePath = 20,
+    /// Intersect the clip region with the current path (`clip`).
+    Clip = 21,
+
+    /// Push canvas state (transform, clip, paint) onto the save stack.
+    Save = 22,
+    /// Pop the most recently saved canvas state (`restore`).
+    Restore = 23,
+
+    /// Session-internal translation of drawing coordinates (element placement
+    /// is `Attr::TransformTranslate`). Operands: dx@2..6, dy@6..10 (f32,
+    /// 8 bytes).
+    CanvasTranslate = 24,
+    /// Rotate around the current origin. Operands: radians@2..6 (f32,
+    /// 4 bytes; pivot via `TransformOrigin`) — counterpart:
+    /// `TransformRotate`.
+    CanvasRotate = 25,
+    /// Scale the canvas. Operands: sx@2..6, sy@6..10 (f32, 8 bytes) —
+    /// declarative counterpart: `TransformScale`.
+    CanvasScale = 26,
+
+    // --- Session bracket (appended; keeps 15–26 numbering untouched) --------
+
+    /// Open a drawing session bound to a canvas node: every canvas record
+    /// until the matching `CanvasClose` targets it.
+    ///
+    /// Operands: ops@0 (record count inside the session, back-filled by the
+    /// closer), target_kind@1 (0 = tree node; reserved for future offscreen
+    /// surfaces), node@2..6.
+    ///
+    /// Not valid inside an attribute batch; nesting two sessions is invalid.
+    CanvasOpen = 27,
+
+    /// Close the current drawing session (Canvas2D has no equivalent — our
+    /// begin/end pair scopes the target node). A close with a wrong `ops`
+    /// count or a non-empty save/restore stack is a protocol error, caught
+    /// by `Frame::validate`.
+    CanvasClose = 28,
+
+    // ========================================================================
+    // 29–44: Path segments (SVG ch.8.3 path data), absolute + relative.
+    //
+    // The complete lineto/curveto family the session's path builder needs.
+    // Payloads that fit the 12-byte inline budget (≤3 f32) are carried in
+    // the record; wider ones (quadratic 4 f32, cubic 6 f32, arc 5 f32 + 2
+    // flags) carry a side-table index whose entry layout is documented on
+    // each opcode. Relative (lowercase) forms offset from the current point
+    // per SVG semantics; a relative `PathMoveToRel` as the first segment
+    // is still absolute (SVG: implicit 0,0 origin).
+    // ========================================================================
+
+    /// SVG `h` — horizontal lineto (absolute). Operands: x@2..6 (f32, 4 bytes).
+    PathHorizTo = 29,
+    /// SVG `v` — vertical lineto (absolute). Operands: y@2..6 (f32, 4 bytes).
+    PathVertTo = 30,
+    /// SVG `q` — quadratic Bézier (absolute). Side-table index @2..6;
+    /// entry = 4 × f32 native order: `cx, cy, x, y` (16 bytes).
+    PathQuadTo = 31,
+    /// SVG `t` — smooth quadratic Bézier (control derived from the previous
+    /// segment). Operands: x@2..6, y@6..10 (f32, 8 bytes).
+    PathSmoothQuadTo = 32,
+    /// SVG `c` — cubic Bézier (absolute). Side-table index @2..6;
+    /// entry = 6 × f32 native order: `c1x, c1y, c2x, c2y, x, y` (24 bytes).
+    PathCubicTo = 33,
+    /// SVG `s` — smooth cubic Bézier (control derived from the previous
+    /// segment). Operands: x@2..6, y@6..10 (f32, 8 bytes).
+    PathSmoothCubicTo = 34,
+    /// SVG `a` — elliptical arc (absolute). Side-table index @2..6;
+    /// entry = 5 × f32 native order (`rx, ry, x_rotation, x, y`, 20 bytes)
+    /// followed by 2 × u8 flags: `large_arc`, `sweep` (22 bytes total).
+    PathArcTo = 35,
+
+    /// SVG `m` — relative moveto (first segment is absolute, per SVG).
+    /// Operands: dx@2..6, dy@6..10 (f32, 8 bytes).
+    PathMoveToRel = 36,
+    /// SVG `l` — relative lineto. Operands: dx@2..6, dy@6..10 (f32, 8 bytes).
+    PathLineToRel = 37,
+    /// SVG `h` — relative horizontal lineto. Operands: dx@2..6 (f32, 4 bytes).
+    PathHorizToRel = 38,
+    /// SVG `v` — relative vertical lineto. Operands: dy@2..6 (f32, 4 bytes).
+    PathVertToRel = 39,
+    /// SVG `q` — relative quadratic Bézier. Side-table index @2..6;
+    /// entry = 4 × f32: `dcx, dcy, dx, dy` (16 bytes).
+    PathQuadToRel = 40,
+    /// SVG `t` — relative smooth quadratic Bézier. Operands: dx@2..6,
+    /// dy@6..10 (f32, 8 bytes).
+    PathSmoothQuadToRel = 41,
+    /// SVG `c` — relative cubic Bézier. Side-table index @2..6;
+    /// entry = 6 × f32: `dc1x, dc1y, dc2x, dc2y, dx, dy` (24 bytes).
+    PathCubicToRel = 42,
+    /// SVG `s` — relative smooth cubic Bézier. Operands: dx@2..6,
+    /// dy@6..10 (f32, 8 bytes).
+    PathSmoothCubicToRel = 43,
+    /// SVG `a` — relative elliptical arc. Side-table index @2..6;
+    /// entry = 5 × f32 (`rx, ry, x_rotation, dx, dy`) + 2 × u8 flags
+    /// (`large_arc`, `sweep`) — 22 bytes total (same layout as `PathArcToRel`).
+    PathArcToRel = 44,
+
+    // ========================================================================
+    // 45–47: Canvas matrix transforms (appended; keeps 15–44 numbering
+    // untouched) — the Canvas2D `transform` / `setTransform` /
+    // `resetTransform` trio. The declarative counterparts live on the
+    // element (`Attr::Transform` + the `TRANSFORM_*` function attrs);
+    // these operate on the session's current transformation matrix (CTM).
+    // ========================================================================
+
+    /// Concatenate a matrix onto the CTM — Canvas2D
+    /// `transform(a, b, c, d, e, f)` (post-multiplies, so the new matrix
+    /// applies in the current local coordinate system). Side-table index
+    /// @2..6; entry = 6 × f32 native order: `a, b, c, d, e, f` (24 bytes,
+    /// same layout as `Attr::Transform`).
+    CanvasTransform = 45,
+    /// Replace the CTM with an absolute matrix — Canvas2D
+    /// `setTransform(a, b, c, d, e, f)` (discards the current CTM; use
+    /// `Save`/`Restore` to bracket if it must be recovered). Side-table
+    /// index @2..6; entry layout identical to `CanvasTransform`.
+    CanvasSetTransform = 46,
+    /// Reset the CTM to the identity matrix — Canvas2D
+    /// `resetTransform()`. Operand-free (identity carries no values).
+    CanvasResetTransform = 47,
+
+    PushIndex = 48,
+
+    PushUnset = 49,
+
+    /// `AppendRoot` — attach a node as the last child of the virtual root:
+    /// the parentless case of [`Opcode::Append`].
+    AppendRoot = 50,
+}

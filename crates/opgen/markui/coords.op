@@ -40,6 +40,15 @@ struct Bounds {
     heigth: Length,
 }
 
+/// Width and height as a pair of `<length>`s.
+///
+/// Both fields use [`Length`] to support auto/px/percent units.
+/// Layout: 2 × `Length` = 16 bytes, zero padding.
+struct Size {
+    width: Length,
+    height: Length,
+}
+
 /// Image sizing behavior within its layout box.
 ///
 /// Mirrors CSS `object-fit` and SVG `preserveAspectRatio` semantics.
