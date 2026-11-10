@@ -4,11 +4,11 @@ use std::fmt::Debug;
 
 use parserc::{AsBytes, AsStr, Find, Input, StartWith};
 
-use crate::errors::UnsynError;
+use crate::errors::OpgenError;
 
 /// The `Input` trait for `unsyn` parsing.
 pub trait UnsynInput:
-    Input<Item = char, Error = UnsynError>
+    Input<Item = char, Error = OpgenError>
     + AsBytes
     + AsStr
     + StartWith<&'static str>
@@ -22,6 +22,6 @@ pub trait UnsynInput:
 }
 
 /// A implementation of `CSTInput`.
-pub type TokenStream<'a> = parserc::chars::TokenStream<'a, UnsynError>;
+pub type TokenStream<'a> = parserc::chars::TokenStream<'a, OpgenError>;
 
 impl<'a> UnsynInput for TokenStream<'a> {}
