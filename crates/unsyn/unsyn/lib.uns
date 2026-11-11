@@ -1,7 +1,5 @@
 //! unsyn for `unsyn`
 
-use a::*;
-
 whitespace WHITESPACE ->
       U+0009
     | U+000A
@@ -15,7 +13,6 @@ whitespace WHITESPACE ->
     | U+2028
     | U+2029;
 
-lexer TAB -> U+0009;
 lexer LF  -> U+000A;
 lexer CR  -> U+000D;
 
@@ -32,12 +29,20 @@ lexer NON_KEYWORD_IDENTIFIER -> IDENTIFIER_OR_KEYWORD except KEYWORDS;
 lexer IDENTIFIER -> NON_KEYWORD_IDENTIFIER | RAW_IDENTIFIER;
 
 lexer KEYWORDS ->
+      LEADING_KEYWORDS
+    | FOLLOWING_KEYWORDS
+    ;
+
+lexer LEADING_KEYWORDS ->
       'lexer'
     | 'syntax'
-    | 'followed'
+    | 'whitespace'
+    ;
+
+lexer FOLLOWING_KEYWORDS ->
+      'concat'
     | 'except'
-    | 'super'
-    | 'crate'
+    | 'followed'
     ;
 
 lexer STRING_LITERAL ->
@@ -109,23 +114,6 @@ lexer BLOCK_COMMENT_OR_DOC ->
     ;
 
 
-syntax
-Path ->
-    '::'? PathSegment ( '::' PathSegment )*
-    ;
-
-syntax PathSegment ->
-    'super' | 'crate'| IDENTIFIER
-    ;
-
-syntax UseDeclaration -> 'use' UseTree;
-
-syntax UseTree ->
-      ( Path? '::' )? '*'
-    | ( Path? '::' )? '{' ( UseTree ( ',' UseTree )* ','? )? '}'
-    | Path ( 'as' ( IDENTIFIER | '_' ) )?
-    ;
-
 syntax Expr -> ExprNoTopAlt+ ( '|' ExprNoTopAlt+ )?;
 
 syntax ExprNoTopAlt -> ExprWithSuffix | ExprWithoutSuffix;
@@ -146,7 +134,7 @@ syntax ExprWithSuffix ->
           '*'
         | '?'
         | '+'
-        | '{' Repeat '}'
+        | Repeat
       )
     | ExprWithoutSuffix 'concat' ExprNoTopAlt
     | ExprWithoutSuffix 'followed' ExprNoTopAlt
@@ -154,12 +142,18 @@ syntax ExprWithSuffix ->
     ;
 
 syntax Repeat ->
-      DEC_LITERAL
-    | DEC_LITERAL '..' DEC_LITERAL?
-    | '..' DEC_LITERAL
+    '{'
+    (
+          DEC_LITERAL
+        | DEC_LITERAL ',' DEC_LITERAL?
+        | ',' DEC_LITERAL
+    )
+    '}'
     ;
 
 syntax Range ->
       UNICODE_LITERAL '-' UNICODE_LITERAL
     | STRING_LITERAL concat '-' concat STRING_LITERAL
     ;
+
+syntax Stmt -> LEADING_KEYWORDS IDENTIFIER '->' Expr ';';
