@@ -83,8 +83,8 @@ lexer LINE_COMMENT ->
 
 lexer BLOCK_COMMENT ->
       '/*'
-        ( ~['*','!'] | '**' | BLOCK_COMMENT_OR_DOC )
-        ( BLOCK_COMMENT_OR_DOC | ~['*/'] )*
+        ( ~['*','!','/*'] | '**' | BLOCK_COMMENT_OR_DOC )
+        ( BLOCK_COMMENT_OR_DOC | ~['/*','*/'] )*
       '*/'
     | '/**/'
     | '/***/'
@@ -93,7 +93,7 @@ lexer BLOCK_COMMENT ->
 lexer INNER_LINE_DOC -> '//!' ~[LF,CR];
 
 lexer INNER_BLOCK_DOC ->
-    '/*!' ( BLOCK_COMMENT_OR_DOC | ~['*/',CR] )* '*/'
+    '/*!' ( BLOCK_COMMENT_OR_DOC | ~['/*','*/',CR] )* '*/'
     ;
 
 lexer OUTER_LINE_DOC ->
@@ -102,8 +102,8 @@ lexer OUTER_LINE_DOC ->
 
 lexer OUTER_BLOCK_DOC ->
     '/**'
-      ( ~'*' | BLOCK_COMMENT_OR_DOC )
-      ( BLOCK_COMMENT_OR_DOC | ~['*/',CR] )*
+      ( ~['*','/*'] | BLOCK_COMMENT_OR_DOC )
+      ( BLOCK_COMMENT_OR_DOC | ~['/*','*/',CR] )*
     '*/'
     ;
 

@@ -7,13 +7,13 @@
 //! 1. **collection** — every `whitespace`, `lexer` and `syntax` statement is
 //!    registered in a [`SymbolTable`], and a name declared twice is rejected.
 //! 2. **validation** — the literals, character sets, ranges and repetitions of
-//!    every body are evaluated (see [`check`]).
+//!    every body are evaluated (see the `check` pass).
 //! 3. **linking** — every bare name a body refers to is resolved against the
 //!    definitions of the file, a terminal pattern may not refer to a `syntax`
 //!    node, and a file declares its trivia with at most one `whitespace`
 //!    statement.
 //! 4. **recursion** — the leftmost dependencies of the definitions are computed
-//!    and a node that can start with itself is rejected (see [`graph`]).
+//!    and a node that can start with itself is rejected (see the `graph` pass).
 //!
 //! A `<call>` is deliberately *not* resolved: it denotes the matcher the
 //! generated code calls, which may be provided by the backend, so the names a

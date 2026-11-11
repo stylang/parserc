@@ -1,6 +1,6 @@
 use std::{fs, path::PathBuf};
 
-use parserc::{Input, syntax::Syntax};
+use parserc::syntax::Syntax;
 use unsyn::{
     input::TokenStream,
     semantics::{NodeKind, analyze},
@@ -23,11 +23,9 @@ fn parse_bootstrap() -> Crate<TokenStream<'static>> {
 
     let mut token_stream = TokenStream::from(content);
 
-    let c = Crate::parse(&mut token_stream).unwrap_or_else(|e| panic!("parse {filepath:?}: {e}"));
-
-    assert_eq!(token_stream.len(), 0, "the spec was not consumed");
-
-    c
+    // `Crate` is read to its end, so a spec with text no item can read fails to
+    // parse rather than being a file that was quietly cut short.
+    Crate::parse(&mut token_stream).unwrap_or_else(|e| panic!("parse {filepath:?}: {e}"))
 }
 
 #[test]

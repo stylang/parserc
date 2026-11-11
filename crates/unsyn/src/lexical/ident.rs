@@ -27,7 +27,7 @@ where
             .parse(input)
             .map_err(SyntaxKind::Ident.map())?;
 
-        let rest = take_while(|c| is_xid_continue(c)).parse(input)?;
+        let rest = take_while(is_xid_continue).parse(input)?;
 
         let content = content.split_to(1 + rest.len());
 

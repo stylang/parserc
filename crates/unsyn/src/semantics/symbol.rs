@@ -218,3 +218,179 @@ where
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use parserc::{
+        Span,
+        syntax::{Syntax, SyntaxInput},
+    };
+
+    use crate::{
+        errors::SemanticsKind,
+        input::TokenStream,
+        lexical::ident::Ident,
+        syntax::{Crate, Item, Stmt},
+    };
+
+    use super::*;
+
+    /// The kind, name token and statement of every definition of a parsed file.
+    fn parts<I: UnsynInput>(file: &Crate<I>) -> Vec<(NodeKind, &Ident<I>, &Stmt<I>)> {
+        file.items
+            .iter()
+            .filter_map(|item| match item {
+                Item::Stmt(stmt) => Some(match stmt {
+                    Stmt::Whitespace { ident, .. } => (NodeKind::Whitespace, ident, stmt),
+                    Stmt::Lexer { ident, .. } => (NodeKind::Lexer, ident, stmt),
+                    Stmt::Syntax { ident, .. } => (NodeKind::Syntax, ident, stmt),
+                }),
+                _ => None,
+            })
+            .collect()
+    }
+
+    /// Collects a file into a table, keeping the errors it reports.
+    fn collect<'a, I: UnsynInput>(file: &'a Crate<I>) -> (SymbolTable<'a, I>, Vec<UnsynError>) {
+        let mut table = SymbolTable::new();
+        let mut errors = vec![];
+
+        for (kind, name, stmt) in parts(file) {
+            if let Err(error) = table.insert(Definition::from_stmt(kind, name, stmt)) {
+                errors.push(error);
+            }
+        }
+
+        (table, errors)
+    }
+
+    #[test]
+    fn a_kind_is_named_by_the_keyword_that_introduces_it() {
+        let kinds = [
+            (NodeKind::Whitespace, "whitespace", true),
+            (NodeKind::Lexer, "lexer", true),
+            (NodeKind::Syntax, "syntax", false),
+        ];
+
+        for (kind, keyword, terminal) in kinds {
+            assert_eq!(kind.keyword(), keyword);
+            assert_eq!(kind.to_string(), keyword);
+            assert_eq!(kind.is_terminal(), terminal);
+        }
+    }
+
+    #[test]
+    fn a_definition_is_the_statement_it_was_read_from() {
+        let file = TokenStream::from("lexer A -> 'a';")
+            .parse::<Crate<_>>()
+            .expect("a definition should parse");
+
+        let (table, errors) = collect(&file);
+
+        assert!(errors.is_empty(), "{errors:?}");
+        assert_eq!(table.len(), 1);
+        assert!(!table.is_empty());
+
+        let def = table.get("A").expect("the name should be found");
+
+        assert_eq!(def.kind(), NodeKind::Lexer);
+        assert_eq!(def.name(), "A");
+        assert_eq!(def.name_span(), &Span::Range(6..7));
+        assert_eq!(def.stmt(), parts(&file)[0].2);
+        assert_eq!(def.expr().to_span(), Span::Range(11..14));
+    }
+
+    /// A name is claimed by the definition that comes first, which is the one an
+    /// error about a later one has to point back at.
+    #[test]
+    fn a_name_can_only_be_defined_once() {
+        let file = TokenStream::from("lexer A -> 'a';\nsyntax A -> 'b';")
+            .parse::<Crate<_>>()
+            .expect("both definitions should parse");
+
+        let (table, errors) = collect(&file);
+
+        assert_eq!(table.len(), 1, "the second name is taken");
+        assert_eq!(
+            errors,
+            vec![UnsynError::Semantics(
+                SemanticsKind::NameCollision(Span::Range(6..7)),
+                Span::Range(23..24),
+            )],
+            "{errors:?}"
+        );
+
+        // It keeps the kind it was first defined with.
+        assert_eq!(table.get("A").map(Definition::kind), Some(NodeKind::Lexer));
+    }
+
+    /// A name answers to one kind only, so a reference that asks for the wrong
+    /// one is as good as a reference to nothing.
+    #[test]
+    fn a_definition_is_found_by_its_name_and_its_kind() {
+        let file = TokenStream::from("whitespace W -> ' '; lexer A -> 'a';")
+            .parse::<Crate<_>>()
+            .expect("both definitions should parse");
+
+        let (table, _) = collect(&file);
+
+        assert_eq!(
+            table.get("W").map(Definition::kind),
+            Some(NodeKind::Whitespace)
+        );
+        assert_eq!(
+            table
+                .get_of_kind("W", NodeKind::Whitespace)
+                .map(Definition::name),
+            Some("W"),
+        );
+        assert!(table.get_of_kind("W", NodeKind::Lexer).is_none());
+        assert!(table.get_of_kind("A", NodeKind::Whitespace).is_none());
+        assert!(table.get("no such node").is_none());
+
+        // There is one trivia matcher per file, and the table knows it by kind
+        // alone.
+        assert_eq!(table.whitespace().map(Definition::name), Some("W"));
+
+        let no_whitespace = TokenStream::from("lexer A -> 'a';")
+            .parse::<Crate<_>>()
+            .expect("a definition should parse");
+
+        let (table, _) = collect(&no_whitespace);
+
+        assert!(table.whitespace().is_none());
+    }
+
+    #[test]
+    fn a_table_keeps_the_order_the_definitions_were_written_in() {
+        let file = TokenStream::from("lexer B -> 'b'; syntax C -> 'c'; lexer A -> 'a';")
+            .parse::<Crate<_>>()
+            .expect("the definitions should parse");
+
+        let (table, _) = collect(&file);
+
+        let names: Vec<&str> = table.iter().map(Definition::name).collect();
+
+        assert_eq!(names, vec!["B", "C", "A"]);
+        assert_eq!(table.len(), names.len());
+        assert!(
+            table
+                .iter()
+                .all(|def| def.kind().is_terminal() || def.kind() == NodeKind::Syntax)
+        );
+    }
+
+    #[test]
+    fn an_empty_table_holds_nothing() {
+        let file = TokenStream::from("//! nothing defined here\n")
+            .parse::<Crate<_>>()
+            .expect("a file of docs should parse");
+
+        let (table, errors) = collect(&file);
+
+        assert!(table.is_empty());
+        assert!(errors.is_empty());
+        assert!(table.get("nothing").is_none());
+        assert!(table.whitespace().is_none());
+    }
+}
