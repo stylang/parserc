@@ -90,7 +90,7 @@ lexer BLOCK_COMMENT ->
     | '/***/'
     ;
 
-lexer INNER_LINE_DOC -> '//!' ~[LR,CR];
+lexer INNER_LINE_DOC -> '//!' ~[LF,CR];
 
 lexer INNER_BLOCK_DOC ->
     '/*!' ( BLOCK_COMMENT_OR_DOC | ~['*/',CR] )* '*/'
@@ -125,7 +125,7 @@ syntax ExprWithoutSuffix ->
     | '[' (Range | STRING_LITERAL |  UNICODE_LITERAL) ']'
     | STRING_LITERAL
     | UNICODE_LITERAL
-    | Path
+    | IDENTIFIER
     ;
 
 syntax ExprWithSuffix ->

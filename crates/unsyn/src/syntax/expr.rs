@@ -14,7 +14,6 @@ use crate::{
         lit::{LitDec, LitStr, LitUnicode},
         punct::{ArrowRight, Comma, DotDot, Minus, Or, Plus, Question, Semi, Star, Tilde},
     },
-    syntax::Path,
 };
 
 /// A stmt define a node of syntax tree.
@@ -204,8 +203,8 @@ where
     Str(LitStr<I>),
     /// A literal unicode expr.
     Unicode(LitUnicode<I>),
-    /// A path expression.
-    Path(Path<I>),
+    /// A reference to another node by name.
+    Ident(Ident<I>),
 }
 
 /// expr for set item.
@@ -221,8 +220,8 @@ where
     Str(LitStr<I>),
     /// A literal unicode expr.
     Unicode(LitUnicode<I>),
-    /// A path expression.
-    Path(Path<I>),
+    /// A reference to another node by name.
+    Ident(Ident<I>),
 }
 
 /// A literal range expression

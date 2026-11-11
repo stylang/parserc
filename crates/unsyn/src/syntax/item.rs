@@ -5,9 +5,8 @@ use crate::{
     lexical::{
         S,
         comments::{InnerBlockDoc, InnerLineDoc, OuterBlockDoc, OuterLineDoc},
-        punct::Semi,
     },
-    syntax::{ModuleDeclaration, Stmt, UseDeclaration},
+    syntax::Stmt,
 };
 
 /// inner document for source file.
@@ -41,8 +40,6 @@ where
 {
     OuterDoc(OuterDoc<I>),
     S(S<I>),
-    Use(UseDeclaration<I>, Semi<I>),
-    Mod(ModuleDeclaration<I>, Semi<I>),
     Stmt(Stmt<I>),
 }
 

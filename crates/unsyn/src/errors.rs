@@ -35,8 +35,6 @@ pub enum PunctKind {
     Lt,
     #[error("punct '>'")]
     Gt,
-    #[error("punct '::'")]
-    PathSep,
     #[error("punct ','")]
     Comma,
     #[error("punct '->'")]
@@ -66,20 +64,8 @@ pub enum KeywordKind {
     Followed,
     #[error("keyword 'except'")]
     Except,
-    #[error("keyword 'use'")]
-    Use,
-    #[error("keyword 'super'")]
-    Super,
-    #[error("keyword 'crate'")]
-    Crate,
-    #[error("keyword 'as'")]
-    As,
-    #[error("keyword 'this'")]
-    This,
     #[error("keyword 'whitespace'")]
     Whitespace,
-    #[error("keyword 'mod'")]
-    Mod,
     #[error("keyword 'concat'")]
     Concat,
 }
@@ -117,8 +103,6 @@ pub enum SyntaxKind {
     InnerLineDoc,
     #[error("outer block document")]
     OuterBlockDoc,
-    #[error("use tree")]
-    UseTree,
     #[error("unicode escape")]
     UnicodeEscape,
     #[error("literal decimal number")]
@@ -160,8 +144,24 @@ pub enum SemanticsKind {
     UnicodeEscape,
     #[error("empty set expression")]
     EmptySet,
-    #[error("invalid set item")]
-    SetItem,
+    #[error("undefined symbol `{0}`")]
+    UndefinedSymbol(String),
+    #[error("name collision with the previous definition at {0:?}")]
+    NameCollision(Span),
+    #[error("duplicate `whitespace` declaration")]
+    DuplicateWhitespace,
+    #[error("`syntax` node `{0}` can not be used by a terminal pattern")]
+    UnexpectedSyntax(String),
+    #[error("invalid range: the lower bound is greater than the upper bound")]
+    InvalidRange,
+    #[error("invalid repetition range")]
+    InvalidRepeat,
+    #[error("not a valid unicode code point")]
+    InvalidCodePoint,
+    #[error("expect a single character literal")]
+    NotAChar,
+    #[error("left-recursive definition of node `{0}`")]
+    LeftRecursion(String),
 }
 
 impl SemanticsKind {

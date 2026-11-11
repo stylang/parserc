@@ -51,7 +51,6 @@ define_punct!(BraceStart, "{");
 define_punct!(BraceEnd, "}");
 define_punct!(Lt, "<");
 define_punct!(Gt, ">");
-define_punct!(PathSep, "::");
 define_punct!(Comma, ",");
 define_punct!(ArrowRight, "->");
 define_punct!(Semi, ";");
