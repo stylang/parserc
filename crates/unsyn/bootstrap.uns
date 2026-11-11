@@ -93,7 +93,7 @@ lexer BLOCK_COMMENT ->
 lexer INNER_LINE_DOC -> '//!' ~[LF,CR];
 
 lexer INNER_BLOCK_DOC ->
-    '/*!' ( BLOCK_COMMENT_OR_DOC | ~['/*','*/',CR] )* '*/'
+    '/*!' ( BLOCK_COMMENT_OR_DOC | ~['/*','*/'] )* '*/'
     ;
 
 lexer OUTER_LINE_DOC ->
@@ -103,7 +103,7 @@ lexer OUTER_LINE_DOC ->
 lexer OUTER_BLOCK_DOC ->
     '/**'
       ( ~['*','/*'] | BLOCK_COMMENT_OR_DOC )
-      ( BLOCK_COMMENT_OR_DOC | ~['/*','*/',CR] )*
+      ( BLOCK_COMMENT_OR_DOC | ~['/*','*/'] )*
     '*/'
     ;
 
@@ -122,7 +122,7 @@ syntax ExprWithoutSuffix ->
       '~'  ExprWithoutSuffix
     | '<' IDENTIFIER '>'
     | '(' Expr ')'
-    | '[' (Range | STRING_LITERAL |  UNICODE_LITERAL) ']'
+    | '[' ( SetItem ',' )* SetItem? ']'
     | STRING_LITERAL
     | UNICODE_LITERAL
     | IDENTIFIER
@@ -154,6 +154,13 @@ syntax Repeat ->
 syntax Range ->
       UNICODE_LITERAL '-' UNICODE_LITERAL
     | STRING_LITERAL concat '-' concat STRING_LITERAL
+    ;
+
+syntax SetItem ->
+      Range
+    | STRING_LITERAL
+    | UNICODE_LITERAL
+    | IDENTIFIER
     ;
 
 syntax Stmt -> LEADING_KEYWORDS IDENTIFIER '->' Expr ';';

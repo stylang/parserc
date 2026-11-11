@@ -13,7 +13,9 @@
 //!    node, and a file declares its trivia with at most one `whitespace`
 //!    statement.
 //! 4. **recursion** — the leftmost dependencies of the definitions are computed
-//!    and a node that can start with itself is rejected (see the `graph` pass).
+//!    and a node that can start with itself is rejected, together with the
+//!    dependencies of the same position, which catch the nodes that can only be
+//!    decided by deciding themselves (see the `graph` pass).
 //!
 //! A `<call>` is deliberately *not* resolved: it denotes the matcher the
 //! generated code calls, which may be provided by the backend, so the names a
@@ -41,7 +43,10 @@ mod symbol;
 mod value;
 
 pub use check::validate_expr;
-pub use graph::{WILDCARD, first_edges, left_recursive, nullable_nodes, walk_calls, walk_refs};
+pub use graph::{
+    WILDCARD, first_edges, left_recursive, nullable_nodes, same_offset_edges,
+    same_offset_recursive, walk_calls, walk_refs,
+};
 pub use symbol::{Definition, NodeKind, SymbolTable};
 pub use value::{dec_usize, dec_value, str_chars, str_value, unicode_char, unicode_value};
 
@@ -253,22 +258,41 @@ where
         }
     }
 
-    /// Phase five: rejects the nodes that can start with themselves.
+    /// Phase five: rejects the nodes that can start with themselves, and the
+    /// nodes that can only be decided by deciding themselves.
     fn check_recursion(&mut self) {
-        let mut errors = Vec::new();
-
-        for name in left_recursive(&self.symbols) {
-            let span = self
-                .symbols
+        let span_of = |name: &str| {
+            self.symbols
                 .get(name)
                 .map(|def| def.name_span().clone())
-                .unwrap_or(Span::None);
+                .unwrap_or(Span::None)
+        };
 
-            errors.push(UnsynError::Semantics(
-                SemanticsKind::LeftRecursion(name.to_owned()),
-                span,
-            ));
-        }
+        // The leftmost question is the narrower one, and a node that answers it
+        // answers the wider one too, so the wider pass must not name it again.
+        let leftmost = left_recursive(&self.symbols);
+
+        let mut errors: Vec<UnsynError> = leftmost
+            .iter()
+            .map(|name| {
+                UnsynError::Semantics(
+                    SemanticsKind::LeftRecursion((*name).to_owned()),
+                    span_of(name),
+                )
+            })
+            .collect();
+
+        errors.extend(
+            same_offset_recursive(&self.symbols)
+                .into_iter()
+                .filter(|name| !leftmost.contains(name))
+                .map(|name| {
+                    UnsynError::Semantics(
+                        SemanticsKind::SameOffsetRecursion(name.to_owned()),
+                        span_of(name),
+                    )
+                }),
+        );
 
         self.errors.extend(errors);
     }
@@ -446,6 +470,80 @@ mod tests {
     fn a_node_that_consumes_before_recurring_is_fine() {
         assert_well_formed("lexer A -> 'a' A;");
         assert_well_formed("lexer A -> B; lexer B -> 'b';");
+    }
+
+    #[test]
+    fn a_concat_that_must_consume_before_recurring_is_fine() {
+        // Either side of `concat` is matched, so one of them that needs input is
+        // enough to move the recursion off the position the node starts at.
+        assert_well_formed("lexer A -> B concat C A; lexer B -> 'b'; lexer C -> 'c'?;");
+        assert_well_formed("lexer A -> B concat C A; lexer B -> 'b'?; lexer C -> 'c';");
+
+        // With nothing to consume on either side the recursion is leftmost after
+        // all.
+        let errors = diagnostics("lexer A -> B concat C A; lexer B -> 'b'?; lexer C -> 'c'?;");
+
+        assert_eq!(errors.len(), 1, "{errors:#?}");
+        assert!(errors[0].contains("left-recursive definition of node `A`"));
+    }
+
+    #[test]
+    fn rejects_a_complement_of_the_node_itself() {
+        // `~A` has to know whether `A` matches here, and `A` is `~A` needing an
+        // `'a'`: the definition answers its own question at one position.
+        let errors = diagnostics("lexer A -> ~A 'a';");
+
+        assert_eq!(errors.len(), 1, "{errors:#?}");
+        assert_eq!(
+            errors[0],
+            "unexpect/invalid: definition of node `A` must be evaluated to evaluate itself, Range(6..7)"
+        );
+    }
+
+    #[test]
+    fn rejects_a_node_that_is_tested_against_itself() {
+        // What an `except` takes away is tested over the match of the target, so
+        // excluding itself is asked at its own position whatever it consumes.
+        assert_eq!(
+            diagnostics("lexer A -> 'a' except A;").len(),
+            1,
+            "a node can not exclude itself"
+        );
+        assert_eq!(
+            diagnostics("lexer A -> B except A; lexer B -> 'b';").len(),
+            1,
+            "nor be excluded by what excludes it"
+        );
+
+        // Excluding another node that is about its own business is the normal
+        // shape of a keyword check.
+        assert_well_formed("lexer A -> B except C; lexer B -> 'b'; lexer C -> 'c';");
+    }
+
+    #[test]
+    fn a_lookahead_behind_mandatory_input_is_fine() {
+        // Both the lookahead and the complement are asked one character on, so
+        // the recursion is bounded by the input rather than circular.
+        assert_well_formed("lexer A -> 'a' followed A;");
+        assert_well_formed("lexer A -> 'a' ~A;");
+    }
+
+    #[test]
+    fn rejects_a_lookahead_that_can_be_asked_at_its_own_position() {
+        // An optional target leaves the lookahead where the node was asked.
+        let errors = diagnostics("lexer A -> B followed A; lexer B -> 'b'?;");
+
+        assert_eq!(errors.len(), 1, "{errors:#?}");
+        assert!(errors[0].contains("must be evaluated to evaluate itself"));
+    }
+
+    #[test]
+    fn a_left_recursive_node_is_not_named_twice() {
+        // The same node answers both questions; the narrower report is kept.
+        let errors = diagnostics("lexer A -> A 'a' | ~A;");
+
+        assert_eq!(errors.len(), 1, "{errors:#?}");
+        assert!(errors[0].contains("left-recursive definition of node `A`"));
     }
 
     #[test]

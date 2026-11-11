@@ -202,8 +202,13 @@ pub enum SemanticsKind {
     InvalidCodePoint,
     #[error("expect a single character literal")]
     NotAChar,
+    /// A node that can begin with the text it has to match as a whole.
     #[error("left-recursive definition of node `{0}`")]
     LeftRecursion(String),
+    /// A node whose match at a position can only be decided by deciding its own
+    /// match at that same position, which neither advances nor terminates.
+    #[error("definition of node `{0}` must be evaluated to evaluate itself")]
+    SameOffsetRecursion(String),
 }
 
 impl SemanticsKind {

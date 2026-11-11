@@ -208,7 +208,8 @@ where
         suffix: Brace<I, Repeat<I>>,
     },
     /// `concat`, which asks the backend to join what the operands matched into
-    /// one token.
+    /// one token. Both operands are matched, the second one from where the first
+    /// one ended.
     Concat {
         /// what is joined to the operand after the keyword.
         target: ExprWithoutSuffix<I>,
@@ -221,7 +222,9 @@ where
         suffix: Box<ExprNoTopAlt<I>>,
     },
     /// `followed`, which asks that the operand after the keyword come next in the
-    /// source without being part of what matched here.
+    /// source without being part of what matched here. It is therefore tested
+    /// after whatever the target consumed, never at the position the target
+    /// starts at.
     Followed {
         /// what the operand after the keyword must follow.
         target: ExprWithoutSuffix<I>,
@@ -234,7 +237,9 @@ where
         suffix: Box<ExprNoTopAlt<I>>,
     },
     /// `except`, which removes what the operand after the keyword matches from
-    /// the operand before it.
+    /// the operand before it. What is removed is matched by the target as a
+    /// whole, so the operand is tested at the position the target starts at,
+    /// however much the target consumes.
     Except {
         /// what the operand after the keyword is taken out of.
         target: ExprWithoutSuffix<I>,
@@ -255,7 +260,9 @@ pub enum ExprWithoutSuffix<I>
 where
     I: UnsynInput,
 {
-    /// `~`, which asks that the operand here not be matched.
+    /// `~`, which asks that the operand here not be matched. The operand is
+    /// tested at the position the complement is asked about, and is never
+    /// consumed as part of the match.
     Tilde(
         /// the tilde punct `~`
         Tilde<I>,

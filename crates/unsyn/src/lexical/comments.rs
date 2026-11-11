@@ -24,8 +24,9 @@
 //!
 //! The three `lexer` rules of `bootstrap.uns` say the same thing by keeping `/*`
 //! out of the text of a body, so that an opening there can only be read by the
-//! recursive alternative. One difference is left open: those rules also keep `CR`
-//! out of a document body, which the scanner here does not check.
+//! recursive alternative. A body does keep its `CR`: text written with `CRLF`
+//! line endings carries one before every `LF`, and a block form is closed by its
+//! `*/` alone, unlike a line document, which has to end at either.
 
 use parserc::{ControlFlow, Parser, keyword, next, syntax::Syntax, take_till, take_while};
 
@@ -441,12 +442,14 @@ mod tests {
 
     #[test]
     fn test_inner_block_doc() {
-        let inner_line_docs = [
+        let block_docs = [
             ("/*! hello\n/**/*/", "/*! hello\n/**/*/"),
             ("/*! hello\n/**hello*/*/", "/*! hello\n/**hello*/*/"),
+            // The `CR` of a `CRLF` line ending is only text of the body.
+            ("/*! hello\r\nthere */", "/*! hello\r\nthere */"),
         ];
 
-        for (input, expect) in inner_line_docs {
+        for (input, expect) in block_docs {
             assert_eq!(
                 TokenStream::from(input).parse::<InnerBlockDoc<_>>(),
                 Ok(InnerBlockDoc(TokenStream::from(expect)))
@@ -461,6 +464,8 @@ mod tests {
             ("/*** - Only a comment */", "/*** - Only a comment */"),
             ("/***/", "/***/"),
             ("/**/", "/**/"),
+            // A comment and a document draw their body the same way.
+            ("/* hello\r\nthere */", "/* hello\r\nthere */"),
         ];
 
         for (input, expect) in block_comments {
@@ -489,12 +494,14 @@ mod tests {
 
     #[test]
     fn test_outer_block_doc() {
-        let inner_line_docs = [
+        let block_docs = [
             ("/** hello\n/**/*/", "/** hello\n/**/*/"),
             ("/** hello\n/**hello*/*/", "/** hello\n/**hello*/*/"),
+            // The `CR` of a `CRLF` line ending is only text of the body.
+            ("/** hello\r\nthere */", "/** hello\r\nthere */"),
         ];
 
-        for (input, expect) in inner_line_docs {
+        for (input, expect) in block_docs {
             assert_eq!(
                 TokenStream::from(input).parse::<OuterBlockDoc<_>>(),
                 Ok(OuterBlockDoc(TokenStream::from(expect)))

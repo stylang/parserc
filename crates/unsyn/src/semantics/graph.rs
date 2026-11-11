@@ -5,9 +5,14 @@
 //! it names a matcher the backend provides, which the semantic phase of a
 //! single file knows nothing about (see [`Module::matchers`](super::Module::matchers)).
 //!
-//! Two facts about a body drive the recursion check: whether it can match the
-//! empty string, and which nodes it can start with. An unknown name is treated
-//! as non-empty and as starting with nothing, which never reports a false cycle.
+//! Three facts about a body drive the recursion checks: whether it can match the
+//! empty string, which nodes it can start with, and which nodes it must consult
+//! at the position it is consulted at. The first two build the graph of
+//! [`first_edges`], whose cycles are the left-recursive definitions; the third
+//! builds [`same_offset_edges`], whose cycles also cover the operands that are
+//! only ever tested (`~`, and what an `except` takes away) and so can never be
+//! the beginning of a match. An unknown name is treated as non-empty and as
+//! starting with nothing, which never reports a false cycle.
 
 use std::collections::{HashMap, HashSet};
 
@@ -73,25 +78,74 @@ pub fn first_edges<'a, I: UnsynInput>(
     edges
 }
 
+/// Builds the same-offset dependency graph: every node mapped to the nodes it
+/// has to consult at the position it is itself consulted at.
+///
+/// Where [`first_edges`] asks which nodes can *begin* the text a node matches,
+/// this asks which nodes must be *evaluated* before that match can be decided.
+/// The two differ exactly for the operands that never become part of the match:
+/// the operand of `~` is tested here, and what an `except` takes away is tested
+/// at the position its target started at, however much the target consumes.
+/// A sequence keeps this position only while the elements before it can match
+/// nothing, so the operand after `concat` or `followed` is consulted one
+/// character on unless the operand before it can be empty.
+pub fn same_offset_edges<'a, I: UnsynInput>(
+    table: &SymbolTable<'a, I>,
+    nullable: &HashMap<&'a str, bool>,
+) -> HashMap<&'a str, Vec<&'a str>> {
+    let mut edges: HashMap<&'a str, Vec<&'a str>> = HashMap::new();
+
+    for def in table.iter() {
+        let mut names = vec![];
+
+        expr_same_offset(def.expr(), table, nullable, &mut names);
+
+        edges.insert(def.name(), names);
+    }
+
+    edges
+}
+
 /// Returns the names of the nodes that are directly or mutually left-recursive.
 ///
 /// A node is left-recursive when it can start with itself: matching it would
 /// expand the same rule again before consuming any input, so such a definition
 /// can not be compiled.
 pub fn left_recursive<'a, I: UnsynInput>(table: &SymbolTable<'a, I>) -> Vec<&'a str> {
-    let nullable = nullable_nodes(table);
-    let edges = first_edges(table, &nullable);
+    cyclic_nodes(table, &first_edges(table, &nullable_nodes(table)))
+}
 
-    let mut done: HashSet<&str> = HashSet::new();
-    let mut on_stack: HashSet<&str> = HashSet::new();
-    let mut stack: Vec<&str> = Vec::new();
+/// Returns the names of the nodes that must be evaluated in order to be
+/// evaluated.
+///
+/// This is the wider question: a node can be asked about a position without its
+/// answer becoming the text matched there, as `~A` asks whether `A` matches here
+/// in order to match something else. Such a definition can not be compiled
+/// either, since deciding it at one position is deciding it at that position,
+/// which neither advances the input nor terminates. Every left-recursive node is
+/// also one of these, so a report of both must not name a node twice.
+pub fn same_offset_recursive<'a, I: UnsynInput>(table: &SymbolTable<'a, I>) -> Vec<&'a str> {
+    cyclic_nodes(table, &same_offset_edges(table, &nullable_nodes(table)))
+}
+
+/// Names the nodes that sit on a cycle of `edges`, in declaration order.
+///
+/// A node that merely reaches a cycle is not named: the definitions on the cycle
+/// are the ones that can not be compiled.
+fn cyclic_nodes<'a, I: UnsynInput>(
+    table: &SymbolTable<'a, I>,
+    edges: &HashMap<&'a str, Vec<&'a str>>,
+) -> Vec<&'a str> {
+    let mut done: HashSet<&'a str> = HashSet::new();
+    let mut on_stack: HashSet<&'a str> = HashSet::new();
+    let mut stack: Vec<&'a str> = Vec::new();
     let mut found: HashSet<&'a str> = HashSet::new();
 
     for def in table.iter() {
         if !done.contains(def.name()) {
-            visit_first(
+            visit_edges(
                 def.name(),
-                &edges,
+                edges,
                 &mut done,
                 &mut on_stack,
                 &mut stack,
@@ -107,7 +161,7 @@ pub fn left_recursive<'a, I: UnsynInput>(table: &SymbolTable<'a, I>) -> Vec<&'a 
         .collect()
 }
 
-fn visit_first<'a>(
+fn visit_edges<'a>(
     name: &'a str,
     edges: &HashMap<&'a str, Vec<&'a str>>,
     done: &mut HashSet<&'a str>,
@@ -129,7 +183,7 @@ fn visit_first<'a>(
                     found.insert(member);
                 }
             } else if !done.contains(next) {
-                visit_first(next, edges, done, on_stack, stack, found);
+                visit_edges(next, edges, done, on_stack, stack, found);
             }
         }
     }
@@ -398,8 +452,13 @@ fn with_suffix_nullable<I: UnsynInput>(
             repeat_lower(&suffix.body) == 0 || without_suffix_nullable(target, table, nullable)
         }
         ExprWithSuffix::Concat { target, suffix, .. } => {
+            // Both operands of `concat` are matched and joined into one token,
+            // so the sequence can match nothing only when both of them can.
+            // The lookahead of `followed` and the taken-away side of `except`
+            // are never matched, which is why they do not have to be empty for
+            // their own expression to be.
             without_suffix_nullable(target, table, nullable)
-                || alt_nullable(suffix, table, nullable)
+                && alt_nullable(suffix, table, nullable)
         }
         // The right side of `followed` is a lookahead that is never consumed.
         ExprWithSuffix::Followed { target, .. } | ExprWithSuffix::Except { target, .. } => {
@@ -490,6 +549,10 @@ fn with_suffix_first<'a, I: UnsynInput>(
                 alt_first(suffix, table, nullable, names);
             }
         }
+        // Neither the lookahead of `followed` nor what an `except` takes away is
+        // ever the beginning of the match here, so neither contributes a node to
+        // the leftmost position. Both are consulted at this very position all the
+        // same, which is the question the same-offset graph asks.
         ExprWithSuffix::Followed { target, .. } | ExprWithSuffix::Except { target, .. } => {
             without_suffix_first(target, table, nullable, names);
         }
@@ -516,6 +579,115 @@ fn without_suffix_first<'a, I: UnsynInput>(
             }
         }
         ExprWithoutSuffix::Paren(paren) => expr_first(&paren.body, table, nullable, names),
+    }
+}
+
+fn expr_same_offset<'a, I: UnsynInput>(
+    expr: &'a Expr<I>,
+    table: &SymbolTable<'a, I>,
+    nullable: &HashMap<&'a str, bool>,
+    names: &mut Vec<&'a str>,
+) {
+    alts_same_offset(&expr.first, table, nullable, names);
+
+    // Deciding an alternation means trying every alternative here.
+    for (_, alts) in expr.rest.iter() {
+        alts_same_offset(alts, table, nullable, names);
+    }
+}
+
+fn alts_same_offset<'a, I: UnsynInput>(
+    alts: &'a ExprNoTopAlts<I>,
+    table: &SymbolTable<'a, I>,
+    nullable: &HashMap<&'a str, bool>,
+    names: &mut Vec<&'a str>,
+) {
+    let mut elements = vec![&alts.first];
+    elements.extend(alts.rest.iter().map(|(_, expr)| expr));
+
+    for expr in elements {
+        alt_same_offset(expr, table, nullable, names);
+
+        // A later element is consulted where the sequence has already arrived,
+        // which is this position only while what precedes it can be empty.
+        if !alt_nullable(expr, table, nullable) {
+            break;
+        }
+    }
+}
+
+fn alt_same_offset<'a, I: UnsynInput>(
+    expr: &'a ExprNoTopAlt<I>,
+    table: &SymbolTable<'a, I>,
+    nullable: &HashMap<&'a str, bool>,
+    names: &mut Vec<&'a str>,
+) {
+    match expr {
+        ExprNoTopAlt::WithSuffix(expr) => with_suffix_same_offset(expr, table, nullable, names),
+        ExprNoTopAlt::WithoutSuffix(expr) => {
+            without_suffix_same_offset(expr, table, nullable, names)
+        }
+    }
+}
+
+fn with_suffix_same_offset<'a, I: UnsynInput>(
+    expr: &'a ExprWithSuffix<I>,
+    table: &SymbolTable<'a, I>,
+    nullable: &HashMap<&'a str, bool>,
+    names: &mut Vec<&'a str>,
+) {
+    match expr {
+        ExprWithSuffix::Star(target, _)
+        | ExprWithSuffix::Question(target, _)
+        | ExprWithSuffix::Plus(target, _)
+        | ExprWithSuffix::Repeat { target, .. } => {
+            without_suffix_same_offset(target, table, nullable, names);
+        }
+        // The operand after `concat` and after `followed` starts where the
+        // target ended, so it is here too only when the target can be empty.
+        ExprWithSuffix::Concat { target, suffix, .. }
+        | ExprWithSuffix::Followed { target, suffix, .. } => {
+            without_suffix_same_offset(target, table, nullable, names);
+
+            if without_suffix_nullable(target, table, nullable) {
+                alt_same_offset(suffix, table, nullable, names);
+            }
+        }
+        // Whatever an `except` takes away is tested against the text of the
+        // match itself, so the target has to consume for it to move off here.
+        ExprWithSuffix::Except { target, tokens, .. } => {
+            without_suffix_same_offset(target, table, nullable, names);
+            without_suffix_same_offset(tokens, table, nullable, names);
+        }
+    }
+}
+
+fn without_suffix_same_offset<'a, I: UnsynInput>(
+    expr: &'a ExprWithoutSuffix<I>,
+    table: &SymbolTable<'a, I>,
+    nullable: &HashMap<&'a str, bool>,
+    names: &mut Vec<&'a str>,
+) {
+    match expr {
+        // A complement is decided by matching its operand here and refusing
+        // whatever that match would have been.
+        ExprWithoutSuffix::Tilde(_, target) => {
+            without_suffix_same_offset(target, table, nullable, names);
+        }
+        ExprWithoutSuffix::Ident(ident) => {
+            if let Some(name) = referenced_node(ident, table) {
+                names.push(name);
+            }
+        }
+        ExprWithoutSuffix::Paren(paren) => expr_same_offset(&paren.body, table, nullable, names),
+        // A call and its matcher are the backend's own affair, a string and a
+        // code point are compared to the input directly, and the shape of a
+        // referenced set member is deliberately not asked about here (see
+        // `validate_set_item` in the `check` pass).
+        ExprWithoutSuffix::Call(_)
+        | ExprWithoutSuffix::Set(_)
+        | ExprWithoutSuffix::Str(_)
+        | ExprWithoutSuffix::Unicode(_) => {}
     }
 }
 
@@ -601,6 +773,73 @@ mod tests {
                 assert_eq!(edges["Tail"], Vec::<&str>::new());
             },
         );
+    }
+
+    #[test]
+    fn a_concat_is_empty_only_when_both_operands_are() {
+        // `concat` matches both operands and joins them into one token, so what
+        // it matches is empty only when there is nothing on either side of the
+        // keyword.
+        with_table(
+            r"
+            lexer Left -> 'l'?;
+            lexer Right -> 'r';
+            lexer Join -> Left concat Right Tail;
+            lexer Tail -> 't';
+            ",
+            |table| {
+                let nullable = nullable_nodes(table);
+
+                assert!(!nullable["Join"]);
+
+                // Both operands of the `concat` begin at this position, but
+                // `Tail` does not: the `concat` has to consume its right
+                // operand, which closes the leftmost position behind it.
+                assert_eq!(first_edges(table, &nullable)["Join"], vec!["Left", "Right"]);
+            },
+        );
+
+        with_table(
+            "lexer Left -> 'l'?; lexer Right -> 'r'?; lexer Join -> Left concat Right;",
+            |table| {
+                assert!(nullable_nodes(table)["Join"]);
+            },
+        );
+    }
+
+    #[test]
+    fn same_offset_edges_reach_the_operands_that_are_only_tested() {
+        with_table(
+            r"
+            lexer A -> 'a' except B;
+            lexer B -> ~C;
+            lexer C -> 'c' followed D;
+            lexer D -> 'd';
+            ",
+            |table| {
+                let edges = same_offset_edges(table, &nullable_nodes(table));
+
+                // What an `except` takes away is tested however much the target
+                // consumes, and a complement is always tested here.
+                assert_eq!(edges["A"], vec!["B"]);
+                assert_eq!(edges["B"], vec!["C"]);
+                // The lookahead of `followed` comes after the `'c'` this starts
+                // with, so `D` is consulted one character on.
+                assert_eq!(edges["C"], Vec::<&str>::new());
+                assert_eq!(edges["D"], Vec::<&str>::new());
+            },
+        );
+    }
+
+    #[test]
+    fn a_followed_lookahead_is_here_only_when_the_target_can_be_empty() {
+        with_table("lexer A -> 'a' followed A;", |table| {
+            assert!(same_offset_recursive(table).is_empty());
+        });
+
+        with_table("lexer A -> B followed A; lexer B -> 'b'?;", |table| {
+            assert_eq!(same_offset_recursive(table), vec!["A"]);
+        });
     }
 
     #[test]
