@@ -16,8 +16,8 @@
 //! - [`syntax`] applies the context-free grammar of the language and produces a
 //!   [`Crate`](syntax::Crate), the CST of the source file.
 //! - [`semantics`] gives that CST meaning: it resolves the references between
-//!   nodes, validates their patterns and rejects the definitions that can start
-//!   with themselves.
+//!   nodes, validates their patterns, rejects the definitions that can start
+//!   with themselves, and reports what a definition says twice as a lint.
 //!
 //! ```
 //! use parserc::syntax::Syntax;
@@ -41,6 +41,9 @@
 //!
 //! // `<Name>` is a call of a matcher the backend provides, not a node.
 //! assert_eq!(module.matchers(), ["XID_Start", "XID_Continue"]);
+//!
+//! // A set whose members say nothing twice earns no lint.
+//! assert!(module.lints().is_empty());
 //! ```
 //!
 //! The spec of the language, written in the language itself, lives in

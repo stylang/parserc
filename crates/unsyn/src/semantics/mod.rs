@@ -7,7 +7,8 @@
 //! 1. **collection** — every `whitespace`, `lexer` and `syntax` statement is
 //!    registered in a [`SymbolTable`], and a name declared twice is rejected.
 //! 2. **validation** — the literals, character sets, ranges and repetitions of
-//!    every body are evaluated (see the `check` pass).
+//!    every body are evaluated, and the members of a set are compared with one
+//!    another (see the `check` pass).
 //! 3. **linking** — every bare name a body refers to is resolved against the
 //!    definitions of the file, a terminal pattern may not refer to a `syntax`
 //!    node, and a file declares its trivia with at most one `whitespace`
@@ -16,6 +17,14 @@
 //!    and a node that can start with itself is rejected, together with the
 //!    dependencies of the same position, which catch the nodes that can only be
 //!    decided by deciding themselves (see the `graph` pass).
+//!
+//! The findings of these passes leave in two channels. An [`UnsynError`] says a
+//! file denotes nothing, and [`analyze`] answers it with the errors and no model
+//! at all. A [`Lint`] says a file denotes something twice, which is worth
+//! hearing about but is still a program, so lints travel with the [`Module`] of
+//! the file that was accepted (see [`Module::lints`]). A caller that wants a
+//! stricter language is free to treat a lint as fatal; the analyzer does not
+//! decide that for it.
 //!
 //! A `<call>` is deliberately *not* resolved: it denotes the matcher the
 //! generated code calls, which may be provided by the backend, so the names a
@@ -35,6 +44,20 @@
 //!
 //! assert_eq!(module.symbols().len(), 1);
 //! assert_eq!(module.definition("FOO").unwrap().kind().keyword(), "lexer");
+//!
+//! // A definition that says one thing twice is still a program: the note comes
+//! // back with its model rather than in place of it.
+//! let mut input = TokenStream::from("lexer VOWEL -> ['a', 'a'];");
+//! let file = Crate::parse(&mut input).unwrap();
+//!
+//! let module = analyze(&file).unwrap();
+//!
+//! assert_eq!(module.lints().len(), 1);
+//! assert!(
+//!     module.lints()[0]
+//!         .to_string()
+//!         .contains("member `'a'` of this set is already declared")
+//! );
 //! ```
 
 mod check;
@@ -53,7 +76,7 @@ pub use value::{dec_usize, dec_value, str_chars, str_value, unicode_char, unicod
 use parserc::Span;
 
 use crate::{
-    errors::{SemanticsKind, UnsynError},
+    errors::{Diagnostics, Lint, SemanticsKind, UnsynError},
     input::UnsynInput,
     syntax::{Crate, Item, Stmt},
 };
@@ -62,7 +85,8 @@ use self::graph::{syntax_refs_of_terminal, unresolved_refs};
 
 /// Runs every semantic check over one parsed source file.
 ///
-/// Returns all diagnostics found instead of stopping at the first one.
+/// Returns every error found instead of stopping at the first one. A file with
+/// no error is a [`Module`] carrying the lints of its definitions.
 #[inline]
 pub fn analyze<'a, I>(file: &'a Crate<I>) -> Result<Module<'a, I>, Vec<UnsynError>>
 where
@@ -79,6 +103,7 @@ where
 {
     symbols: SymbolTable<'a, I>,
     matchers: Vec<&'a str>,
+    lints: Vec<Lint>,
 }
 
 impl<'a, I> Module<'a, I>
@@ -113,6 +138,16 @@ where
     pub fn uses_matcher(&self, name: &str) -> bool {
         self.matchers.contains(&name)
     }
+
+    /// The reports this file earned without ceasing to be a program.
+    ///
+    /// A lint never stops a [`Module`] from being built; these are the
+    /// definitions that say what another of their members already says. They are
+    /// reported in the order the file declares its nodes.
+    #[inline]
+    pub fn lints(&self) -> &[Lint] {
+        &self.lints
+    }
 }
 
 /// The single-file semantic analyzer.
@@ -124,8 +159,8 @@ where
     file: &'a Crate<I>,
     /// The collected node definitions.
     symbols: SymbolTable<'a, I>,
-    /// The diagnostics collected so far.
-    errors: Vec<UnsynError>,
+    /// The diagnostics collected so far, in the two channels.
+    report: Diagnostics,
 }
 
 impl<'a, I> Analyzer<'a, I>
@@ -138,14 +173,20 @@ where
         Self {
             file,
             symbols: SymbolTable::new(),
-            errors: Vec::new(),
+            report: Diagnostics::default(),
         }
     }
 
-    /// Returns the diagnostics found so far.
+    /// Returns the errors found so far.
     #[inline]
     pub fn errors(&self) -> &[UnsynError] {
-        &self.errors
+        &self.report.errors
+    }
+
+    /// Returns the lints found so far.
+    #[inline]
+    pub fn lints(&self) -> &[Lint] {
+        &self.report.lints
     }
 
     /// Runs every phase of the analysis over the file.
@@ -158,13 +199,17 @@ where
 
         let matchers = self.collect_matchers();
 
-        if self.errors.is_empty() {
+        // Only an error costs the file its model: a lint travels with it.
+        let Diagnostics { errors, lints } = self.report;
+
+        if errors.is_empty() {
             Ok(Module {
                 symbols: self.symbols,
                 matchers,
+                lints,
             })
         } else {
-            Err(self.errors)
+            Err(errors)
         }
     }
 
@@ -190,14 +235,18 @@ where
             .symbols
             .insert(Definition::from_stmt(kind, ident, stmt))
         {
-            self.errors.push(error);
+            self.report.push(error);
         }
     }
 
     /// Phase two: evaluates every literal, set, range and repetition.
+    ///
+    /// This is the only phase that writes to both channels of the report: a
+    /// value that means nothing is an error, and a value a set already means is
+    /// a lint.
     fn validate_bodies(&mut self) {
         for def in self.symbols.iter() {
-            validate_expr(def.expr(), &mut self.errors);
+            validate_expr(def.expr(), &mut self.report);
         }
     }
 
@@ -231,7 +280,7 @@ where
             }
         }
 
-        self.errors.extend(errors);
+        self.report.errors.extend(errors);
     }
 
     /// Phase four: rejects a file that declares trivia more than once.
@@ -251,7 +300,7 @@ where
         whitespace.remove(0);
 
         for span in whitespace {
-            self.errors.push(UnsynError::Semantics(
+            self.report.push(UnsynError::Semantics(
                 SemanticsKind::DuplicateWhitespace,
                 span,
             ));
@@ -294,7 +343,7 @@ where
                 }),
         );
 
-        self.errors.extend(errors);
+        self.report.errors.extend(errors);
     }
 
     /// Gathers the matchers the file calls.
@@ -335,6 +384,21 @@ mod tests {
             Ok(_) => vec![],
             Err(errors) => errors.iter().map(|error| error.to_string()).collect(),
         }
+    }
+
+    /// Analyzes `source` and renders the lints its model carries.
+    ///
+    /// A file with an error has no model to carry them, so this asks the
+    /// question the lint channel exists to answer: what does the file say twice?
+    fn lints_of(source: &str) -> Vec<String> {
+        let mut input = TokenStream::from(source);
+        let file = Crate::parse(&mut input).expect("the test input should parse");
+
+        let module = analyze(&file).unwrap_or_else(|errors| {
+            panic!("{source} should be a program, not an error: {errors:#?}")
+        });
+
+        module.lints().iter().map(ToString::to_string).collect()
     }
 
     /// Asserts that `source` has no semantic problem at all.
@@ -567,6 +631,67 @@ mod tests {
         // `'…'` is a string or a char, so `['*/']` is a one-member set of the
         // two-character sequence the comment rules match.
         assert_well_formed("lexer A -> ~['*/', 'ab'];");
+    }
+
+    #[test]
+    fn a_repeated_member_is_reported_without_refusing_the_file() {
+        // The set `'a'` written twice is one character said twice: the pattern
+        // still matches one language, so the file is a program and the report
+        // travels with it instead of replacing it.
+        let lints = lints_of("lexer A -> ['a', 'a'];");
+
+        assert_eq!(lints.len(), 1, "{lints:#?}");
+        assert!(lints[0].contains("member `'a'` of this set is already declared"));
+
+        // Nothing in this file is wrong by any other rule.
+        assert_eq!(diagnostics("lexer A -> ['a', 'a'];"), Vec::<String>::new());
+    }
+
+    #[test]
+    fn a_member_of_a_complement_set_is_compared_too() {
+        assert_eq!(
+            lints_of(r"lexer A -> ~['\u{61}', U+0061];").len(),
+            1,
+            "two spellings of `'a'` are one member"
+        );
+
+        // A range covers a character the set already names.
+        assert_eq!(lints_of("lexer A -> ['a'-'z', 'c'];").len(), 1);
+
+        // Two ranges that reach past one another share part of what they say.
+        assert_eq!(lints_of("lexer A -> ['a'-'c', 'b'-'d'];").len(), 1);
+    }
+
+    #[test]
+    fn a_repeated_alternative_is_not_a_matter_of_the_set_rules() {
+        // A set enumerates the members of one union of characters, which is what
+        // makes a repeated member worth saying; a body that repeats an
+        // alternative repeats a whole pattern, and the shapes it may match are
+        // not what a single file can compare.
+        assert!(lints_of("lexer A -> 'a' | 'a';").is_empty());
+        assert!(lints_of("lexer A -> ( 'a' | 'a' )+;").is_empty());
+        assert!(lints_of("lexer A -> 'ab' | 'a';").is_empty());
+
+        // Two names can not even be compared here, since the shape of a
+        // referenced member is not what one file knows (see `validate_set_item`).
+        assert!(lints_of("lexer A -> [LF, LF]; lexer LF -> '\\n';").is_empty());
+        assert!(lints_of("lexer A -> [LF, CR]; lexer LF -> '\\n'; lexer CR -> '\\r';").is_empty());
+    }
+
+    #[test]
+    fn a_lint_of_one_definition_says_nothing_about_another() {
+        let lints = lints_of(
+            r"
+            lexer A -> ['a', 'a'];
+            lexer B -> ['b', 'b', 'b'];
+            ",
+        );
+
+        // Each set reports its own repeats, in the order the file declares them.
+        assert_eq!(lints.len(), 3, "{lints:#?}");
+        assert!(lints[0].contains("member `'a'`"), "{lints:#?}");
+        assert!(lints[1].contains("member `'b'`"), "{lints:#?}");
+        assert!(lints[2].contains("member `'b'`"), "{lints:#?}");
     }
 
     #[test]

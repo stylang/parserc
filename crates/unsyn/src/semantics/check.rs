@@ -4,11 +4,17 @@
 //! literals it uses, the character sets it enumerates, the ranges it draws and
 //! the repetitions it counts. Names are not resolved here: that happens in the
 //! link phase, once every definition of the crate is known.
+//!
+//! What is found goes to the two channels of a [`Diagnostics`]. A value no
+//! definition can mean — an escape that decodes to nothing, a range drawn
+//! backwards — is an error. A value that another member of the same set already
+//! means is a lint: the set still denotes one language, it merely says part of
+//! it twice.
 
 use parserc::syntax::{Punctuated, Syntax};
 
 use crate::{
-    errors::{SemanticsKind, UnsynError},
+    errors::{Diagnostics, LintKind, SemanticsKind, UnsynError},
     input::UnsynInput,
     lexical::{delimiter::Bracket, lit::LitDec, punct::Comma},
     semantics::value::{dec_usize, dec_value, str_chars, str_value, unicode_value},
@@ -20,13 +26,13 @@ use crate::{
 
 /// Validates the literals, sets, ranges and repetitions of a node body.
 ///
-/// Every problem found is pushed to `errors`, so one call reports all
+/// Every problem found is reported to `report`, so one call states all the
 /// value-level diagnostics of one definition.
-pub fn validate_expr<I: UnsynInput>(expr: &Expr<I>, errors: &mut Vec<UnsynError>) {
-    validate_alts(&expr.first, errors);
+pub fn validate_expr<I: UnsynInput>(expr: &Expr<I>, report: &mut Diagnostics) {
+    validate_alts(&expr.first, report);
 
     for (_, alts) in expr.rest.iter() {
-        validate_alts(alts, errors);
+        validate_alts(alts, report);
     }
 }
 
@@ -39,182 +45,229 @@ pub(crate) fn items<T, P>(punctuated: &Punctuated<T, P>) -> impl Iterator<Item =
         .chain(punctuated.tail.iter().map(|tail| &**tail))
 }
 
-fn validate_alts<I: UnsynInput>(alts: &ExprNoTopAlts<I>, errors: &mut Vec<UnsynError>) {
-    validate_alt(&alts.first, errors);
+fn validate_alts<I: UnsynInput>(alts: &ExprNoTopAlts<I>, report: &mut Diagnostics) {
+    validate_alt(&alts.first, report);
 
     for (_, expr) in alts.rest.iter() {
-        validate_alt(expr, errors);
+        validate_alt(expr, report);
     }
 }
 
-fn validate_alt<I: UnsynInput>(expr: &ExprNoTopAlt<I>, errors: &mut Vec<UnsynError>) {
+fn validate_alt<I: UnsynInput>(expr: &ExprNoTopAlt<I>, report: &mut Diagnostics) {
     match expr {
-        ExprNoTopAlt::WithSuffix(expr) => validate_with_suffix(expr, errors),
-        ExprNoTopAlt::WithoutSuffix(expr) => validate_without_suffix(expr, errors),
+        ExprNoTopAlt::WithSuffix(expr) => validate_with_suffix(expr, report),
+        ExprNoTopAlt::WithoutSuffix(expr) => validate_without_suffix(expr, report),
     }
 }
 
-fn validate_with_suffix<I: UnsynInput>(expr: &ExprWithSuffix<I>, errors: &mut Vec<UnsynError>) {
+fn validate_with_suffix<I: UnsynInput>(expr: &ExprWithSuffix<I>, report: &mut Diagnostics) {
     match expr {
         ExprWithSuffix::Star(target, _)
         | ExprWithSuffix::Question(target, _)
-        | ExprWithSuffix::Plus(target, _) => validate_without_suffix(target, errors),
+        | ExprWithSuffix::Plus(target, _) => validate_without_suffix(target, report),
         ExprWithSuffix::Repeat { target, suffix } => {
-            validate_without_suffix(target, errors);
-            validate_repeat(&suffix.body, errors);
+            validate_without_suffix(target, report);
+            validate_repeat(&suffix.body, report);
         }
         ExprWithSuffix::Concat { target, suffix, .. }
         | ExprWithSuffix::Followed { target, suffix, .. } => {
-            validate_without_suffix(target, errors);
-            validate_alt(suffix, errors);
+            validate_without_suffix(target, report);
+            validate_alt(suffix, report);
         }
         ExprWithSuffix::Except { target, tokens, .. } => {
-            validate_without_suffix(target, errors);
-            validate_without_suffix(tokens, errors);
+            validate_without_suffix(target, report);
+            validate_without_suffix(tokens, report);
         }
     }
 }
 
-fn validate_without_suffix<I: UnsynInput>(
-    expr: &ExprWithoutSuffix<I>,
-    errors: &mut Vec<UnsynError>,
-) {
+fn validate_without_suffix<I: UnsynInput>(expr: &ExprWithoutSuffix<I>, report: &mut Diagnostics) {
     match expr {
-        ExprWithoutSuffix::Tilde(_, target) => validate_without_suffix(target, errors),
+        ExprWithoutSuffix::Tilde(_, target) => validate_without_suffix(target, report),
         // The target of a call is resolved by the linker, not here.
         ExprWithoutSuffix::Call(_) => {}
         // A reference carries no value to evaluate; see [`crate::semantics::Analyzer`].
         ExprWithoutSuffix::Ident(_) => {}
-        ExprWithoutSuffix::Paren(paren) => validate_expr(&paren.body, errors),
-        ExprWithoutSuffix::Set(bracket) => validate_set(bracket, errors),
+        ExprWithoutSuffix::Paren(paren) => validate_expr(&paren.body, report),
+        ExprWithoutSuffix::Set(bracket) => validate_set(bracket, report),
         ExprWithoutSuffix::Str(lit) => {
             if let Some(error) = str_value(lit).1 {
-                errors.push(error);
+                report.push(error);
             }
         }
         ExprWithoutSuffix::Unicode(lit) => {
             if let Err(error) = unicode_value(lit) {
-                errors.push(error);
+                report.push(error);
             }
         }
     }
 }
 
+/// Validates the members of a set and reports the ones the set already says.
+///
+/// A set is a union, so a member whose values another member already denotes
+/// adds nothing to what the pattern matches. That is redundant rather than
+/// meaningless, and so it belongs to the lint channel. A member is reported at
+/// most once, against the first earlier member it conflicts with: what it says
+/// twice is one fact, not the several ways it could be phrased.
 fn validate_set<I: UnsynInput>(
     bracket: &Bracket<I, Punctuated<SetItem<I>, Comma<I>>>,
-    errors: &mut Vec<UnsynError>,
+    report: &mut Diagnostics,
 ) {
     if bracket.body.is_empty() {
-        errors.push(UnsynError::Semantics(
+        report.push(UnsynError::Semantics(
             SemanticsKind::EmptySet,
             bracket.to_span(),
         ));
         return;
     }
 
+    let mut members: Vec<Member> = vec![];
+
     for item in items(&bracket.body) {
-        validate_set_item(item, errors);
+        // A member that denotes no value at all carries its own error, and a
+        // member that denotes an unknown one is not a value of this set yet.
+        let Some(member) = validate_set_item(item, report) else {
+            continue;
+        };
+
+        if let Some(kind) = members
+            .iter()
+            .find_map(|earlier| conflict(earlier, &member))
+        {
+            report.lint(kind, item.to_span());
+        }
+
+        members.push(member);
     }
 }
 
-fn validate_set_item<I: UnsynInput>(item: &SetItem<I>, errors: &mut Vec<UnsynError>) {
+/// Validates one member of a set and returns the value it denotes.
+///
+/// `None` when the member was rejected — its diagnostic is the report's to make,
+/// and a broken value is not worth comparing with anything — or when the member
+/// is a name, whose shape one file can not know.
+fn validate_set_item<I: UnsynInput>(item: &SetItem<I>, report: &mut Diagnostics) -> Option<Member> {
     match item {
-        SetItem::Range(range) => validate_range(range, errors),
+        SetItem::Range(range) => {
+            validate_range(range, report).map(|(start, end)| Member::of_range(start, end))
+        }
         SetItem::Str(lit) => {
             // `'…'` is a string as well as a character, and a set is a union of
             // strings, so a member of any length is meaningful here.
-            if let Some(error) = str_value(lit).1 {
-                errors.push(error);
+            let (value, error) = str_value(lit);
+
+            if let Some(error) = error {
+                report.push(error);
+                return None;
             }
+
+            Some(Member::of_value(value))
         }
-        SetItem::Unicode(lit) => {
-            if let Err(error) = unicode_value(lit) {
-                errors.push(error);
+        SetItem::Unicode(lit) => match unicode_value(lit) {
+            Ok(value) => Some(Member::Char(value)),
+            Err(error) => {
+                report.push(error);
+                None
             }
-        }
-        // The shape of a referenced set member can not be known here.
-        SetItem::Ident(_) => {}
+        },
+        // The shape of a referenced set member can not be known here: whether
+        // `LF` is the same member twice is a question about the whole program,
+        // not about this file.
+        SetItem::Ident(_) => None,
     }
 }
 
-fn validate_range<I: UnsynInput>(range: &Range<I>, errors: &mut Vec<UnsynError>) {
-    let mut sides: Vec<u32> = vec![];
+/// Validates a range and returns the two bounds it draws.
+///
+/// `None` when a bound can not be evaluated or the bounds stand in the wrong
+/// order: such a range denotes no code point at all.
+fn validate_range<I: UnsynInput>(
+    range: &Range<I>,
+    report: &mut Diagnostics,
+) -> Option<(char, char)> {
+    let mut sides: Vec<char> = vec![];
 
     match range {
         Range::Unicode(start, _, end) => {
             for lit in [start, end] {
                 match unicode_value(lit) {
-                    Ok(value) => sides.push(value as u32),
-                    Err(error) => errors.push(error),
+                    Ok(value) => sides.push(value),
+                    Err(error) => report.push(error),
                 }
             }
         }
         Range::Str(start, _, end) => {
             for lit in [start, end] {
                 if let Some(error) = str_value(lit).1 {
-                    errors.push(error);
+                    report.push(error);
                     continue;
                 }
 
                 let chars = str_chars(lit);
 
                 if chars.len() != 1 {
-                    errors.push(UnsynError::Semantics(
+                    report.push(UnsynError::Semantics(
                         SemanticsKind::NotAChar,
                         lit.to_span(),
                     ));
                     continue;
                 }
 
-                sides.push(chars[0] as u32);
+                sides.push(chars[0]);
             }
         }
     }
 
     // A bound that was rejected already carries its own diagnostic, so the
     // comparison is only made when both sides could be evaluated.
-    if sides.len() == 2 && sides[0] > sides[1] {
-        errors.push(UnsynError::Semantics(
+    let [start, end]: [char; 2] = sides.try_into().ok()?;
+
+    if start > end {
+        report.push(UnsynError::Semantics(
             SemanticsKind::InvalidRange,
             range.to_span(),
         ));
+        return None;
     }
+
+    Some((start, end))
 }
 
 /// Evaluates a repetition bound, reporting a diagnostic when it can not be
 /// evaluated.
-fn bound<I: UnsynInput>(lit: &LitDec<I>, errors: &mut Vec<UnsynError>) -> Option<usize> {
+fn bound<I: UnsynInput>(lit: &LitDec<I>, report: &mut Diagnostics) -> Option<usize> {
     match dec_value(lit) {
         Ok(value) => Some(value),
         Err(error) => {
-            errors.push(error);
+            report.push(error);
             None
         }
     }
 }
 
-fn validate_repeat<I: UnsynInput>(repeat: &Repeat<I>, errors: &mut Vec<UnsynError>) {
+fn validate_repeat<I: UnsynInput>(repeat: &Repeat<I>, report: &mut Diagnostics) {
     let span = repeat.to_span();
 
     match repeat {
         // `{..N}` and `{N}` matching nothing at all is never intended.
         Repeat::RangeTo(_, end) | Repeat::Count(end) => {
-            if let Some(0) = bound(end, errors) {
-                errors.push(UnsynError::Semantics(SemanticsKind::InvalidRepeat, span));
+            if let Some(0) = bound(end, report) {
+                report.push(UnsynError::Semantics(SemanticsKind::InvalidRepeat, span));
             }
         }
         Repeat::RangeFrom(start, _, end) => {
-            let Some(start) = bound(start, errors) else {
+            let Some(start) = bound(start, report) else {
                 return;
             };
 
             if let Some(end) = end {
-                let Some(end) = bound(end, errors) else {
+                let Some(end) = bound(end, report) else {
                     return;
                 };
 
                 if end < start {
-                    errors.push(UnsynError::Semantics(SemanticsKind::InvalidRepeat, span));
+                    report.push(UnsynError::Semantics(SemanticsKind::InvalidRepeat, span));
                 }
             }
         }
@@ -232,6 +285,103 @@ pub(crate) fn repeat_lower<I: UnsynInput>(repeat: &Repeat<I>) -> usize {
     }
 }
 
+/// The value one member of a set adds to it.
+///
+/// Two members are compared by what they *denote* rather than by how they are
+/// spelled, so `'a'`, `U+0061` and `'\u{61}'` are one member written three
+/// times, and `'a'-'a'` is the character `'a'`.
+#[derive(Debug, Clone, PartialEq, Eq)]
+enum Member {
+    /// A single character.
+    Char(char),
+    /// A sequence of two or more characters, which no range can reach.
+    Str(String),
+    /// Every code point between two bounds that differ, inclusive.
+    Range(char, char),
+}
+
+impl Member {
+    /// The member a decoded string literal denotes.
+    fn of_value(value: String) -> Self {
+        let mut chars = value.chars();
+
+        match (chars.next(), chars.next()) {
+            (Some(one), None) => Member::Char(one),
+            _ => Member::Str(value),
+        }
+    }
+
+    /// The member the interval between two characters denotes.
+    fn of_range(start: char, end: char) -> Self {
+        if start == end {
+            Member::Char(start)
+        } else {
+            Member::Range(start, end)
+        }
+    }
+
+    /// The code points this member denotes, or `None` when it denotes a
+    /// sequence of them.
+    ///
+    /// Only single-character values live in one space, where one member can
+    /// contain another: a range covers no `'/*'`, because it denotes none.
+    fn code_points(&self) -> Option<(u32, u32)> {
+        match self {
+            Member::Char(c) => Some((*c as u32, *c as u32)),
+            Member::Range(start, end) => Some((*start as u32, *end as u32)),
+            Member::Str(_) => None,
+        }
+    }
+
+    /// This member's value, written the way the DSL would write it.
+    ///
+    /// The source text of a literal is not kept by the model, and two spellings
+    /// of one character are one fact to report, so the value is re-rendered.
+    fn text(&self) -> String {
+        match self {
+            Member::Char(c) => format!("'{}'", c.escape_default()),
+            Member::Str(value) => {
+                let escaped: String = value.chars().flat_map(char::escape_default).collect();
+
+                format!("'{escaped}'")
+            }
+            Member::Range(start, end) => {
+                format!("'{}'-'{}'", start.escape_default(), end.escape_default())
+            }
+        }
+    }
+}
+
+/// Diagnoses `later` against `earlier`, a member the same set already carries.
+///
+/// `None` when the two denote different things, either because they share no
+/// value or because what they share leaves each of them still worth writing —
+/// which is the case for two sequences of characters of different length.
+fn conflict(earlier: &Member, later: &Member) -> Option<LintKind> {
+    if earlier == later {
+        return Some(LintKind::DuplicateMember(later.text()));
+    }
+
+    // Two members of different lengths are not in the same space at all.
+    let (Some((first, last)), Some((next, end))) = (earlier.code_points(), later.code_points())
+    else {
+        return None;
+    };
+
+    if last < next || end < first {
+        return None;
+    }
+
+    // Both share a value and are not equal, so one of three relations is left.
+    if next <= first && last <= end {
+        Some(LintKind::CoversMember(later.text(), earlier.text()))
+    } else if first <= next && end <= last {
+        Some(LintKind::CoveredMember(later.text(), earlier.text()))
+    } else {
+        Some(LintKind::OverlappingMember(later.text(), earlier.text()))
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use parserc::syntax::SyntaxInput;
@@ -242,17 +392,48 @@ mod tests {
 
     use super::*;
 
-    /// Validates one body expression and renders what it found.
-    fn messages(body: &str) -> Vec<String> {
+    /// Validates one body expression and collects what it found.
+    fn report(body: &str) -> Diagnostics {
         let expr = TokenStream::from(body)
             .parse::<Expr<_>>()
             .expect("the test body should parse");
 
-        let mut errors = vec![];
+        let mut report = Diagnostics::default();
 
-        validate_expr(&expr, &mut errors);
+        validate_expr(&expr, &mut report);
 
-        errors.iter().map(ToString::to_string).collect()
+        report
+    }
+
+    /// Renders the errors a body produced.
+    fn messages(body: &str) -> Vec<String> {
+        report(body)
+            .errors
+            .iter()
+            .map(ToString::to_string)
+            .collect()
+    }
+
+    /// Renders the lints a body produced.
+    fn lints(body: &str) -> Vec<String> {
+        report(body).lints.iter().map(ToString::to_string).collect()
+    }
+
+    /// Renders the single lint a body produced, which must have no error.
+    fn lint(body: &str) -> String {
+        let report = report(body);
+
+        assert!(report.errors.is_empty(), "{body}: {:#?}", report.errors);
+        assert_eq!(report.lints.len(), 1, "{body}: {:#?}", report.lints);
+
+        report.lints[0].to_string()
+    }
+
+    /// Asserts that `body` earns exactly one lint, and that it reads as `want`.
+    fn assert_lint(body: &str, want: &str) {
+        let message = lint(body);
+
+        assert!(message.contains(want), "{body}: {message}");
     }
 
     #[test]
@@ -266,6 +447,109 @@ mod tests {
     fn a_reference_carries_no_value_to_check() {
         assert!(messages("MISSING").is_empty());
         assert!(messages("[MISSING]").is_empty());
+    }
+
+    #[test]
+    fn a_member_the_set_already_says_is_linted() {
+        // The values of the members are compared, not their spellings.
+        for body in [
+            "['a','a']",
+            "[ 'a' , 'a' ]",
+            "['/*','/*']",
+            r"['\u{61}','a']",
+            "[U+0061,'a']",
+            "['a',U+0061]",
+            "['a'-'b','a'-'b']",
+            "['a','a'-'a']",
+            "~['a','a']",
+            "['a','a']{2}",
+            "('a' | ['a','a'])",
+        ] {
+            assert_lint(body, "already declared");
+        }
+
+        // Three times the same member is reported twice: each of the two
+        // repeats says something an earlier member already said.
+        assert_eq!(lints("['a','a','a']").len(), 2);
+    }
+
+    #[test]
+    fn a_member_the_set_already_covers_is_linted() {
+        // The later member adds nothing to the union.
+        assert_lint("['a'-'z','c']", "is covered by the earlier member");
+        assert_lint("['a'-'z','c'-'d']", "is covered by the earlier member");
+
+        // The later member makes the earlier one the redundant one.
+        assert_lint("['c','a'-'z']", "covers the earlier member");
+    }
+
+    #[test]
+    fn a_member_the_set_partly_says_is_linted() {
+        // The member named first in the message is the one being reported, and
+        // the span points at it.
+        let message = lint("['a'-'c','b'-'d']");
+
+        assert!(
+            message.starts_with("lint: member `'b'-'d'` overlaps the earlier member `'a'-'c'`"),
+            "{message}"
+        );
+    }
+
+    #[test]
+    fn members_that_say_different_things_are_not_linted() {
+        for body in [
+            "['a','b']",
+            "['a'-'b','c'-'d']",
+            "['0'-'9','a'-'f','A'-'F']",
+            r"['/*','*/']",
+            "~['*','!','/*']",
+            "['a','ab']",
+            "['ab','abc']",
+            "[U+0000,U+000A]",
+        ] {
+            assert!(report(body).lints.is_empty(), "{body}: {:#?}", report(body));
+        }
+    }
+
+    #[test]
+    fn a_name_is_not_compared_with_anything() {
+        // Whether `LF` and `LF` are two members or one is a question about the
+        // definitions `LF` denotes, which this pass does not know.
+        for body in ["[LF, LF]", "[LF, CR]", "[LF, 'a']"] {
+            assert!(report(body).lints.is_empty(), "{body}: {:#?}", report(body));
+        }
+    }
+
+    #[test]
+    fn an_alternation_is_not_a_set() {
+        // A body that repeats an alternative repeats a pattern, not a member of
+        // a union of characters, and is out of the scope of these lints.
+        for body in ["'a' | 'a'", "('a' | 'a')", "'a' | 'a' | 'a'"] {
+            assert!(report(body).lints.is_empty(), "{body}: {:#?}", report(body));
+        }
+    }
+
+    #[test]
+    fn a_member_that_denotes_nothing_is_not_compared() {
+        // The error says what is wrong with the range; calling it a lint as well
+        // would report one problem under two names.
+        let broken = report("['z'-'a','z'-'a']");
+
+        assert_eq!(broken.errors.len(), 2, "{broken:#?}");
+        assert!(broken.lints.is_empty(), "{broken:#?}");
+
+        // A bound that decodes to no character has the same excuse.
+        let escaped = report("['a','a'-'\\u{D800}']");
+
+        assert!(
+            escaped
+                .errors
+                .iter()
+                .map(ToString::to_string)
+                .any(|m| m.contains("not a valid unicode code point")),
+            "{escaped:#?}"
+        );
+        assert!(escaped.lints.is_empty(), "{escaped:#?}");
     }
 
     #[test]

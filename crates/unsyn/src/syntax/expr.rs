@@ -275,6 +275,9 @@ where
     /// take a suffix as one operand.
     Paren(Paren<I, Box<Expr<I>>>),
     /// `[…]`, a set of the characters or strings it lists.
+    ///
+    /// A set is a union, so the [analysis](crate::semantics) compares its
+    /// members by the values they denote rather than by how they are written.
     Set(Bracket<I, Punctuated<SetItem<I>, Comma<I>>>),
     /// A literal string, as in `'a'`.
     Str(LitStr<I>),
@@ -285,6 +288,11 @@ where
 }
 
 /// One member of a set.
+///
+/// The four forms denote values of three kinds: one character (`'a'`, `U+0061`,
+/// and the range `'a'-'a'`, which is one character too), a sequence of two or
+/// more (`'/*'`), an interval of code points (`'a'-'z'`), or the set another
+/// node denotes, whose shape no single file knows.
 #[derive(Debug, PartialEq, Eq, PartialOrd, Ord, Clone, Syntax)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub enum SetItem<I>

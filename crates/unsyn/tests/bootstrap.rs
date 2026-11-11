@@ -83,6 +83,14 @@ fn bootstrap_semantics() {
 
     // The only matchers the spec expects from the backend.
     assert_eq!(module.matchers(), ["XID_Start", "XID_Continue"]);
+
+    // The spec says nothing twice: every member of every set it enumerates
+    // denotes a value no earlier member of that set already denotes.
+    assert!(
+        module.lints().is_empty(),
+        "the spec has redundant members: {:#?}",
+        module.lints()
+    );
 }
 
 #[test]

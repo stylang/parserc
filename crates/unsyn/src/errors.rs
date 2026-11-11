@@ -1,14 +1,24 @@
-//! The types used for `unsyn` parsing error reports.
+//! The types used for `unsyn` diagnostic reports.
 //!
-//! An error says which stage of [`unsyn`](crate) met the problem, what it was
-//! looking for, and how far the parser may still go:
+//! Every report says which stage of [`unsyn`](crate) met the problem and which
+//! of two channels it belongs to:
+//!
+//! - an [`UnsynError`] means the file denotes nothing, and the analysis of it
+//!   ends with its diagnostics rather than with a model;
+//! - a [`Lint`] means the file denotes something it need not have said twice,
+//!   and the analysis produces the model of it all the same.
+//!
+//! [`Diagnostics`] is the pair of lists a pass writes both kinds of finding to.
+//!
+//! An error also says what the stage was looking for, and how far the parser may
+//! still go:
 //!
 //! - [`PunctKind`]: a punctuation token, [`KeywordKind`]: a keyword;
 //! - [`SyntaxKind`]: a composite token or node built out of them;
 //! - [`SemanticsKind`]: a token that is well formed but meaningless, and every
 //!   rule the grammar itself cannot state (see [`crate::semantics`]).
 //!
-//! Everything but [`UnsynError::Semantics`] also carries a
+//! Everything but [`UnsynError::Semantics`] carries a
 //! [`ControlFlow`]: [`Recovable`](ControlFlow::Recovable) means an enclosing
 //! backtracking parser may try another alternative, [`Fatal`](ControlFlow::Fatal)
 //! means the file is malformed and no alternative can help.
@@ -219,6 +229,91 @@ impl SemanticsKind {
     }
 }
 
+/// A report about a file that is meaningful but says something twice.
+///
+/// Nothing here makes a definition unusable: a rule of this family points at a
+/// construct that could be written shorter, or that does not do what its author
+/// meant, while the pattern it is part of still matches one language. The
+/// analyzer therefore keeps these apart from its [`UnsynError`]s, and hands them
+/// over with the model of a file it accepted (see
+/// [`Module::lints`](crate::semantics::Module::lints)); a caller that would
+/// rather refuse such a file is free to treat a lint as fatal.
+#[derive(Debug, thiserror::Error, PartialEq, Eq, Clone)]
+pub enum LintKind {
+    /// A member of a set whose value an earlier member of the same set already
+    /// denotes.
+    #[error("member `{0}` of this set is already declared")]
+    DuplicateMember(String),
+    /// A member every value of which an earlier member of the same set denotes.
+    #[error("member `{0}` is covered by the earlier member `{1}` of this set")]
+    CoveredMember(String, String),
+    /// A member that denotes everything an earlier member of the same set does,
+    /// and more besides, which makes that earlier member the redundant one.
+    #[error("member `{0}` covers the earlier member `{1}` of this set")]
+    CoversMember(String, String),
+    /// A member that denotes some — but not all — of the values of an earlier
+    /// member of the same set.
+    #[error("member `{0}` overlaps the earlier member `{1}` of this set")]
+    OverlappingMember(String, String),
+}
+
+/// One [`LintKind`] and the place in the file that says it.
+#[derive(Debug, thiserror::Error, PartialEq, Eq, Clone)]
+#[error("lint: {kind}, {span:?}")]
+pub struct Lint {
+    /// What the construct at `span` does that it need not do.
+    pub kind: LintKind,
+    /// The construct that earns the report.
+    pub span: Span,
+}
+
+/// The two channels of a diagnostic report, kept apart by what they imply.
+///
+/// A pass that can find both kinds of problem writes to one of these and leaves
+/// the question of what to do about each of them to its caller, which for the
+/// [analyzer](crate::semantics) is the difference between rejecting a file and
+/// returning the model of it with a note attached.
+#[derive(Debug, Default, PartialEq, Eq)]
+pub struct Diagnostics {
+    /// The problems that leave the file meaning nothing.
+    pub errors: Vec<UnsynError>,
+    /// The problems that leave the file meaningful.
+    pub lints: Vec<Lint>,
+}
+
+impl Diagnostics {
+    /// Records a problem that leaves the file meaning nothing.
+    #[inline]
+    pub fn push(&mut self, error: UnsynError) {
+        self.errors.push(error);
+    }
+
+    /// Records a problem that leaves the file meaningful.
+    #[inline]
+    pub fn lint(&mut self, kind: LintKind, span: Span) {
+        self.lints.push(Lint { kind, span });
+    }
+
+    /// Records every report of `other`.
+    #[inline]
+    pub fn merge(&mut self, other: Self) {
+        self.errors.extend(other.errors);
+        self.lints.extend(other.lints);
+    }
+
+    /// Returns `true` when the file means nothing.
+    #[inline]
+    pub fn has_errors(&self) -> bool {
+        !self.errors.is_empty()
+    }
+
+    /// Returns `true` when nothing at all was found.
+    #[inline]
+    pub fn is_empty(&self) -> bool {
+        self.errors.is_empty() && self.lints.is_empty()
+    }
+}
+
 /// Error information container for `unsyn` parsing.
 #[derive(Debug, thiserror::Error, PartialEq, Eq)]
 pub enum UnsynError {
@@ -425,5 +520,78 @@ mod tests {
             SemanticsKind::EmptySet.map()(inner),
             UnsynError::Semantics(SemanticsKind::EmptySet, Span::Range(2..3))
         );
+    }
+
+    /// The wording of the lint channel is as much a part of what a user reads as
+    /// the wording of the errors, and it names the members by their value.
+    #[test]
+    fn every_lint_names_the_members_it_compares() {
+        assert_eq!(
+            Lint {
+                kind: LintKind::DuplicateMember("'a'".into()),
+                span: Span::Range(6..9),
+            }
+            .to_string(),
+            "lint: member `'a'` of this set is already declared, Range(6..9)"
+        );
+
+        assert_eq!(
+            Lint {
+                kind: LintKind::CoveredMember("'c'".into(), "'a'-'z'".into()),
+                span: Span::Range(12..15),
+            }
+            .to_string(),
+            "lint: member `'c'` is covered by the earlier member `'a'-'z'` of this set, Range(12..15)"
+        );
+
+        assert_eq!(
+            Lint {
+                kind: LintKind::CoversMember("'a'-'z'".into(), "'c'".into()),
+                span: Span::Range(10..16),
+            }
+            .to_string(),
+            "lint: member `'a'-'z'` covers the earlier member `'c'` of this set, Range(10..16)"
+        );
+
+        assert_eq!(
+            Lint {
+                kind: LintKind::OverlappingMember("'b'-'d'".into(), "'a'-'c'".into()),
+                span: Span::Range(16..22),
+            }
+            .to_string(),
+            "lint: member `'b'-'d'` overlaps the earlier member `'a'-'c'` of this set, Range(16..22)"
+        );
+    }
+
+    #[test]
+    fn the_two_channels_of_a_report_stay_apart() {
+        let mut report = Diagnostics::default();
+
+        assert!(report.is_empty());
+        assert!(!report.has_errors());
+
+        report.push(UnsynError::Semantics(
+            SemanticsKind::EmptySet,
+            Span::Range(0..2),
+        ));
+        report.lint(LintKind::DuplicateMember("'a'".into()), Span::Range(1..4));
+
+        assert!(report.has_errors());
+        assert!(!report.is_empty());
+
+        // A lint alone is not a reason to refuse a file.
+        let only_a_lint = Diagnostics {
+            errors: vec![],
+            lints: report.lints.clone(),
+        };
+
+        assert!(!only_a_lint.has_errors());
+        assert!(!only_a_lint.is_empty());
+
+        let mut merged = Diagnostics::default();
+        merged.merge(only_a_lint);
+
+        assert!(merged.errors.is_empty());
+        assert_eq!(merged.lints.len(), 1);
     }
 }
