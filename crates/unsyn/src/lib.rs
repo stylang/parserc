@@ -20,55 +20,51 @@
 //! recursion checks count on this, since whatever consumes is what stands
 //! between a definition and itself.
 //!
-//! This crate is the implementation of that language, in four stages, each one
-//! dependent on the previous one:
+//! # Two phases, two features
 //!
-//! - [`input`] holds the [`Input`](parserc::Input) the parsers share.
-//! - [`lexical`] recognises the tokens: identifiers, keywords, punctuation,
-//!   delimiters, literals and the several comment and documentation forms.
-//! - [`syntax`] applies the context-free grammar of the language and produces a
-//!   [`Crate`](syntax::Crate), the CST of the source file.
-//! - [`semantics`] gives that CST meaning: it resolves the references between
-//!   nodes, validates their patterns, rejects the definitions that can start
-//!   with themselves, and reports what a definition says twice as a lint.
+//! The crate does two jobs that have nothing to do with each other, and the
+//! features of `Cargo.toml` say so:
 //!
-//! ```
-//! use parserc::syntax::Syntax;
-//! use unsyn::{input::TokenStream, semantics::analyze, syntax::Crate};
-//!
-//! let source = r#"
-//!     whitespace W -> U+0020 | U+0009;
-//!     lexer XID_Start -> <XID_Start>;
-//!     lexer XID_Continue -> <XID_Continue>;
-//!     lexer IDENTIFIER -> ( XID_Start | '_' ) XID_Continue*;
-//!     syntax PROGRAM -> IDENTIFIER;
-//! "#;
-//!
-//! let mut input = TokenStream::from(source);
-//! let file = Crate::parse(&mut input).expect("the source should parse");
-//!
-//! let module = analyze(&file).expect("the source should be well-formed");
-//!
-//! assert_eq!(module.symbols().len(), 5);
-//! assert_eq!(module.definition("IDENTIFIER").unwrap().kind().keyword(), "lexer");
-//!
-//! // `<Name>` is a call of a matcher the backend provides, not a node.
-//! assert_eq!(module.matchers(), ["XID_Start", "XID_Continue"]);
-//!
-//! // A set whose members say nothing twice earns no lint.
-//! assert!(module.lints().is_empty());
-//! ```
+//! - `runtime`, the [`runtime`] module, is what a grammar the generator writes
+//!   is *compiled against*: the [`GeneratedInput`](runtime::GeneratedInput)
+//!   every generated type is bounded by, and the
+//!   [`matcher`](runtime::matcher) calls a `<NAME>` in a pattern turns into.
+//!   It knows nothing of the DSL, and needs nothing but a character stream.
+//! - `codegen`, the same-named feature, is the DSL itself: the reader, the
+//!   analyzer and the generator, in the stages its own module document lays
+//!   out, over `quote` and `proc_macro2`.
 //!
 //! The spec of the language, written in the language itself, lives in
-//! `bootstrap.uns` next to this crate and is checked by the tests of
-//! [`semantics`], and [`codegen`] is what turns a analyzed file into the Rust of
-//! the tree it describes. What the four stages do one after the other, over both
-//! that spec and a small one written inline, is what `examples/pipeline.rs` runs
-//! and reports.
+//! `bootstrap.uns` next to this crate; `examples/pipeline.rs` runs the whole
+//! build phase over it, from source text to the Rust of the tree it describes.
+//!
+//! A crate that keeps a generated file and never produces one therefore takes
+//! the runtime alone, and leaves `quote` and `proc-macro2` out of its tree:
+//!
+//! ```toml
+//! [dependencies]
+//! unsyn = { version = "0.13", default-features = false, features = ["runtime"] }
+//! ```
+//!
+//! Both features off leaves a crate with nothing in it, which is not a build
+//! anyone should ship: the documentation of that case is allowed to point at the
+//! modules it cannot show.
+#![cfg_attr(
+    not(any(feature = "runtime", feature = "codegen")),
+    allow(rustdoc::broken_intra_doc_links)
+)]
 
+#[cfg(feature = "codegen")]
 pub mod codegen;
+#[cfg(feature = "codegen")]
 pub mod errors;
+#[cfg(feature = "codegen")]
 pub mod input;
+#[cfg(feature = "codegen")]
 pub mod lexical;
+#[cfg(feature = "runtime")]
+pub mod runtime;
+#[cfg(feature = "codegen")]
 pub mod semantics;
+#[cfg(feature = "codegen")]
 pub mod syntax;

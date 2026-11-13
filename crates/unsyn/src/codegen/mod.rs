@@ -13,6 +13,52 @@
 //! derive macro of the backend and this generator can share one way of writing a
 //! node.
 //!
+//! # The stages it stands on
+//!
+//! Generating is the last of four passes over a source file, each one dependent
+//! on the previous one:
+//!
+//! - [`input`](crate::input) holds the [`Input`](parserc::Input) the parsers share.
+//! - [`lexical`](crate::lexical) recognises the tokens: identifiers, keywords,
+//!   punctuation, delimiters, literals and the several comment and documentation
+//!   forms.
+//! - [`syntax`](crate::syntax) applies the context-free grammar of the language
+//!   and produces a [`Crate`](crate::syntax::Crate), the CST of the source file.
+//! - [`semantics`](crate::semantics) gives that CST meaning: it resolves the
+//!   references between nodes, validates their patterns, rejects the definitions
+//!   that can start with themselves, and reports what a definition says twice as
+//!   a lint.
+//!
+//! ```
+//! use parserc::syntax::Syntax;
+//! use unsyn::{input::TokenStream, semantics::analyze, syntax::Crate};
+//!
+//! let source = r#"
+//!     whitespace W -> U+0020 | U+0009;
+//!     lexer XID_Start -> <XID_Start>;
+//!     lexer XID_Continue -> <XID_Continue>;
+//!     lexer IDENTIFIER -> ( XID_Start | '_' ) XID_Continue*;
+//!     syntax PROGRAM -> IDENTIFIER;
+//! "#;
+//!
+//! let mut input = TokenStream::from(source);
+//! let file = Crate::parse(&mut input).expect("the source should parse");
+//!
+//! let module = analyze(&file).expect("the source should be well-formed");
+//!
+//! assert_eq!(module.symbols().len(), 5);
+//! assert_eq!(module.definition("IDENTIFIER").unwrap().kind().keyword(), "lexer");
+//!
+//! // `<Name>` is a call of a matcher the backend provides, not a node.
+//! assert_eq!(module.matchers(), ["XID_Start", "XID_Continue"]);
+//!
+//! // A set whose members say nothing twice earns no lint.
+//! assert!(module.lints().is_empty());
+//! ```
+//!
+//! What those stages do one after the other, over `bootstrap.uns` and a small
+//! spec written inline, is what `examples/pipeline.rs` runs and reports.
+//!
 //! # Two programs, one plan
 //!
 //! A `lexer` body reads text, so it is first compiled to a program over
@@ -54,9 +100,7 @@
 //! position without taking anything, so every cycle left is one a tree can hold.
 
 mod error;
-mod input;
 mod item;
-pub mod matcher;
 mod name;
 mod scan;
 mod shape;
@@ -69,7 +113,6 @@ use proc_macro2::TokenStream;
 use quote::quote;
 
 pub use error::{CodegenError, CodegenKind};
-pub use input::GeneratedInput;
 
 use crate::input::UnsynInput;
 use crate::lexical::delimiter::Bracket;
@@ -108,15 +151,15 @@ pub(crate) fn set_items<T, P>(punctuated: &Punctuated<T, P>) -> impl Iterator<It
 /// `::parserc` and `::unsyn` unless the project keeps them elsewhere, in which
 /// case the paths are given here.
 ///
-/// [`GeneratedInput`]: crate::codegen::GeneratedInput
+/// [`GeneratedInput`]: crate::runtime::GeneratedInput
 #[derive(Debug, Clone)]
 pub struct Paths {
-    /// Where [`GeneratedInput`] is, which every
+    /// Where [`GeneratedInput`](crate::runtime::GeneratedInput) is, which every
     /// generated type is written over.
     pub unsyn: TokenStream,
     /// Where the combinators and [`Syntax`](parserc::syntax::Syntax) are.
     pub parserc: TokenStream,
-    /// Where the [`matcher`] module is, which is what
+    /// Where the [`matcher`](crate::runtime::matcher) module is, which is what
     /// `<NAME>` calls.
     pub matcher: TokenStream,
 }
@@ -126,7 +169,7 @@ impl Default for Paths {
         Self {
             unsyn: quote!(::unsyn),
             parserc: quote!(::parserc),
-            matcher: quote!(::unsyn::codegen::matcher),
+            matcher: quote!(::unsyn::runtime::matcher),
         }
     }
 }

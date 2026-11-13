@@ -538,7 +538,7 @@ fn with_suffix_nullable<I: UnsynInput>(
         ExprWithSuffix::Star(..) | ExprWithSuffix::Question(..) => true,
         ExprWithSuffix::Plus(target, _) => without_suffix_nullable(target, table, nullable),
         ExprWithSuffix::Repeat { target, suffix } => {
-            // `{0..N}` may match nothing at all, and any other count matches the
+            // `{0, N}` may match nothing at all, and any other count matches the
             // empty string when its target does.
             repeat_lower(&suffix.body) == 0 || without_suffix_nullable(target, table, nullable)
         }

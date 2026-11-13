@@ -563,7 +563,7 @@ pub(crate) fn literal<I: UnsynInput>(lit: &LitStr<I>) -> Result<Inst, CodegenErr
 }
 
 /// The matcher a keyword asks about to find where it ends, which is one of the
-/// two the [`matcher`](super::matcher) module gives without a backend.
+/// two the [`matcher`](crate::runtime::matcher) module gives without a backend.
 const KEYWORD_END: &str = "XID_Continue";
 
 /// The character a code point literal denotes.

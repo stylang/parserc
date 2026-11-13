@@ -12,7 +12,7 @@
 //!
 //! - A step one character wide is a [`Pred`], and a repetition of one is scanned
 //!   instead of looped over: `X*` is [`take_while`](parserc::take_while),
-//!   `~ […]*` is [`take_till`](parserc::take_till), and `X{n..m}` is
+//!   `~ […]*` is [`take_till`](parserc::take_till), and `X{n, m}` is
 //!   [`take_while_with`](parserc::take_while_with), each of which walks the text
 //!   once rather than calling a parser per character.
 //! - A literal of one character is [`next_if`](parserc::next_if) and of more

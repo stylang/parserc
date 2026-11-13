@@ -599,7 +599,7 @@ impl Shaper {
     fn call(&mut self, owner: &str, name: &str) -> Result<Type, CodegenError> {
         let inst = Inst::Matcher(name.to_owned());
 
-        if super::matcher::is_builtin(name) {
+        if crate::runtime::matcher::is_builtin(name) {
             return Ok(Type::Named(self.shared(&format!("Match{name}"), inst)));
         }
 

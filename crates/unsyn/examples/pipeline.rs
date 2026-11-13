@@ -69,7 +69,7 @@ lexer SEP -> ',' | ';';
 lexer NOTE -> '#' ~[U+000A]*;
 
 syntax Value -> KEY | Number | List | Group;
-syntax Number -> DIGIT{1..9};
+syntax Number -> DIGIT{1, 9};
 syntax List -> '[' Value ( SEP Value )* ']';
 syntax Group -> ( '{' Binding* '}' ) except ':';
 syntax Binding -> NAME OP Value;

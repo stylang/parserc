@@ -99,7 +99,7 @@ mod tests {
 
     #[test]
     fn the_span_of_a_group_reaches_its_closing_token() {
-        let mut input = TokenStream::from("{2..3}");
+        let mut input = TokenStream::from("{2, 3}");
 
         let group = input
             .parse::<Brace<_, Repeat<_>>>()

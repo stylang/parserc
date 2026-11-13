@@ -268,7 +268,7 @@ fn validate_repeat<I: UnsynInput>(repeat: &Repeat<I>, report: &mut Diagnostics) 
     let span = repeat.to_span();
 
     match repeat {
-        // `{..N}` and `{N}` matching nothing at all is never intended.
+        // `{, N}` and `{N}` matching nothing at all is never intended.
         Repeat::RangeTo(_, end) | Repeat::Count(end) => {
             if let Some(0) = bound(end, report) {
                 report.push(UnsynError::Semantics(SemanticsKind::InvalidRepeat, span));
@@ -614,8 +614,8 @@ mod tests {
     fn invalid_repetition_bounds_are_reported() {
         for body in [
             "'a'{0}",
-            "'a'{3..1}",
-            "'a'{..0}",
+            "'a'{3, 1}",
+            "'a'{, 0}",
             "'a'{99999999999999999999999}",
         ] {
             assert!(
@@ -626,7 +626,7 @@ mod tests {
             );
         }
 
-        for body in ["'a'{0..3}", "'a'{1..3}", "'a'{3}", "'a'{..3}"] {
+        for body in ["'a'{0, 3}", "'a'{1, 3}", "'a'{3}", "'a'{, 3}"] {
             assert!(messages(body).is_empty(), "{body}");
         }
     }
@@ -634,11 +634,11 @@ mod tests {
     #[test]
     fn the_lower_bound_of_a_repetition_is_evaluated() {
         for (body, expected) in [
-            ("{0..3}", 0),
-            ("{2..3}", 2),
+            ("{0, 3}", 0),
+            ("{2, 3}", 2),
             ("{3}", 3),
-            ("{..3}", 0),
-            ("{1_0..20}", 10),
+            ("{, 3}", 0),
+            ("{1_0, 20}", 10),
         ] {
             let repeat = TokenStream::from(body)
                 .parse::<Brace<_, Repeat<_>>>()

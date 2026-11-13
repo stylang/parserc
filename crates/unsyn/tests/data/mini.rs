@@ -10,7 +10,7 @@
 pub struct WS<I>(pub I);
 impl<I> ::parserc::syntax::Syntax<I> for WS<I>
 where
-    I: ::unsyn::codegen::GeneratedInput,
+    I: ::unsyn::runtime::GeneratedInput,
 {
     fn parse(input: &mut I) -> ::core::result::Result<Self, <I as ::parserc::Input>::Error> {
         #[allow(unused_imports)]
@@ -51,7 +51,7 @@ where
 pub struct LETTER<I>(pub I);
 impl<I> ::parserc::syntax::Syntax<I> for LETTER<I>
 where
-    I: ::unsyn::codegen::GeneratedInput,
+    I: ::unsyn::runtime::GeneratedInput,
 {
     fn parse(input: &mut I) -> ::core::result::Result<Self, <I as ::parserc::Input>::Error> {
         #[allow(unused_imports)]
@@ -91,7 +91,7 @@ where
 pub struct DIGIT<I>(pub I);
 impl<I> ::parserc::syntax::Syntax<I> for DIGIT<I>
 where
-    I: ::unsyn::codegen::GeneratedInput,
+    I: ::unsyn::runtime::GeneratedInput,
 {
     fn parse(input: &mut I) -> ::core::result::Result<Self, <I as ::parserc::Input>::Error> {
         #[allow(unused_imports)]
@@ -128,7 +128,7 @@ where
 pub struct WORD<I>(pub I);
 impl<I> ::parserc::syntax::Syntax<I> for WORD<I>
 where
-    I: ::unsyn::codegen::GeneratedInput,
+    I: ::unsyn::runtime::GeneratedInput,
 {
     fn parse(input: &mut I) -> ::core::result::Result<Self, <I as ::parserc::Input>::Error> {
         #[allow(unused_imports)]
@@ -171,7 +171,7 @@ where
 pub struct LET<I>(pub I);
 impl<I> ::parserc::syntax::Syntax<I> for LET<I>
 where
-    I: ::unsyn::codegen::GeneratedInput,
+    I: ::unsyn::runtime::GeneratedInput,
 {
     fn parse(input: &mut I) -> ::core::result::Result<Self, <I as ::parserc::Input>::Error> {
         #[allow(unused_imports)]
@@ -185,7 +185,7 @@ where
             if {
                 let mut __probe = input.clone();
                 (|__probe: &mut I| -> ::core::result::Result<(), <I as ::parserc::Input>::Error> {
-                    ::unsyn::codegen::matcher::XID_Continue(__probe)?;
+                    ::unsyn::runtime::matcher::XID_Continue(__probe)?;
                     ::core::result::Result::Ok(())
                 })
                 .parse(&mut __probe)
@@ -224,7 +224,7 @@ where
 pub struct FN<I>(pub I);
 impl<I> ::parserc::syntax::Syntax<I> for FN<I>
 where
-    I: ::unsyn::codegen::GeneratedInput,
+    I: ::unsyn::runtime::GeneratedInput,
 {
     fn parse(input: &mut I) -> ::core::result::Result<Self, <I as ::parserc::Input>::Error> {
         #[allow(unused_imports)]
@@ -238,7 +238,7 @@ where
             if {
                 let mut __probe = input.clone();
                 (|__probe: &mut I| -> ::core::result::Result<(), <I as ::parserc::Input>::Error> {
-                    ::unsyn::codegen::matcher::XID_Continue(__probe)?;
+                    ::unsyn::runtime::matcher::XID_Continue(__probe)?;
                     ::core::result::Result::Ok(())
                 })
                 .parse(&mut __probe)
@@ -277,7 +277,7 @@ where
 pub struct KEYWORDS<I>(pub I);
 impl<I> ::parserc::syntax::Syntax<I> for KEYWORDS<I>
 where
-    I: ::unsyn::codegen::GeneratedInput,
+    I: ::unsyn::runtime::GeneratedInput,
 {
     fn parse(input: &mut I) -> ::core::result::Result<Self, <I as ::parserc::Input>::Error> {
         #[allow(unused_imports)]
@@ -324,7 +324,7 @@ where
 pub struct IDENT<I>(pub I);
 impl<I> ::parserc::syntax::Syntax<I> for IDENT<I>
 where
-    I: ::unsyn::codegen::GeneratedInput,
+    I: ::unsyn::runtime::GeneratedInput,
 {
     fn parse(input: &mut I) -> ::core::result::Result<Self, <I as ::parserc::Input>::Error> {
         #[allow(unused_imports)]
@@ -378,7 +378,7 @@ where
 pub struct OPEN<I>(pub I);
 impl<I> ::parserc::syntax::Syntax<I> for OPEN<I>
 where
-    I: ::unsyn::codegen::GeneratedInput,
+    I: ::unsyn::runtime::GeneratedInput,
 {
     fn parse(input: &mut I) -> ::core::result::Result<Self, <I as ::parserc::Input>::Error> {
         #[allow(unused_imports)]
@@ -415,7 +415,7 @@ where
 pub struct CLOSE<I>(pub I);
 impl<I> ::parserc::syntax::Syntax<I> for CLOSE<I>
 where
-    I: ::unsyn::codegen::GeneratedInput,
+    I: ::unsyn::runtime::GeneratedInput,
 {
     fn parse(input: &mut I) -> ::core::result::Result<Self, <I as ::parserc::Input>::Error> {
         #[allow(unused_imports)]
@@ -452,7 +452,7 @@ where
 pub struct COMMA<I>(pub I);
 impl<I> ::parserc::syntax::Syntax<I> for COMMA<I>
 where
-    I: ::unsyn::codegen::GeneratedInput,
+    I: ::unsyn::runtime::GeneratedInput,
 {
     fn parse(input: &mut I) -> ::core::result::Result<Self, <I as ::parserc::Input>::Error> {
         #[allow(unused_imports)]
@@ -489,7 +489,7 @@ where
 pub struct SEMI<I>(pub I);
 impl<I> ::parserc::syntax::Syntax<I> for SEMI<I>
 where
-    I: ::unsyn::codegen::GeneratedInput,
+    I: ::unsyn::runtime::GeneratedInput,
 {
     fn parse(input: &mut I) -> ::core::result::Result<Self, <I as ::parserc::Input>::Error> {
         #[allow(unused_imports)]
@@ -526,7 +526,7 @@ where
 pub struct ARROW<I>(pub I);
 impl<I> ::parserc::syntax::Syntax<I> for ARROW<I>
 where
-    I: ::unsyn::codegen::GeneratedInput,
+    I: ::unsyn::runtime::GeneratedInput,
 {
     fn parse(input: &mut I) -> ::core::result::Result<Self, <I as ::parserc::Input>::Error> {
         #[allow(unused_imports)]
@@ -563,7 +563,7 @@ where
 pub struct SHARP<I>(pub I);
 impl<I> ::parserc::syntax::Syntax<I> for SHARP<I>
 where
-    I: ::unsyn::codegen::GeneratedInput,
+    I: ::unsyn::runtime::GeneratedInput,
 {
     fn parse(input: &mut I) -> ::core::result::Result<Self, <I as ::parserc::Input>::Error> {
         #[allow(unused_imports)]
@@ -600,7 +600,7 @@ where
 pub struct LEFT<I>(pub I);
 impl<I> ::parserc::syntax::Syntax<I> for LEFT<I>
 where
-    I: ::unsyn::codegen::GeneratedInput,
+    I: ::unsyn::runtime::GeneratedInput,
 {
     fn parse(input: &mut I) -> ::core::result::Result<Self, <I as ::parserc::Input>::Error> {
         #[allow(unused_imports)]
@@ -637,7 +637,7 @@ where
 pub struct RIGHT<I>(pub I);
 impl<I> ::parserc::syntax::Syntax<I> for RIGHT<I>
 where
-    I: ::unsyn::codegen::GeneratedInput,
+    I: ::unsyn::runtime::GeneratedInput,
 {
     fn parse(input: &mut I) -> ::core::result::Result<Self, <I as ::parserc::Input>::Error> {
         #[allow(unused_imports)]
@@ -674,7 +674,7 @@ where
 pub struct TILDE<I>(pub I);
 impl<I> ::parserc::syntax::Syntax<I> for TILDE<I>
 where
-    I: ::unsyn::codegen::GeneratedInput,
+    I: ::unsyn::runtime::GeneratedInput,
 {
     fn parse(input: &mut I) -> ::core::result::Result<Self, <I as ::parserc::Input>::Error> {
         #[allow(unused_imports)]
@@ -711,7 +711,7 @@ where
 pub struct LETTER_OR_ANY<I>(pub I);
 impl<I> ::parserc::syntax::Syntax<I> for LETTER_OR_ANY<I>
 where
-    I: ::unsyn::codegen::GeneratedInput,
+    I: ::unsyn::runtime::GeneratedInput,
 {
     fn parse(input: &mut I) -> ::core::result::Result<Self, <I as ::parserc::Input>::Error> {
         #[allow(unused_imports)]
@@ -748,7 +748,7 @@ where
 pub struct QUOTE<I>(pub I);
 impl<I> ::parserc::syntax::Syntax<I> for QUOTE<I>
 where
-    I: ::unsyn::codegen::GeneratedInput,
+    I: ::unsyn::runtime::GeneratedInput,
 {
     fn parse(input: &mut I) -> ::core::result::Result<Self, <I as ::parserc::Input>::Error> {
         #[allow(unused_imports)]
@@ -785,7 +785,7 @@ where
 pub struct BSLASH<I>(pub I);
 impl<I> ::parserc::syntax::Syntax<I> for BSLASH<I>
 where
-    I: ::unsyn::codegen::GeneratedInput,
+    I: ::unsyn::runtime::GeneratedInput,
 {
     fn parse(input: &mut I) -> ::core::result::Result<Self, <I as ::parserc::Input>::Error> {
         #[allow(unused_imports)]
@@ -822,7 +822,7 @@ where
 pub struct MATCHER<I>(pub I);
 impl<I> ::parserc::syntax::Syntax<I> for MATCHER<I>
 where
-    I: ::unsyn::codegen::GeneratedInput,
+    I: ::unsyn::runtime::GeneratedInput,
 {
     fn parse(input: &mut I) -> ::core::result::Result<Self, <I as ::parserc::Input>::Error> {
         #[allow(unused_imports)]
@@ -832,7 +832,7 @@ where
         };
         {
             let mut __from = input.clone();
-            ::unsyn::codegen::matcher::XID_Start(input)?;
+            ::unsyn::runtime::matcher::XID_Start(input)?;
             if input.len() == __from.len() {
                 return Err(::parserc::Kind::Token(
                     "MATCHER",
@@ -859,7 +859,7 @@ where
 pub struct SLASH<I>(pub I);
 impl<I> ::parserc::syntax::Syntax<I> for SLASH<I>
 where
-    I: ::unsyn::codegen::GeneratedInput,
+    I: ::unsyn::runtime::GeneratedInput,
 {
     fn parse(input: &mut I) -> ::core::result::Result<Self, <I as ::parserc::Input>::Error> {
         #[allow(unused_imports)]
@@ -896,7 +896,7 @@ where
 pub struct STAR<I>(pub I);
 impl<I> ::parserc::syntax::Syntax<I> for STAR<I>
 where
-    I: ::unsyn::codegen::GeneratedInput,
+    I: ::unsyn::runtime::GeneratedInput,
 {
     fn parse(input: &mut I) -> ::core::result::Result<Self, <I as ::parserc::Input>::Error> {
         #[allow(unused_imports)]
@@ -933,7 +933,7 @@ where
 pub struct UNDER<I>(pub I);
 impl<I> ::parserc::syntax::Syntax<I> for UNDER<I>
 where
-    I: ::unsyn::codegen::GeneratedInput,
+    I: ::unsyn::runtime::GeneratedInput,
 {
     fn parse(input: &mut I) -> ::core::result::Result<Self, <I as ::parserc::Input>::Error> {
         #[allow(unused_imports)]
@@ -970,7 +970,7 @@ where
 pub struct Plus<I>(pub I);
 impl<I> ::parserc::syntax::Syntax<I> for Plus<I>
 where
-    I: ::unsyn::codegen::GeneratedInput,
+    I: ::unsyn::runtime::GeneratedInput,
 {
     fn parse(input: &mut I) -> ::core::result::Result<Self, <I as ::parserc::Input>::Error> {
         #[allow(unused_imports)]
@@ -1007,7 +1007,7 @@ where
 pub struct Minus<I>(pub I);
 impl<I> ::parserc::syntax::Syntax<I> for Minus<I>
 where
-    I: ::unsyn::codegen::GeneratedInput,
+    I: ::unsyn::runtime::GeneratedInput,
 {
     fn parse(input: &mut I) -> ::core::result::Result<Self, <I as ::parserc::Input>::Error> {
         #[allow(unused_imports)]
@@ -1044,7 +1044,7 @@ where
 pub struct Underscore<I>(pub I);
 impl<I> ::parserc::syntax::Syntax<I> for Underscore<I>
 where
-    I: ::unsyn::codegen::GeneratedInput,
+    I: ::unsyn::runtime::GeneratedInput,
 {
     fn parse(input: &mut I) -> ::core::result::Result<Self, <I as ::parserc::Input>::Error> {
         #[allow(unused_imports)]
@@ -1081,7 +1081,7 @@ where
 pub struct TEXT11<I>(pub I);
 impl<I> ::parserc::syntax::Syntax<I> for TEXT11<I>
 where
-    I: ::unsyn::codegen::GeneratedInput,
+    I: ::unsyn::runtime::GeneratedInput,
 {
     fn parse(input: &mut I) -> ::core::result::Result<Self, <I as ::parserc::Input>::Error> {
         #[allow(unused_imports)]
@@ -1119,7 +1119,7 @@ where
 pub struct TEXT12<I>(pub I);
 impl<I> ::parserc::syntax::Syntax<I> for TEXT12<I>
 where
-    I: ::unsyn::codegen::GeneratedInput,
+    I: ::unsyn::runtime::GeneratedInput,
 {
     fn parse(input: &mut I) -> ::core::result::Result<Self, <I as ::parserc::Input>::Error> {
         #[allow(unused_imports)]
@@ -1157,7 +1157,7 @@ where
 pub struct Any<I>(pub I);
 impl<I> ::parserc::syntax::Syntax<I> for Any<I>
 where
-    I: ::unsyn::codegen::GeneratedInput,
+    I: ::unsyn::runtime::GeneratedInput,
 {
     fn parse(input: &mut I) -> ::core::result::Result<Self, <I as ::parserc::Input>::Error> {
         #[allow(unused_imports)]
@@ -1194,7 +1194,7 @@ where
 pub struct Commented11<I>(pub I);
 impl<I> ::parserc::syntax::Syntax<I> for Commented11<I>
 where
-    I: ::unsyn::codegen::GeneratedInput,
+    I: ::unsyn::runtime::GeneratedInput,
 {
     fn parse(input: &mut I) -> ::core::result::Result<Self, <I as ::parserc::Input>::Error> {
         #[allow(unused_imports)]
@@ -1241,7 +1241,7 @@ pub struct ITEM<I>(
 );
 impl<I> ::parserc::syntax::Syntax<I> for ITEM<I>
 where
-    I: ::unsyn::codegen::GeneratedInput,
+    I: ::unsyn::runtime::GeneratedInput,
 {
     fn parse(input: &mut I) -> ::core::result::Result<Self, <I as ::parserc::Input>::Error> {
         #[allow(unused_imports)]
@@ -1287,7 +1287,7 @@ pub struct EXPR<I>(
 );
 impl<I> ::parserc::syntax::Syntax<I> for EXPR<I>
 where
-    I: ::unsyn::codegen::GeneratedInput,
+    I: ::unsyn::runtime::GeneratedInput,
 {
     fn parse(input: &mut I) -> ::core::result::Result<Self, <I as ::parserc::Input>::Error> {
         #[allow(unused_imports)]
@@ -1322,7 +1322,7 @@ pub enum PRIMARY<I> {
 }
 impl<I> ::parserc::syntax::Syntax<I> for PRIMARY<I>
 where
-    I: ::unsyn::codegen::GeneratedInput,
+    I: ::unsyn::runtime::GeneratedInput,
 {
     fn parse(input: &mut I) -> ::core::result::Result<Self, <I as ::parserc::Input>::Error> {
         #[allow(unused_imports)]
@@ -1404,7 +1404,7 @@ pub struct GROUP<I>(
 );
 impl<I> ::parserc::syntax::Syntax<I> for GROUP<I>
 where
-    I: ::unsyn::codegen::GeneratedInput,
+    I: ::unsyn::runtime::GeneratedInput,
 {
     fn parse(input: &mut I) -> ::core::result::Result<Self, <I as ::parserc::Input>::Error> {
         #[allow(unused_imports)]
@@ -1443,7 +1443,7 @@ pub struct NEGATED<I>(
 );
 impl<I> ::parserc::syntax::Syntax<I> for NEGATED<I>
 where
-    I: ::unsyn::codegen::GeneratedInput,
+    I: ::unsyn::runtime::GeneratedInput,
 {
     fn parse(input: &mut I) -> ::core::result::Result<Self, <I as ::parserc::Input>::Error> {
         #[allow(unused_imports)]
@@ -1478,7 +1478,7 @@ pub enum BINOP<I> {
 }
 impl<I> ::parserc::syntax::Syntax<I> for BINOP<I>
 where
-    I: ::unsyn::codegen::GeneratedInput,
+    I: ::unsyn::runtime::GeneratedInput,
 {
     fn parse(input: &mut I) -> ::core::result::Result<Self, <I as ::parserc::Input>::Error> {
         #[allow(unused_imports)]
@@ -1543,7 +1543,7 @@ pub enum LITERAL<I> {
 }
 impl<I> ::parserc::syntax::Syntax<I> for LITERAL<I>
 where
-    I: ::unsyn::codegen::GeneratedInput,
+    I: ::unsyn::runtime::GeneratedInput,
 {
     fn parse(input: &mut I) -> ::core::result::Result<Self, <I as ::parserc::Input>::Error> {
         #[allow(unused_imports)]
@@ -1598,7 +1598,7 @@ pub struct NUMBER<I>(
 );
 impl<I> ::parserc::syntax::Syntax<I> for NUMBER<I>
 where
-    I: ::unsyn::codegen::GeneratedInput,
+    I: ::unsyn::runtime::GeneratedInput,
 {
     fn parse(input: &mut I) -> ::core::result::Result<Self, <I as ::parserc::Input>::Error> {
         #[allow(unused_imports)]
@@ -1632,7 +1632,7 @@ pub struct TEXT<I>(
 );
 impl<I> ::parserc::syntax::Syntax<I> for TEXT<I>
 where
-    I: ::unsyn::codegen::GeneratedInput,
+    I: ::unsyn::runtime::GeneratedInput,
 {
     fn parse(input: &mut I) -> ::core::result::Result<Self, <I as ::parserc::Input>::Error> {
         #[allow(unused_imports)]
@@ -1671,7 +1671,7 @@ pub struct PARAMS<I>(
 );
 impl<I> ::parserc::syntax::Syntax<I> for PARAMS<I>
 where
-    I: ::unsyn::codegen::GeneratedInput,
+    I: ::unsyn::runtime::GeneratedInput,
 {
     fn parse(input: &mut I) -> ::core::result::Result<Self, <I as ::parserc::Input>::Error> {
         #[allow(unused_imports)]
@@ -1711,7 +1711,7 @@ pub struct LIST<I>(
 );
 impl<I> ::parserc::syntax::Syntax<I> for LIST<I>
 where
-    I: ::unsyn::codegen::GeneratedInput,
+    I: ::unsyn::runtime::GeneratedInput,
 {
     fn parse(input: &mut I) -> ::core::result::Result<Self, <I as ::parserc::Input>::Error> {
         #[allow(unused_imports)]
@@ -1751,7 +1751,7 @@ pub struct TUPLE<I>(
 );
 impl<I> ::parserc::syntax::Syntax<I> for TUPLE<I>
 where
-    I: ::unsyn::codegen::GeneratedInput,
+    I: ::unsyn::runtime::GeneratedInput,
 {
     fn parse(input: &mut I) -> ::core::result::Result<Self, <I as ::parserc::Input>::Error> {
         #[allow(unused_imports)]
@@ -1802,7 +1802,7 @@ where
 pub struct SHAPE<I>(pub SHARP<I>, pub SHAPE1<I>);
 impl<I> ::parserc::syntax::Syntax<I> for SHAPE<I>
 where
-    I: ::unsyn::codegen::GeneratedInput,
+    I: ::unsyn::runtime::GeneratedInput,
 {
     fn parse(input: &mut I) -> ::core::result::Result<Self, <I as ::parserc::Input>::Error> {
         #[allow(unused_imports)]
@@ -1834,7 +1834,7 @@ pub struct ANYONE<I>(
 );
 impl<I> ::parserc::syntax::Syntax<I> for ANYONE<I>
 where
-    I: ::unsyn::codegen::GeneratedInput,
+    I: ::unsyn::runtime::GeneratedInput,
 {
     fn parse(input: &mut I) -> ::core::result::Result<Self, <I as ::parserc::Input>::Error> {
         #[allow(unused_imports)]
@@ -1867,7 +1867,7 @@ pub struct Joined<I>(
 );
 impl<I> ::parserc::syntax::Syntax<I> for Joined<I>
 where
-    I: ::unsyn::codegen::GeneratedInput,
+    I: ::unsyn::runtime::GeneratedInput,
 {
     fn parse(input: &mut I) -> ::core::result::Result<Self, <I as ::parserc::Input>::Error> {
         #[allow(unused_imports)]
@@ -1898,7 +1898,7 @@ where
 pub struct Guarded<I>(pub Guarded1<I>);
 impl<I> ::parserc::syntax::Syntax<I> for Guarded<I>
 where
-    I: ::unsyn::codegen::GeneratedInput,
+    I: ::unsyn::runtime::GeneratedInput,
 {
     fn parse(input: &mut I) -> ::core::result::Result<Self, <I as ::parserc::Input>::Error> {
         #[allow(unused_imports)]
@@ -1931,7 +1931,7 @@ pub struct Commented<I>(
 );
 impl<I> ::parserc::syntax::Syntax<I> for Commented<I>
 where
-    I: ::unsyn::codegen::GeneratedInput,
+    I: ::unsyn::runtime::GeneratedInput,
 {
     fn parse(input: &mut I) -> ::core::result::Result<Self, <I as ::parserc::Input>::Error> {
         #[allow(unused_imports)]
@@ -1978,7 +1978,7 @@ pub struct Either<I>(
 );
 impl<I> ::parserc::syntax::Syntax<I> for Either<I>
 where
-    I: ::unsyn::codegen::GeneratedInput,
+    I: ::unsyn::runtime::GeneratedInput,
 {
     fn parse(input: &mut I) -> ::core::result::Result<Self, <I as ::parserc::Input>::Error> {
         #[allow(unused_imports)]
@@ -2013,7 +2013,7 @@ where
 pub struct Dotted<I>(pub Dotted1<I>);
 impl<I> ::parserc::syntax::Syntax<I> for Dotted<I>
 where
-    I: ::unsyn::codegen::GeneratedInput,
+    I: ::unsyn::runtime::GeneratedInput,
 {
     fn parse(input: &mut I) -> ::core::result::Result<Self, <I as ::parserc::Input>::Error> {
         #[allow(unused_imports)]
@@ -2041,7 +2041,7 @@ pub struct EXPR1<I>(
 );
 impl<I> ::parserc::syntax::Syntax<I> for EXPR1<I>
 where
-    I: ::unsyn::codegen::GeneratedInput,
+    I: ::unsyn::runtime::GeneratedInput,
 {
     fn parse(input: &mut I) -> ::core::result::Result<Self, <I as ::parserc::Input>::Error> {
         #[allow(unused_imports)]
@@ -2075,7 +2075,7 @@ pub enum NUMBER1<I> {
 }
 impl<I> ::parserc::syntax::Syntax<I> for NUMBER1<I>
 where
-    I: ::unsyn::codegen::GeneratedInput,
+    I: ::unsyn::runtime::GeneratedInput,
 {
     fn parse(input: &mut I) -> ::core::result::Result<Self, <I as ::parserc::Input>::Error> {
         #[allow(unused_imports)]
@@ -2130,7 +2130,7 @@ pub enum TEXT1<I> {
 }
 impl<I> ::parserc::syntax::Syntax<I> for TEXT1<I>
 where
-    I: ::unsyn::codegen::GeneratedInput,
+    I: ::unsyn::runtime::GeneratedInput,
 {
     fn parse(input: &mut I) -> ::core::result::Result<Self, <I as ::parserc::Input>::Error> {
         #[allow(unused_imports)]
@@ -2189,7 +2189,7 @@ where
 pub struct PARAMS11<I>(pub COMMA<I>, pub ::std::vec::Vec<WS<I>>, pub IDENT<I>);
 impl<I> ::parserc::syntax::Syntax<I> for PARAMS11<I>
 where
-    I: ::unsyn::codegen::GeneratedInput,
+    I: ::unsyn::runtime::GeneratedInput,
 {
     fn parse(input: &mut I) -> ::core::result::Result<Self, <I as ::parserc::Input>::Error> {
         #[allow(unused_imports)]
@@ -2223,7 +2223,7 @@ pub struct PARAMS1<I>(
 );
 impl<I> ::parserc::syntax::Syntax<I> for PARAMS1<I>
 where
-    I: ::unsyn::codegen::GeneratedInput,
+    I: ::unsyn::runtime::GeneratedInput,
 {
     fn parse(input: &mut I) -> ::core::result::Result<Self, <I as ::parserc::Input>::Error> {
         #[allow(unused_imports)]
@@ -2252,7 +2252,7 @@ where
 pub struct TUPLE1<I>(pub COMMA<I>, pub ::std::vec::Vec<WS<I>>, pub IDENT<I>);
 impl<I> ::parserc::syntax::Syntax<I> for TUPLE1<I>
 where
-    I: ::unsyn::codegen::GeneratedInput,
+    I: ::unsyn::runtime::GeneratedInput,
 {
     fn parse(input: &mut I) -> ::core::result::Result<Self, <I as ::parserc::Input>::Error> {
         #[allow(unused_imports)]
@@ -2283,7 +2283,7 @@ where
 pub struct SHAPE1<I>(pub ::std::vec::Vec<(::std::vec::Vec<WS<I>>, DIGIT<I>)>);
 impl<I> ::parserc::syntax::Syntax<I> for SHAPE1<I>
 where
-    I: ::unsyn::codegen::GeneratedInput,
+    I: ::unsyn::runtime::GeneratedInput,
 {
     fn parse(input: &mut I) -> ::core::result::Result<Self, <I as ::parserc::Input>::Error> {
         #[allow(unused_imports)]
@@ -2332,7 +2332,7 @@ pub enum ANYONE1<I> {
 }
 impl<I> ::parserc::syntax::Syntax<I> for ANYONE1<I>
 where
-    I: ::unsyn::codegen::GeneratedInput,
+    I: ::unsyn::runtime::GeneratedInput,
 {
     fn parse(input: &mut I) -> ::core::result::Result<Self, <I as ::parserc::Input>::Error> {
         #[allow(unused_imports)]
@@ -2387,7 +2387,7 @@ pub enum ANYONE2<I> {
 }
 impl<I> ::parserc::syntax::Syntax<I> for ANYONE2<I>
 where
-    I: ::unsyn::codegen::GeneratedInput,
+    I: ::unsyn::runtime::GeneratedInput,
 {
     fn parse(input: &mut I) -> ::core::result::Result<Self, <I as ::parserc::Input>::Error> {
         #[allow(unused_imports)]
@@ -2439,7 +2439,7 @@ where
 pub struct Guarded1<I>(pub IDENT<I>);
 impl<I> ::parserc::syntax::Syntax<I> for Guarded1<I>
 where
-    I: ::unsyn::codegen::GeneratedInput,
+    I: ::unsyn::runtime::GeneratedInput,
 {
     fn parse(input: &mut I) -> ::core::result::Result<Self, <I as ::parserc::Input>::Error> {
         #[allow(unused_imports)]
@@ -2487,7 +2487,7 @@ pub enum Commented1<I> {
 }
 impl<I> ::parserc::syntax::Syntax<I> for Commented1<I>
 where
-    I: ::unsyn::codegen::GeneratedInput,
+    I: ::unsyn::runtime::GeneratedInput,
 {
     fn parse(input: &mut I) -> ::core::result::Result<Self, <I as ::parserc::Input>::Error> {
         #[allow(unused_imports)]
@@ -2542,7 +2542,7 @@ pub enum Either1<I> {
 }
 impl<I> ::parserc::syntax::Syntax<I> for Either1<I>
 where
-    I: ::unsyn::codegen::GeneratedInput,
+    I: ::unsyn::runtime::GeneratedInput,
 {
     fn parse(input: &mut I) -> ::core::result::Result<Self, <I as ::parserc::Input>::Error> {
         #[allow(unused_imports)]
@@ -2594,7 +2594,7 @@ where
 pub struct Dotted1<I>(pub ::std::vec::Vec<(::std::vec::Vec<WS<I>>, IDENT<I>)>);
 impl<I> ::parserc::syntax::Syntax<I> for Dotted1<I>
 where
-    I: ::unsyn::codegen::GeneratedInput,
+    I: ::unsyn::runtime::GeneratedInput,
 {
     fn parse(input: &mut I) -> ::core::result::Result<Self, <I as ::parserc::Input>::Error> {
         #[allow(unused_imports)]

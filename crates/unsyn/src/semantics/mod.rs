@@ -830,17 +830,17 @@ mod tests {
     #[test]
     fn rejects_meaningless_repetitions() {
         assert!(diagnostics("lexer A -> 'a'{0};")[0].contains("invalid repetition range"));
-        assert!(diagnostics("lexer A -> 'a'{3..1};")[0].contains("invalid repetition range"));
-        assert!(diagnostics("lexer A -> 'a'{..0};")[0].contains("invalid repetition range"));
+        assert!(diagnostics("lexer A -> 'a'{3, 1};")[0].contains("invalid repetition range"));
+        assert!(diagnostics("lexer A -> 'a'{, 0};")[0].contains("invalid repetition range"));
 
-        assert_well_formed("lexer A -> 'a'{2..3};");
-        assert_well_formed("lexer A -> 'a'{0..3};");
+        assert_well_formed("lexer A -> 'a'{2, 3};");
+        assert_well_formed("lexer A -> 'a'{0, 3};");
         assert_well_formed("lexer A -> 'a'{3};");
     }
 
     #[test]
     fn separators_in_a_repetition_are_ignored() {
-        assert_well_formed("lexer A -> 'a'{1_0..2_0};");
+        assert_well_formed("lexer A -> 'a'{1_0, 2_0};");
     }
 
     #[test]

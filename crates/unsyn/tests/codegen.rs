@@ -184,7 +184,7 @@ fn a_suffix_that_needs_a_check_of_its_own_gets_a_type_for_it() {
         "whitespace WS -> [' '];
          lexer Word -> ['a'-'z']+;
          lexer Key -> 'key';
-         syntax Fixed -> Word{2..4};
+         syntax Fixed -> Word{2, 4};
          syntax Asked -> Word except Key;",
     );
 
@@ -305,7 +305,7 @@ fn a_call_of_a_matcher_the_backend_provides_is_a_call_of_it() {
 
     // The matcher is reached through the path the generator was given, so a
     // project may keep its own implementations beside its generated file.
-    assert!(file.contains("unsyn::codegen::matcher::Casing"), "{file}");
+    assert!(file.contains("unsyn::runtime::matcher::Casing"), "{file}");
 
     // The same spec generated for a project that keeps the crates elsewhere.
     let moved = generate(
@@ -320,7 +320,7 @@ fn a_call_of_a_matcher_the_backend_provides_is_a_call_of_it() {
 
     assert!(moved.contains("::my_parserc::matchers::Casing"), "{moved}");
     assert!(
-        moved.contains("my_unsyn::codegen::GeneratedInput"),
+        moved.contains("my_unsyn::runtime::GeneratedInput"),
         "{moved}"
     );
 }

@@ -66,7 +66,7 @@ lexer ASCII_ESCAPE ->
     ;
 
 lexer UNICODE_ESCAPE ->
-    '\\u{' ( HEX_DIGIT '_'* ){1..6} '}'
+    '\\u{' ( HEX_DIGIT '_'* ){1, 6} '}'
     ;
 
 lexer OCT_DIGIT -> ['0'-'7'];
@@ -144,9 +144,9 @@ syntax ExprWithSuffix ->
 syntax Repeat ->
     '{'
     (
-          DEC_LITERAL
+          ',' DEC_LITERAL
         | DEC_LITERAL ',' DEC_LITERAL?
-        | ',' DEC_LITERAL
+        | DEC_LITERAL
     )
     '}'
     ;

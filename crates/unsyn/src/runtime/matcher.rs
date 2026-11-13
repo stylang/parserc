@@ -2,15 +2,16 @@
 //! anything.
 //!
 //! `<NAME>` in a pattern is a call into the backend: it stands for a piece of
-//! text this file's rules do not describe, of which [`Module::matchers`] is the
-//! list. The generator emits those calls as
+//! text this file's rules do not describe, and the analysis of a spec collects
+//! the names it expects from outside into the module's list of matchers. The
+//! generator emits those calls as
 //!
 //! ```text
-//! unsyn::codegen::matcher::NAME(input)?
+//! unsyn::runtime::matcher::NAME(input)?
 //! ```
 //!
-//! under a path [`Codegen`](super::Codegen) can point anywhere, so a project may
-//! keep its own implementations beside its generated file. What is written
+//! under a path the generator can point anywhere, so a project may keep its own
+//! implementations beside its generated file. What is written
 //! here — the two character classes of [`unicode_ident`] — is what lets a file
 //! that only needs an identifier be generated and compiled without the backend
 //! being written first, which is the case for most grammars, including
@@ -22,7 +23,7 @@
 //! took, leaving the rest in place:
 //!
 //! ```ignore
-//! fn NAME<I: unsyn::codegen::GeneratedInput>(input: &mut I) -> Result<I, I::Error>
+//! fn NAME<I: unsyn::runtime::GeneratedInput>(input: &mut I) -> Result<I, I::Error>
 //! ```
 //!
 //! That is [`Parser::Output = I`](parserc::Parser) with a function name, so a
@@ -32,8 +33,6 @@
 //! Because a matcher's length is its own business, the generator never folds one
 //! into a character class: `<XID_Start>` is run as a step, one call per
 //! repetition, and is never scanned ahead.
-//!
-//! [`Module::matchers`]: crate::semantics::Module::matchers
 
 use parserc::{Input, Parser};
 
@@ -42,8 +41,13 @@ use super::input::GeneratedInput;
 /// Returns `true` when the matcher `name` is one of the two this module gives,
 /// which is what lets a grammar that only needs an identifier be generated and
 /// compiled before its backend is written.
+///
+/// A backend that gives a matcher of its own under one of these names has to
+/// point the generated file at it by the `matcher` path of the generator's
+/// `Paths` rather than by this module, since the generator treats the two names
+/// as already provided.
 #[inline]
-pub(crate) fn is_builtin(name: &str) -> bool {
+pub fn is_builtin(name: &str) -> bool {
     matches!(name, "XID_Start" | "XID_Continue")
 }
 
@@ -78,11 +82,13 @@ mod tests {
     use parserc::{AsStr, ControlFlow, ParseError};
 
     use super::*;
-    use crate::input::TokenStream;
+
+    /// The stream a generated grammar of this crate would be written over.
+    type Stream<'a> = parserc::chars::TokenStream<'a, parserc::Kind>;
 
     #[test]
     fn a_matcher_takes_one_character_and_leaves_the_rest() {
-        let mut input = TokenStream::from("aB c");
+        let mut input = Stream::from("aB c");
 
         let taken = XID_Start(&mut input).expect("an xid start");
 
@@ -92,7 +98,7 @@ mod tests {
 
     #[test]
     fn a_matcher_that_does_not_fit_says_so_without_consuming() {
-        let mut input = TokenStream::from(" 1");
+        let mut input = Stream::from(" 1");
 
         let error = XID_Start(&mut input).expect_err("a space is not an xid start");
 
@@ -101,7 +107,7 @@ mod tests {
 
         // The two classes differ where a digit sits: it continues an identifier
         // but never starts one.
-        let mut input = TokenStream::from("1");
+        let mut input = Stream::from("1");
 
         assert!(XID_Start(&mut input).is_err());
         assert!(XID_Continue(&mut input).is_ok());
@@ -109,7 +115,7 @@ mod tests {
 
     #[test]
     fn a_matcher_at_the_end_of_the_input_is_incomplete() {
-        let mut input = TokenStream::from("");
+        let mut input = Stream::from("");
 
         assert_eq!(
             XID_Continue(&mut input).err().map(|err| err.control_flow()),
@@ -122,7 +128,7 @@ mod tests {
         // The contract is `Parser<Output = I>`: a generated pattern calls a
         // matcher through `?` and carries on from wherever it landed, which is
         // how a repetition of `<XID_Continue>` walks along an identifier.
-        let mut input = TokenStream::from("abc 3");
+        let mut input = Stream::from("abc 3");
 
         let mut taken = String::new();
 
@@ -132,5 +138,18 @@ mod tests {
 
         assert_eq!(taken, "abc");
         assert_eq!(input.as_str(), " 3");
+    }
+
+    #[test]
+    fn the_two_classes_written_here_are_the_builtins() {
+        // The generator treats a call of one of these as already provided, which
+        // is what lets a grammar of identifiers be written before a backend is.
+        assert!(is_builtin("XID_Start"));
+        assert!(is_builtin("XID_Continue"));
+
+        // Anything else is the project's own matcher, called at the path the
+        // generator is given for this module.
+        assert!(!is_builtin("Casing"));
+        assert!(!is_builtin(""));
     }
 }

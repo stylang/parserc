@@ -66,8 +66,6 @@ pub enum PunctKind {
     Comma,
     #[error("punct '->'")]
     ArrowRight,
-    #[error("punct '..'")]
-    DotDot,
     #[error("punct '-'")]
     Minus,
 }

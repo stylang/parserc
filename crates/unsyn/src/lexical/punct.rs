@@ -63,7 +63,6 @@ define_punct!(Gt, ">");
 define_punct!(Comma, ",");
 define_punct!(ArrowRight, "->");
 define_punct!(Semi, ";");
-define_punct!(DotDot, "..");
 
 #[cfg(test)]
 mod tests {
@@ -104,10 +103,6 @@ mod tests {
         let mut input = TokenStream::from("->");
 
         assert_eq!(ArrowRight::parse(&mut input).unwrap().1.as_str(), "->");
-
-        let mut input = TokenStream::from("..");
-
-        assert_eq!(DotDot::parse(&mut input).unwrap().1.as_str(), "..");
 
         // The second character of `->` is not optional: a lone `-` is a `Minus`,
         // and a `->` that is not there fails with what it expected.

@@ -66,6 +66,6 @@ syntax Joined -> DIGIT concat UNDER DIGIT;
 syntax Guarded -> IDENT followed '-';
 syntax Commented -> SLASH STAR (~[STAR] | UNDER)* STAR SLASH;
 syntax Either -> (IDENT | DIGIT) LEFT IDENT;
-syntax Dotted -> IDENT{2..3};
+syntax Dotted -> IDENT{2, 3};
 
 "#;

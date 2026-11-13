@@ -10,7 +10,7 @@
 //! # What the generated file leans on
 //!
 //! Every item is generic over one stream `I`, bounded by
-//! [`GeneratedInput`](super::GeneratedInput), and every shortcut it takes is a
+//! [`GeneratedInput`](crate::runtime::GeneratedInput), and every shortcut it takes is a
 //! type the backend already implements as syntax: [`Option`] for an operand that
 //! may be absent, [`Vec`] for a run of them, and a tuple for operands taken back
 //! to back with nothing between, which is what `concat` asks for. No combinator
@@ -110,7 +110,7 @@ impl<'a> Renderer<'a> {
 
             impl<I> #parserc::syntax::Syntax<I> for #ty<I>
             where
-                I: #unsyn::codegen::GeneratedInput,
+                I: #unsyn::runtime::GeneratedInput,
             {
                 fn parse(#input: &mut I) -> ::core::result::Result<Self, <I as #parserc::Input>::Error> {
                     #uses
@@ -225,7 +225,7 @@ impl<'a> Renderer<'a> {
 
             impl<I> #parserc::syntax::Syntax<I> for #ty<I>
             where
-                I: #unsyn::codegen::GeneratedInput,
+                I: #unsyn::runtime::GeneratedInput,
             {
                 fn parse(#input: &mut I) -> ::core::result::Result<Self, <I as #parserc::Input>::Error> {
                     #uses

@@ -30,7 +30,7 @@ use crate::{
         ident::Ident,
         keyword::{Concat, Except, Followed, Lexer, Whitespace},
         lit::{LitDec, LitStr, LitUnicode},
-        punct::{ArrowRight, Comma, DotDot, Minus, Or, Plus, Question, Semi, Star, Tilde},
+        punct::{ArrowRight, Comma, Minus, Or, Plus, Question, Semi, Star, Tilde},
     },
 };
 
@@ -392,16 +392,20 @@ where
 }
 
 /// The bounds of a repetition, between the braces that follow an operand.
+///
+/// The comma form is read before the bare count, which is what lets `{2, 3}` be
+/// two bounds rather than a count of two followed by a closing brace that finds
+/// a comma and fails fatally.
 #[derive(Debug, PartialEq, Eq, PartialOrd, Ord, Clone, Syntax)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub enum Repeat<I>
 where
     I: UnsynInput,
 {
-    /// `..n`, at most `n` times.
-    RangeTo(DotDot<I>, LitDec<I>),
-    /// `n..m`, or `n..` with no bound above.
-    RangeFrom(LitDec<I>, DotDot<I>, Option<LitDec<I>>),
+    /// `,n`, at most `n` times.
+    RangeTo(Comma<I>, LitDec<I>),
+    /// `n,m`, or `n,` with no bound above.
+    RangeFrom(LitDec<I>, Comma<I>, Option<LitDec<I>>),
     /// `n`, exactly `n` times.
     Count(LitDec<I>),
 }
@@ -537,9 +541,9 @@ mod tests {
     fn a_repetition_is_bounded_by_decimals() {
         let bounded = [
             ("A{2}", Span::Range(1..4)),
-            ("A{1..3}", Span::Range(1..7)),
-            ("A{..3}", Span::Range(1..6)),
-            ("A{1..}", Span::Range(1..6)),
+            ("A{1,3}", Span::Range(1..6)),
+            ("A{,3}", Span::Range(1..5)),
+            ("A{1,}", Span::Range(1..5)),
         ];
 
         for (src, braces) in bounded {
@@ -557,9 +561,9 @@ mod tests {
             assert_eq!(suffix.to_span(), braces, "{src}");
         }
 
-        // The three forms keep their decimals and their `..` apart.
+        // The three forms keep their decimals and their comma apart.
         assert_eq!(
-            TokenStream::from("A{1..}").parse::<Expr<_>>(),
+            TokenStream::from("A{1,3}").parse::<Expr<_>>(),
             Ok(Expr {
                 first: ExprNoTopAlts {
                     first: ExprNoTopAlt::WithSuffix(ExprWithSuffix::Repeat {
@@ -569,8 +573,8 @@ mod tests {
                             end: BraceEnd(None, TokenStream::from((5, "}")), None),
                             body: Repeat::RangeFrom(
                                 LitDec(TokenStream::from((2, "1"))),
-                                DotDot(None, TokenStream::from((3, "..")), None),
-                                None,
+                                Comma(None, TokenStream::from((3, ",")), None),
+                                Some(LitDec(TokenStream::from((4, "3")))),
                             ),
                         },
                     }),

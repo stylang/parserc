@@ -8,17 +8,43 @@ repository = "https://github.com/stylang/stylang/crates/unsyn"
 version.workspace = true
 
 [dependencies]
-thiserror = "2.0.17"
 unicode-ident = "1.0.22"
-proc-macro2 = "^1"
-quote = "^1"
+parserc = { path = "../parserc", version = "^0.13", default-features = false, features = ["input"] }
 serde = { version = "1.0.228", optional = true }
-parserc = { path = "../parserc", version = "^0.13", default-features = false, features = ["syntax","input"] }
+thiserror = { version = "2.0.17", optional = true }
+proc-macro2 = { version = "^1", optional = true }
+quote = { version = "^1", optional = true }
 
 [dev-dependencies]
 walkdir = "2"
 syn = { version = "^2", features = ["full"] }
 
+# The crate has two phases, and they are the two features that say so:
+# `runtime` is what a generated grammar is compiled against, `codegen` is the
+# DSL front end and the generator that writes one. `codegen` needs `runtime`,
+# and a crate that only keeps a generated file leaves the defaults off.
 [features]
-default = ["serde"]
-serde = ["dep:serde","parserc/serde"]
+default = ["serde", "codegen"]
+runtime = []
+codegen = ["runtime", "dep:proc-macro2", "dep:quote", "dep:thiserror", "parserc/syntax"]
+serde = ["dep:serde", "parserc/serde"]
+
+[[example]]
+name = "pipeline"
+required-features = ["codegen"]
+
+[[test]]
+name = "bootstrap"
+required-features = ["codegen"]
+
+[[test]]
+name = "codegen"
+required-features = ["codegen"]
+
+[[test]]
+name = "dump"
+required-features = ["codegen"]
+
+[[test]]
+name = "generated"
+required-features = ["codegen"]
