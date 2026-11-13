@@ -11,16 +11,16 @@
 //! # The shortcuts
 //!
 //! - A step one character wide is a [`Pred`], and a repetition of one is scanned
-//!   instead of looped over: `X*` is [`take_while`](parserc::take_while), `~X*`
-//!   is [`take_till`](parserc::take_till), and `X{n..m}` is
+//!   instead of looped over: `X*` is [`take_while`](parserc::take_while),
+//!   `~ […]*` is [`take_till`](parserc::take_till), and `X{n..m}` is
 //!   [`take_while_with`](parserc::take_while_with), each of which walks the text
 //!   once rather than calling a parser per character.
 //! - A literal of one character is [`next_if`](parserc::next_if) and of more
 //!   [`keyword`](parserc::keyword).
-//! - `~'lit'*` is [`take_until`](parserc::take_until) only where the step after
-//!   it asks for that same literal, because `take_until` fails when the needle
-//!   is absent while the loop it stands for reads to the end of the text. The
-//!   search is written out where nothing insists on the needle.
+//! - `~ ['lit']*` is [`take_until`](parserc::take_until) only where the step
+//!   after it asks for that same literal, because `take_until` fails when the
+//!   needle is absent while the loop it stands for reads to the end of the
+//!   text. The search is written out where nothing insists on the needle.
 //! - A matcher is opaque. It is never folded into a class and never scanned
 //!   ahead, so a repetition of one is a real loop over one call each time.
 
@@ -223,9 +223,9 @@ impl<'a> Emitter<'a> {
         let mut out = Vec::new();
 
         for (index, step) in steps.iter().enumerate() {
-            // `~'lit'*` followed by a step that begins with `'lit'`: the run of
-            // characters before the needle is what `take_until` finds, and the
-            // needle has to be there for the sequence to carry on at all.
+            // `~ ['lit']*` followed by a step that begins with `'lit'`: the run
+            // of characters before the needle is what `take_until` finds, and
+            // the needle has to be there for the sequence to carry on at all.
             if let Some(text) = reads_until(step) {
                 let lit = Literal::string(text);
 
@@ -333,14 +333,14 @@ impl<'a> Emitter<'a> {
         ])
     }
 
-    /// The statements of `~X`, which asks whether X fits here and then takes one
-    /// character that is not what it asked about.
+    /// The statements of `~ […]`, which asks whether the set fits here and then
+    /// takes one character that is not among its members.
     fn complement(&self, item: &Inst, var: &Ident) -> Result<TokenStream, CodegenError> {
         let parserc = &self.paths.parserc;
         let fail = self.fail(var);
 
-        // `~X*` reads to where X would fit: the same scan, with the question
-        // asked the other way about.
+        // `~ […]*` reads to where the set would fit: the same scan, with the
+        // question asked the other way about.
         if let Inst::Rep { min, max, item } = item
             && let Some(pred) = item.single_char(self.classes)
         {
@@ -487,7 +487,7 @@ fn bounds(min: usize, max: Option<usize>) -> TokenStream {
     }
 }
 
-/// The literal a step reads up to, when it is `~'lit'*`.
+/// The literal a step reads up to, when it is `~ ['lit']*`.
 fn reads_until(inst: &Inst) -> Option<&str> {
     match inst {
         Inst::Not(item) => match &**item {

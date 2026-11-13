@@ -12,7 +12,9 @@
 //! 3. **linking** — every bare name a body refers to is resolved against the
 //!    definitions of the file, a terminal pattern may not refer to a `syntax`
 //!    node, and a file declares its trivia with at most one `whitespace`
-//!    statement.
+//!    statement. The node that statement declares is the separator every rule
+//!    of nodes reaches its operands over, so a rule that writes it out as an
+//!    operand of its own is noted for it.
 //! 4. **recursion** — the leftmost dependencies of the definitions are computed
 //!    and a node that can start with itself is rejected, together with the
 //!    dependencies of the same position, which catch the nodes that can only be
@@ -76,12 +78,12 @@ pub use value::{dec_usize, dec_value, str_chars, str_value, unicode_char, unicod
 use parserc::Span;
 
 use crate::{
-    errors::{Diagnostics, Lint, SemanticsKind, UnsynError},
+    errors::{Diagnostics, Lint, LintKind, SemanticsKind, UnsynError},
     input::UnsynInput,
     syntax::{Crate, Item, Stmt},
 };
 
-use self::graph::{syntax_refs_of_terminal, unresolved_refs};
+use self::graph::{syntax_refs_of_terminal, unresolved_refs, walk_sequences};
 
 /// Runs every semantic check over one parsed source file.
 ///
@@ -195,6 +197,7 @@ where
         self.validate_bodies();
         self.link_bodies();
         self.check_whitespace();
+        self.check_separators();
         self.check_recursion();
 
         let matchers = self.collect_matchers();
@@ -283,7 +286,8 @@ where
         self.report.errors.extend(errors);
     }
 
-    /// Phase four: rejects a file that declares trivia more than once.
+    /// Phase four: rejects a file that declares trivia more than once, and
+    /// notes the rules of nodes that write its separator out as an operand.
     fn check_whitespace(&mut self) {
         let mut whitespace: Vec<Span> = self
             .symbols
@@ -307,7 +311,45 @@ where
         }
     }
 
-    /// Phase five: rejects the nodes that can start with themselves, and the
+    /// Phase five: notes every operand of a rule of nodes that is nothing but a
+    /// mention of the trivia node the file declares.
+    ///
+    /// A rule of nodes is read with the trivia of its language between every two
+    /// of its operands, whether it says so or not, so a mention of the trivia
+    /// there denotes the separator rather than an operand: the
+    /// [codegen](crate::codegen) gives it no field, and this is where a file is
+    /// told that. A rule with no trivia node of its own mentions an ordinary
+    /// token, and is left alone.
+    fn check_separators(&mut self) {
+        let Some(trivia) = self.symbols.whitespace() else {
+            return;
+        };
+
+        let name = trivia.name();
+
+        // The spans are collected first: the walk borrows the definitions the
+        // report is not allowed to disturb.
+        let mut mentions = Vec::new();
+
+        for def in self
+            .symbols
+            .iter()
+            .filter(|def| def.kind() == NodeKind::Syntax)
+        {
+            walk_sequences(def.expr(), &mut |seq| {
+                for ident in seq.fold_separators(Some(name)).1 {
+                    mentions.push(ident.0.to_span());
+                }
+            });
+        }
+
+        for span in mentions {
+            self.report
+                .lint(LintKind::RedundantSeparator(name.to_owned()), span);
+        }
+    }
+
+    /// Phase six: rejects the nodes that can start with themselves, and the
     /// nodes that can only be decided by deciding themselves.
     fn check_recursion(&mut self) {
         let span_of = |name: &str| {
@@ -499,6 +541,69 @@ mod tests {
         assert!(errors[0].contains("duplicate `whitespace` declaration"));
     }
 
+    /// The trivia of the language lies between the operands of a rule of nodes
+    /// whether the rule says so or not, so a rule that writes it out says the
+    /// same thing twice: the note is for the lint channel, since the rule still
+    /// denotes the language its separator reads.
+    #[test]
+    fn notes_a_trivia_node_written_out_as_an_operand() {
+        let lints = lints_of("whitespace W -> ' '; lexer A -> 'a'; syntax P -> A W A;");
+
+        assert_eq!(lints.len(), 1, "{lints:#?}");
+        assert!(
+            lints[0].contains("`W` is the natural separator of the language"),
+            "{lints:#?}"
+        );
+
+        // Every mention of it is noted, in whatever sequence it stands.
+        let lints = lints_of("whitespace W -> ' '; lexer A -> 'a'; syntax P -> A W A (A W A);");
+
+        assert_eq!(lints.len(), 2, "{lints:#?}");
+
+        // An alternative is a sequence of its own, and so is separated of its
+        // own.
+        let lints = lints_of("whitespace W -> ' '; lexer A -> 'a'; syntax P -> A W A | 'b';");
+
+        assert_eq!(lints.len(), 1, "{lints:#?}");
+    }
+
+    /// A mention of the trivia node is a separator only where a separator is
+    /// what a sequence takes: everywhere else the node is an ordinary token.
+    #[test]
+    fn leaves_a_trivia_node_mentioned_elsewhere_alone() {
+        // A terminal pattern is matched against the text itself, which has no
+        // separators in it.
+        assert_eq!(
+            lints_of("whitespace W -> ' '; lexer A -> 'a'; lexer B -> 'b' W;"),
+            Vec::<String>::new()
+        );
+
+        // A repetition of the trivia asks for a run, which a separator only
+        // happens to be.
+        assert_eq!(
+            lints_of("whitespace W -> ' '; lexer A -> 'a'; syntax P -> A W* A;"),
+            Vec::<String>::new()
+        );
+
+        // The member of a set is a value rather than an operand of a sequence.
+        assert_eq!(
+            lints_of("whitespace W -> ' '; lexer A -> 'a'; syntax P -> A [W] A;"),
+            Vec::<String>::new()
+        );
+
+        // A rule of nothing but the trivia is a rule about it, and keeps it.
+        assert_eq!(
+            lints_of("whitespace W -> ' '; syntax P -> W W;"),
+            Vec::<String>::new()
+        );
+
+        // With no trivia declared, the name is any other node's to use.
+        assert_eq!(
+            lints_of("lexer W -> 'w'; lexer A -> 'a'; syntax P -> A W A;"),
+            Vec::<String>::new()
+        );
+    }
+
     #[test]
     fn rejects_a_directly_left_recursive_node() {
         let errors = diagnostics("lexer A -> A 'a';");
@@ -552,16 +657,11 @@ mod tests {
     }
 
     #[test]
-    fn rejects_a_complement_of_the_node_itself() {
-        // `~A` has to know whether `A` matches here, and `A` is `~A` needing an
-        // `'a'`: the definition answers its own question at one position.
-        let errors = diagnostics("lexer A -> ~A 'a';");
-
-        assert_eq!(errors.len(), 1, "{errors:#?}");
-        assert_eq!(
-            errors[0],
-            "unexpect/invalid: definition of node `A` must be evaluated to evaluate itself, Range(6..7)"
-        );
+    fn a_complement_that_names_the_node_is_accepted() {
+        // A complement is a question about one character: the set it refuses is
+        // consulted, and `A` there is one of its members rather than a pattern
+        // matched here, so no question about `A` is asked of `A`.
+        assert_well_formed("lexer A -> ~[A] 'a';");
     }
 
     #[test]
@@ -589,7 +689,7 @@ mod tests {
         // Both the lookahead and the complement are asked one character on, so
         // the recursion is bounded by the input rather than circular.
         assert_well_formed("lexer A -> 'a' followed A;");
-        assert_well_formed("lexer A -> 'a' ~A;");
+        assert_well_formed("lexer A -> 'a' ~[A];");
     }
 
     #[test]
@@ -604,7 +704,7 @@ mod tests {
     #[test]
     fn a_left_recursive_node_is_not_named_twice() {
         // The same node answers both questions; the narrower report is kept.
-        let errors = diagnostics("lexer A -> A 'a' | ~A;");
+        let errors = diagnostics("lexer A -> A 'a' | ~[A];");
 
         assert_eq!(errors.len(), 1, "{errors:#?}");
         assert!(errors[0].contains("left-recursive definition of node `A`"));
@@ -672,10 +772,14 @@ mod tests {
         assert!(lints_of("lexer A -> ( 'a' | 'a' )+;").is_empty());
         assert!(lints_of("lexer A -> 'ab' | 'a';").is_empty());
 
-        // Two names can not even be compared here, since the shape of a
-        // referenced member is not what one file knows (see `validate_set_item`).
-        assert!(lints_of("lexer A -> [LF, LF]; lexer LF -> '\\n';").is_empty());
+        // Two different names are still not comparable here, since the shape of
+        // the node each of them denotes is not what one file knows (see
+        // `validate_set_item`).
         assert!(lints_of("lexer A -> [LF, CR]; lexer LF -> '\\n'; lexer CR -> '\\r';").is_empty());
+
+        // The same name twice, however, is one member written twice, whatever
+        // the node it names turns out to denote.
+        assert_eq!(lints_of("lexer A -> [LF, LF]; lexer LF -> '\\n';").len(), 1);
     }
 
     #[test]

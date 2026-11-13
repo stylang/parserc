@@ -97,7 +97,7 @@ lexer INNER_BLOCK_DOC ->
     ;
 
 lexer OUTER_LINE_DOC ->
-    '///' ( ~'/' ~[LF,CR]* )?
+    '///' ( ~['/'] ~[LF,CR]* )?
     ;
 
 lexer OUTER_BLOCK_DOC ->
@@ -119,7 +119,7 @@ syntax Expr -> ExprNoTopAlt+ ( '|' ExprNoTopAlt+ )?;
 syntax ExprNoTopAlt -> ExprWithSuffix | ExprWithoutSuffix;
 
 syntax ExprWithoutSuffix ->
-      '~'  Range
+      '~' '[' ( SetItem ',' )* SetItem? ']'
     | '<' IDENTIFIER '>'
     | '(' Expr ')'
     | '[' ( SetItem ',' )* SetItem? ']'

@@ -10,9 +10,10 @@
 //! at the position it is consulted at. The first two build the graph of
 //! [`first_edges`], whose cycles are the left-recursive definitions; the third
 //! builds [`same_offset_edges`], whose cycles also cover the operands that are
-//! only ever tested (`~`, and what an `except` takes away) and so can never be
-//! the beginning of a match. An unknown name is treated as non-empty and as
-//! starting with nothing, which never reports a false cycle.
+//! only ever tested (what an `except` takes away, and the lookahead of a
+//! `followed`) and so can never be the beginning of a match. An unknown name is
+//! treated as non-empty and as starting with nothing, which never reports a
+//! false cycle.
 
 use std::collections::{HashMap, HashSet};
 
@@ -84,11 +85,12 @@ pub fn first_edges<'a, I: UnsynInput>(
 /// Where [`first_edges`] asks which nodes can *begin* the text a node matches,
 /// this asks which nodes must be *evaluated* before that match can be decided.
 /// The two differ exactly for the operands that never become part of the match:
-/// the operand of `~` is tested here, and what an `except` takes away is tested
-/// at the position its target started at, however much the target consumes.
-/// A sequence keeps this position only while the elements before it can match
-/// nothing, so the operand after `concat` or `followed` is consulted one
-/// character on unless the operand before it can be empty.
+/// what an `except` takes away is tested at the position its target started at,
+/// however much the target consumes, and the lookahead of `followed` is here too
+/// whenever the operand before it can match nothing.
+///
+/// A complement is not one of them: `~ […]` asks its question of the character
+/// here and then takes it, so it is an operand like any other that consumes.
 pub fn same_offset_edges<'a, I: UnsynInput>(
     table: &SymbolTable<'a, I>,
     nullable: &HashMap<&'a str, bool>,
@@ -119,11 +121,12 @@ pub fn left_recursive<'a, I: UnsynInput>(table: &SymbolTable<'a, I>) -> Vec<&'a 
 /// evaluated.
 ///
 /// This is the wider question: a node can be asked about a position without its
-/// answer becoming the text matched there, as `~A` asks whether `A` matches here
-/// in order to match something else. Such a definition can not be compiled
-/// either, since deciding it at one position is deciding it at that position,
-/// which neither advances the input nor terminates. Every left-recursive node is
-/// also one of these, so a report of both must not name a node twice.
+/// answer becoming the text matched there, as `A except B` asks whether `B`
+/// matches here in order to match something else. Such a definition can not be
+/// compiled either, since deciding it at one position is deciding it at that
+/// position, which neither advances the input nor terminates. Every
+/// left-recursive node is also one of these, so a report of both must not name
+/// a node twice.
 pub fn same_offset_recursive<'a, I: UnsynInput>(table: &SymbolTable<'a, I>) -> Vec<&'a str> {
     cyclic_nodes(table, &same_offset_edges(table, &nullable_nodes(table)))
 }
@@ -253,18 +256,18 @@ fn without_suffix_refs<'a, I: UnsynInput, F: FnMut(&'a Ident<I>)>(
     f: &mut F,
 ) {
     match expr {
-        ExprWithoutSuffix::Tilde(_, target) => without_suffix_refs(target, f),
-        // A call names a backend matcher, so it is not a reference.
-        ExprWithoutSuffix::Call(_) => {}
-        ExprWithoutSuffix::Ident(ident) => f(ident),
-        ExprWithoutSuffix::Paren(paren) => walk_refs(&paren.body, f),
-        ExprWithoutSuffix::Set(bracket) => {
+        // A complement names the set it refuses, exactly as a set does.
+        ExprWithoutSuffix::Tilde(_, bracket) | ExprWithoutSuffix::Set(bracket) => {
             for item in items(&bracket.body) {
                 if let SetItem::Ident(ident) = item {
                     f(ident);
                 }
             }
         }
+        // A call names a backend matcher, so it is not a reference.
+        ExprWithoutSuffix::Call(_) => {}
+        ExprWithoutSuffix::Ident(ident) => f(ident),
+        ExprWithoutSuffix::Paren(paren) => walk_refs(&paren.body, f),
         ExprWithoutSuffix::Str(_) | ExprWithoutSuffix::Unicode(_) => {}
     }
 }
@@ -329,11 +332,99 @@ fn without_suffix_calls<'a, I: UnsynInput, F: FnMut(&'a Angle<I, Ident<I>>)>(
     f: &mut F,
 ) {
     match expr {
-        ExprWithoutSuffix::Tilde(_, target) => without_suffix_calls(target, f),
+        // A complement refuses a set, and a set holds no matcher call.
+        ExprWithoutSuffix::Tilde(..)
+        | ExprWithoutSuffix::Set(_)
+        | ExprWithoutSuffix::Str(_)
+        | ExprWithoutSuffix::Unicode(_) => {}
         ExprWithoutSuffix::Call(call) => f(call),
         ExprWithoutSuffix::Ident(_) => {}
         ExprWithoutSuffix::Paren(paren) => walk_calls(&paren.body, f),
-        ExprWithoutSuffix::Set(_) | ExprWithoutSuffix::Str(_) | ExprWithoutSuffix::Unicode(_) => {}
+    }
+}
+
+/// Calls `f` with every sequence of operands of `expr`, in source order.
+///
+/// The sequence of each alternative is called for, as are the sequences inside
+/// the groups of the rule, since a group is given a shape of its own and is
+/// separated just as the rule around it is. What is not a sequence of operands
+/// is not walked into as one: the members of a set and of a complement are
+/// values rather than operands, and the operand a suffix asserts about the text
+/// is taken out of the sequence it is written in.
+///
+/// This is the walk that reads the separators of a rule of nodes, which is
+/// exactly what a shape turns into fields: [`ExprNoTopAlts::fold_separators`]
+/// is applied to the sequences this calls `f` with.
+pub(crate) fn walk_sequences<'a, I, F>(expr: &'a Expr<I>, f: &mut F)
+where
+    I: UnsynInput,
+    F: FnMut(&'a ExprNoTopAlts<I>),
+{
+    alts_sequences(&expr.first, f);
+
+    for (_, alts) in expr.rest.iter() {
+        alts_sequences(alts, f);
+    }
+}
+
+fn alts_sequences<'a, I: UnsynInput, F: FnMut(&'a ExprNoTopAlts<I>)>(
+    alts: &'a ExprNoTopAlts<I>,
+    f: &mut F,
+) {
+    f(alts);
+
+    for expr in alts.elements() {
+        alt_sequences(expr, f);
+    }
+}
+
+fn alt_sequences<'a, I: UnsynInput, F: FnMut(&'a ExprNoTopAlts<I>)>(
+    expr: &'a ExprNoTopAlt<I>,
+    f: &mut F,
+) {
+    match expr {
+        ExprNoTopAlt::WithSuffix(expr) => with_suffix_sequences(expr, f),
+        ExprNoTopAlt::WithoutSuffix(expr) => without_suffix_sequences(expr, f),
+    }
+}
+
+fn with_suffix_sequences<'a, I: UnsynInput, F: FnMut(&'a ExprNoTopAlts<I>)>(
+    expr: &'a ExprWithSuffix<I>,
+    f: &mut F,
+) {
+    match expr {
+        ExprWithSuffix::Star(target, _)
+        | ExprWithSuffix::Question(target, _)
+        | ExprWithSuffix::Plus(target, _)
+        | ExprWithSuffix::Repeat { target, .. } => without_suffix_sequences(target, f),
+        // The operand a keyword introduces is an assertion about the text and
+        // no element of the sequence, so only a group written inside it is.
+        ExprWithSuffix::Concat { target, suffix, .. }
+        | ExprWithSuffix::Followed { target, suffix, .. } => {
+            without_suffix_sequences(target, f);
+            alt_sequences(suffix, f);
+        }
+        // Whatever an `except` takes away is still shaped, group and all.
+        ExprWithSuffix::Except { target, tokens, .. } => {
+            without_suffix_sequences(target, f);
+            without_suffix_sequences(tokens, f);
+        }
+    }
+}
+
+fn without_suffix_sequences<'a, I: UnsynInput, F: FnMut(&'a ExprNoTopAlts<I>)>(
+    expr: &'a ExprWithoutSuffix<I>,
+    f: &mut F,
+) {
+    match expr {
+        ExprWithoutSuffix::Paren(paren) => walk_sequences(&paren.body, f),
+        // A set and a complement are compared with the text as one value, so
+        // the names they hold are not operands of any sequence.
+        ExprWithoutSuffix::Set(_) | ExprWithoutSuffix::Tilde(..) => {}
+        ExprWithoutSuffix::Ident(_)
+        | ExprWithoutSuffix::Call(_)
+        | ExprWithoutSuffix::Str(_)
+        | ExprWithoutSuffix::Unicode(_) => {}
     }
 }
 
@@ -473,7 +564,7 @@ fn without_suffix_nullable<I: UnsynInput>(
     nullable: &HashMap<&str, bool>,
 ) -> bool {
     match expr {
-        // A complement, a set, a call and a code point all need input.
+        // Every operand of a complement is a set, which needs input.
         ExprWithoutSuffix::Tilde(..)
         | ExprWithoutSuffix::Call(_)
         | ExprWithoutSuffix::Set(_)
@@ -655,6 +746,7 @@ fn with_suffix_same_offset<'a, I: UnsynInput>(
         }
         // Whatever an `except` takes away is tested against the text of the
         // match itself, so the target has to consume for it to move off here.
+        // A set, a string and a code point are compared with the input here.
         ExprWithSuffix::Except { target, tokens, .. } => {
             without_suffix_same_offset(target, table, nullable, names);
             without_suffix_same_offset(tokens, table, nullable, names);
@@ -669,11 +761,10 @@ fn without_suffix_same_offset<'a, I: UnsynInput>(
     names: &mut Vec<&'a str>,
 ) {
     match expr {
-        // A complement is decided by matching its operand here and refusing
-        // whatever that match would have been.
-        ExprWithoutSuffix::Tilde(_, target) => {
-            without_suffix_same_offset(target, table, nullable, names);
-        }
+        // A complement always takes the one character it asks about, so nothing
+        // is reached at the offset it stands at, and the shape of the set it
+        // refuses is not asked about here.
+        ExprWithoutSuffix::Tilde(..) => {}
         ExprWithoutSuffix::Ident(ident) => {
             if let Some(name) = referenced_node(ident, table) {
                 names.push(name);
@@ -812,7 +903,7 @@ mod tests {
         with_table(
             r"
             lexer A -> 'a' except B;
-            lexer B -> ~C;
+            lexer B -> 'b' except C;
             lexer C -> 'c' followed D;
             lexer D -> 'd';
             ",
@@ -820,7 +911,7 @@ mod tests {
                 let edges = same_offset_edges(table, &nullable_nodes(table));
 
                 // What an `except` takes away is tested however much the target
-                // consumes, and a complement is always tested here.
+                // consumes, so it is reached at this position too.
                 assert_eq!(edges["A"], vec!["B"]);
                 assert_eq!(edges["B"], vec!["C"]);
                 // The lookahead of `followed` comes after the `'c'` this starts

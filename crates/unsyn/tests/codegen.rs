@@ -87,6 +87,52 @@ fn a_rule_of_one_alternative_becomes_a_struct_of_its_operands() {
 }
 
 #[test]
+fn a_trivia_node_written_out_as_an_operand_is_the_separator_of_its_rule() {
+    let content = leaked(
+        "whitespace WS -> [' '];
+         lexer Word -> ['a'-'z']+;
+         syntax Pair -> Word WS Word;
+         syntax Lead -> WS Word;
+         syntax Tail -> Word WS;",
+    );
+
+    let file = plain(content);
+
+    // The mention of the trivia is the run between the two operands, so the
+    // rule is shaped as `Word Word` is rather than holding a token of trivia
+    // between two runs of it.
+    assert!(
+        file.contains("pubstructPair<I>(pubWord<I>,pub::std::vec::Vec<WS<I>>,pubWord<I>);"),
+        "{file}"
+    );
+
+    // At either end of a sequence there is nothing for the mention to separate,
+    // and the trivia it asks for belongs to the rule around it rather than to
+    // this one: the mention still earns no field, and no run either.
+    assert!(file.contains("pubstructLead<I>(pubWord<I>);"), "{file}");
+    assert!(file.contains("pubstructTail<I>(pubWord<I>);"), "{file}");
+
+    assert_eq!(file.matches("parse::<WS<I>>()").count(), 0, "{file}");
+}
+
+#[test]
+fn a_rule_about_the_trivia_itself_keeps_the_operands_it_names() {
+    let content = leaked(
+        "whitespace WS -> [' '];
+         syntax Blanks -> WS WS;",
+    );
+
+    let file = plain(content);
+
+    // Nothing else is left for a separator to separate, so this rule is a run
+    // of trivia and not the separator of one.
+    assert!(
+        file.contains("pubstructBlanks<I>(pubWS<I>,pub::std::vec::Vec<WS<I>>,pubWS<I>);"),
+        "{file}"
+    );
+}
+
+#[test]
 fn a_rule_of_several_alternatives_becomes_an_enum() {
     let content = leaked(
         "whitespace WS -> [' '];

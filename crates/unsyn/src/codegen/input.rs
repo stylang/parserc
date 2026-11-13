@@ -10,9 +10,9 @@
 //!   count characters;
 //! * [`AsStr`], so that a scan for a sequence of characters can search the rest
 //!   of the text in one go;
-//! * [`StartWith`], so that a literal can be probed without consuming it, which
+//! * [`Start`], so that a literal can be probed without consuming it, which
 //!   is what `~` and `except` ask for;
-//! * [`Find`], so that `~'…'*` can stop at the first occurrence of a sequence
+//! * [`Find`], so that `~ […]*` can stop at the first occurrence of a sequence
 //!   instead of stepping over it one character at a time;
 //! * [`Clone`], because every alternative, every optional operand and every
 //!   repetition has to be able to rewind.

@@ -83,7 +83,8 @@ fn validate_with_suffix<I: UnsynInput>(expr: &ExprWithSuffix<I>, report: &mut Di
 
 fn validate_without_suffix<I: UnsynInput>(expr: &ExprWithoutSuffix<I>, report: &mut Diagnostics) {
     match expr {
-        ExprWithoutSuffix::Tilde(_, target) => validate_without_suffix(target, report),
+        // A complement refuses the members of a set, which is what a set is.
+        ExprWithoutSuffix::Tilde(_, bracket) => validate_set(bracket, report),
         // The target of a call is resolved by the linker, not here.
         ExprWithoutSuffix::Call(_) => {}
         // A reference carries no value to evaluate; see [`crate::semantics::Analyzer`].
@@ -123,8 +124,25 @@ fn validate_set<I: UnsynInput>(
     }
 
     let mut members: Vec<Member> = vec![];
+    let mut names: Vec<&str> = vec![];
 
     for item in items(&bracket.body) {
+        // The same name written twice is the same member written twice, however
+        // little of that node one file knows: only whether two *different*
+        // names denote values in common is the question the file can not answer
+        // (see `validate_set_item`).
+        if let SetItem::Ident(ident) = item {
+            let name = ident.0.as_str();
+
+            if names.contains(&name) {
+                report.lint(LintKind::DuplicateMember(name.to_owned()), item.to_span());
+            } else {
+                names.push(name);
+            }
+
+            continue;
+        }
+
         // A member that denotes no value at all carries its own error, and a
         // member that denotes an unknown one is not a value of this set yet.
         let Some(member) = validate_set_item(item, report) else {
@@ -146,7 +164,8 @@ fn validate_set<I: UnsynInput>(
 ///
 /// `None` when the member was rejected — its diagnostic is the report's to make,
 /// and a broken value is not worth comparing with anything — or when the member
-/// is a name, whose shape one file can not know.
+/// is a name, which is compared with the names of the set beside it rather than
+/// with the values here: one file can not know what the node it names denotes.
 fn validate_set_item<I: UnsynInput>(item: &SetItem<I>, report: &mut Diagnostics) -> Option<Member> {
     match item {
         SetItem::Range(range) => {
@@ -171,9 +190,8 @@ fn validate_set_item<I: UnsynInput>(item: &SetItem<I>, report: &mut Diagnostics)
                 None
             }
         },
-        // The shape of a referenced set member can not be known here: whether
-        // `LF` is the same member twice is a question about the whole program,
-        // not about this file.
+        // A repeated name is linted by `validate_set`, which is where the names
+        // of a set are kept together.
         SetItem::Ident(_) => None,
     }
 }
@@ -449,6 +467,24 @@ mod tests {
         assert!(messages("[MISSING]").is_empty());
     }
 
+    /// A name written twice in one set is one member written twice, whatever the
+    /// node it names denotes; whether two *different* names denote values in
+    /// common is the question a single file can not answer.
+    #[test]
+    fn a_reference_the_set_already_names_is_linted() {
+        assert_lint("[A,A]", "already declared");
+        assert_lint("~[A,A]", "already declared");
+        assert_lint("[A,'a',A]", "already declared");
+
+        // Each of the two repeats of a third member says it twice over.
+        assert_eq!(lints("[A,A,A]").len(), 2);
+
+        // Two names that may denote the same language are left for the whole
+        // program to decide, and a name against a value is not comparable.
+        assert!(lints("[A,B]").is_empty());
+        assert!(lints("[A,'a']").is_empty());
+    }
+
     #[test]
     fn a_member_the_set_already_says_is_linted() {
         // The values of the members are compared, not their spellings.
@@ -512,10 +548,14 @@ mod tests {
     }
 
     #[test]
-    fn a_name_is_not_compared_with_anything() {
-        // Whether `LF` and `LF` are two members or one is a question about the
-        // definitions `LF` denotes, which this pass does not know.
-        for body in ["[LF, LF]", "[LF, CR]", "[LF, 'a']"] {
+    fn a_name_is_compared_only_with_itself() {
+        // `LF` and `LF` are one member written twice, which this pass can see
+        // without knowing what `LF` denotes; whether `LF` and `CR` reach the
+        // same character is a question about the definitions they denote, and
+        // this pass does not know them.
+        assert_lint("[LF, LF]", "already declared");
+
+        for body in ["[LF, CR]", "[LF, 'a']"] {
             assert!(report(body).lints.is_empty(), "{body}: {:#?}", report(body));
         }
     }

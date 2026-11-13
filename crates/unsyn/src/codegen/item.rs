@@ -26,6 +26,10 @@
 //! which is what keeps the tree concrete: what was between two tokens is part
 //! of the tree and not something the parser threw away.
 //!
+//! A rule of nodes that writes its own separator out as an operand is given no
+//! field for the mention, since the run around it is the same trivia taken the
+//! same way (see the `Whitespace` section of [`super::shape`]).
+//!
 //! # Recursion
 //!
 //! A node whose type is in the `pointed` set of the shape being written is held

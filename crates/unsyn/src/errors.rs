@@ -255,6 +255,10 @@ pub enum LintKind {
     /// member of the same set.
     #[error("member `{0}` overlaps the earlier member `{1}` of this set")]
     OverlappingMember(String, String),
+    /// A rule of nodes that asks for the trivia the language separates itself
+    /// with, which its generated separator takes whether it is named or not.
+    #[error("`{0}` is the natural separator of the language, which a rule of nodes takes anyway")]
+    RedundantSeparator(String),
 }
 
 /// One [`LintKind`] and the place in the file that says it.

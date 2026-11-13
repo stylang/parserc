@@ -4,8 +4,21 @@
 //! of the grammar and gives the pattern it matches:
 //!
 //! - `whitespace` declares the trivia of the language: at most one per file.
+//!   The node it declares is the natural separator of the language, which every
+//!   `syntax` rule takes between its operands as greedily as the text offers,
+//!   so a rule of nodes has no need to name it. A rule that names it as one of
+//!   its operands says the separator twice: the mention is given no field of
+//!   its own, and a lint is written about it instead.
 //! - `lexer` declares a terminal: a pattern over characters.
 //! - `syntax` declares a non-terminal: a pattern over other nodes.
+//!
+//! Every operand that matches consumes at least one character: `~` asks its
+//! question of the character here and then takes it, and the repetitions, the
+//! options and the bounds that may match nothing at all never match twice at
+//! one position. What an `except` or a `followed` asserts about the text is the
+//! exception the DSL makes, being tested and then left where it was. The
+//! recursion checks count on this, since whatever consumes is what stands
+//! between a definition and itself.
 //!
 //! This crate is the implementation of that language, in four stages, each one
 //! dependent on the previous one:

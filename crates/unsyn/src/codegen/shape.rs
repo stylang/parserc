@@ -24,6 +24,9 @@
 //! the trivia around itself. Every element of a sequence after the first is
 //! therefore reached over a [`Field::separator`], which is the whitespace type
 //! the file declares, and a repetition takes one between each two of its runs.
+//! A separator is a run rather than one piece of trivia, so that it takes as
+//! much of it as the text offers and none at all where two tokens are written
+//! together.
 //!
 //! `concat` is the exception the DSL makes, and the only place the rule does not
 //! hold: it asks for both operands as one token, with nothing between, which is
@@ -31,6 +34,18 @@
 //!
 //! A file that declares no `whitespace` rule has no trivia to take, so it has no
 //! separators at all.
+//!
+//! A rule may still write its separator out, as `syntax Pair -> A WS B;` does
+//! when `WS` is the trivia node. Such a bare mention of the trivia asks for
+//! nothing the run between the operands around it does not already take, so it
+//! is folded away and earns no field: the shape is the one
+//! `syntax Pair -> A B;` makes, and the [analysis](crate::semantics) notes the
+//! mention. At either end of a sequence the mention is folded for the same
+//! reason: the trivia before the first operand of a rule belongs to the
+//! separator of the rule around it, which reaches this one just as greedily.
+//! A mention with a suffix on it (`WS?`, `WS*`) is not folded, since it asks
+//! for a repetition a separator only happens to be; a sequence of nothing but
+//! mentions is a rule *about* the trivia, and keeps them all.
 
 use std::collections::{HashMap, HashSet};
 
@@ -325,14 +340,21 @@ impl Shaper {
 
     /// The fields of one sequence of operands, each after the first reached over
     /// a run of trivia.
+    ///
+    /// A bare mention of the trivia node of the file is that run rather than an
+    /// operand of its own, so it is folded away before the fields are counted
+    /// (see [`ExprNoTopAlts::fold_separators`]); the analysis notes the mention
+    /// from the same reading.
     fn fields_of_sequence<I: UnsynInput>(
         &mut self,
         owner: &str,
         seq: &ExprNoTopAlts<I>,
     ) -> Result<Vec<Field>, CodegenError> {
-        let mut fields = vec![self.field(owner, &seq.first)?];
+        let (elements, _) = seq.fold_separators(self.whitespace.as_deref());
 
-        for (_, expr) in seq.rest.iter() {
+        let mut fields = Vec::with_capacity(elements.len());
+
+        for expr in elements {
             fields.push(self.field(owner, expr)?);
         }
 
@@ -546,7 +568,7 @@ impl Shaper {
             ExprWithoutSuffix::Paren(paren) => self.group(owner, &paren.body),
             // `~` in a rule of nodes asks about text and takes one character of
             // it, so it is a token rather than a pair of fields.
-            ExprWithoutSuffix::Tilde(_, target) => self.tilde(owner, target),
+            ExprWithoutSuffix::Tilde(_, bracket) => self.tilde(owner, bracket),
         }
     }
 
@@ -621,11 +643,11 @@ impl Shaper {
         Ok(Type::Named(self.token(owner, inst)))
     }
 
-    /// The type of `~X` inside a rule of nodes.
+    /// The type of `~ […]` inside a rule of nodes.
     fn tilde<I: UnsynInput>(
         &mut self,
         owner: &str,
-        target: &ExprWithoutSuffix<I>,
+        set: &super::SetOf<I>,
     ) -> Result<Type, CodegenError> {
         let refs = LexRefs {
             tokens: self.tokens.clone(),
@@ -635,7 +657,7 @@ impl Shaper {
 
         let program = Program::new(&refs);
 
-        let inst = Inst::Not(Box::new(program.operand(target)?));
+        let inst = Inst::Not(Box::new(program.set_of(set)?));
 
         Ok(Type::Named(self.token(owner, inst)))
     }

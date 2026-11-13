@@ -28,10 +28,10 @@
 //! and a repetition of one is scanned by the combinators of [`parserc`] in a
 //! pass over the text rather than by looping over a matcher:
 //! [`take_while`](parserc::take_while) for `X*`, [`take_till`](parserc::take_till)
-//! for `~X*`, [`keyword`](parserc::keyword) for a literal of more than one
-//! character, and [`take_until`](parserc::take_until) for `~'lit'*` where the
-//! text after it has to be the literal. A node rule has shortcuts of its own:
-//! the sequence of a group becomes a tuple, a repetition a [`Vec`] and an
+//! for `~ […]*`, [`keyword`](parserc::keyword) for a literal of more than one
+//! character, and [`take_until`](parserc::take_until) for `~ ['lit']*` where
+//! the text after it has to be the literal. A node rule has shortcuts of its
+//! own: the sequence of a group becomes a tuple, a repetition a [`Vec`] and an
 //! optional operand an [`Option`], each of which the backend already implements
 //! as syntax.
 //!

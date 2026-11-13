@@ -172,6 +172,70 @@ fn map_expr_no_top_alt_err(err: UnsynError) -> UnsynError {
     }
 }
 
+impl<I> ExprNoTopAlt<I>
+where
+    I: UnsynInput,
+{
+    /// The name the operand refers to, where it is nothing but a bare reference
+    /// to it: `A`, but neither `A*` nor `[A]` nor `(A)`.
+    #[inline]
+    pub fn bare_ref(&self) -> Option<&Ident<I>> {
+        match self {
+            ExprNoTopAlt::WithoutSuffix(ExprWithoutSuffix::Ident(ident)) => Some(ident),
+            _ => None,
+        }
+    }
+}
+
+impl<I> ExprNoTopAlts<I>
+where
+    I: UnsynInput,
+{
+    /// The operands of the sequence, in the order they were written.
+    #[inline]
+    pub fn elements(&self) -> impl Iterator<Item = &ExprNoTopAlt<I>> {
+        std::iter::once(&self.first).chain(self.rest.iter().map(|(_, expr)| expr))
+    }
+
+    /// Reads the sequence against the trivia node a file names `trivia`, giving
+    /// back first the operands that are elements of their own and then the
+    /// mentions of that node the sequence is separated by anyway.
+    ///
+    /// A rule of nodes reaches every operand after the first over a run of the
+    /// trivia of the language, so writing the trivia between two of them says
+    /// nothing the run does not: such a mention is a separator rather than an
+    /// element, and needs no field. A sequence of nothing but mentions is a rule
+    /// *about* the trivia, which has no other operand to separate, so it keeps
+    /// them all and folds none.
+    ///
+    /// This is the one reading of a mention that both the
+    /// [analysis](crate::semantics), which notes the folded ones as a
+    /// [lint](crate::errors::LintKind::RedundantSeparator), and the
+    /// [codegen](crate::codegen), which gives them no field, work from.
+    pub fn fold_separators<'a>(
+        &'a self,
+        trivia: Option<&str>,
+    ) -> (Vec<&'a ExprNoTopAlt<I>>, Vec<&'a Ident<I>>) {
+        let mut elements: Vec<&ExprNoTopAlt<I>> = Vec::new();
+        let mut mentions: Vec<&Ident<I>> = Vec::new();
+
+        for expr in self.elements() {
+            match (trivia, expr.bare_ref()) {
+                (Some(trivia), Some(ident)) if ident.0.as_str() == trivia => mentions.push(ident),
+                _ => elements.push(expr),
+            }
+        }
+
+        // A sequence that holds nothing but mentions would be left with nothing
+        // in it, which is the one case a mention is not a separator.
+        if mentions.is_empty() || elements.is_empty() {
+            return (self.elements().collect(), Vec::new());
+        }
+
+        (elements, mentions)
+    }
+}
+
 /// An operand with one suffix.
 #[derive(Debug, PartialEq, Eq, PartialOrd, Ord, Clone, Syntax)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
@@ -260,19 +324,19 @@ pub enum ExprWithoutSuffix<I>
 where
     I: UnsynInput,
 {
-    /// `~`, which asks that the operand here not be matched.
+    /// `~ […]`, the one character a set does not denote.
     ///
-    /// The operand is tested at the position the complement is asked about, and
-    /// is never taken as part of the match itself: what `~` matches is the one
-    /// character after the question, which is what lets a line comment read to
-    /// the end of its line with `~[LF]*` rather than stopping short of it. A
-    /// complement therefore always takes exactly one character, and fails where
-    /// what it asked about would have fitted.
+    /// The operand of a complement is always a set, because what `~` matches is
+    /// exactly one character: the set is asked whether it fits here, the
+    /// character that answers the question is taken, and the complement fails
+    /// where the set would have fitted. A complement therefore always consumes
+    /// input, which is what lets a line comment read to the end of its line with
+    /// `~[LF]*` rather than stopping short of it.
     Tilde(
         /// the tilde punct `~`
         Tilde<I>,
-        /// the negated operand, which cannot itself have a suffix.
-        Box<ExprWithoutSuffix<I>>,
+        /// the negated set, whose members are the values refused here.
+        Bracket<I, Punctuated<SetItem<I>, Comma<I>>>,
     ),
     /// `<…>`, a call of a matcher the backend provides, as in `<XID_Start>`.
     Call(Angle<I, Ident<I>>),

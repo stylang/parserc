@@ -189,7 +189,7 @@ pub(crate) enum Inst {
         /// What is repeated.
         item: Box<Inst>,
     },
-    /// Fail when the operand fits here, and take one character when it does not.
+    /// Fail when the set fits here, and take one character when it does not.
     Not(Box<Inst>),
     /// Take the operand unless what removes it fits where the operand starts.
     Except {
@@ -245,8 +245,8 @@ impl Inst {
             }
             Inst::Seq(steps) | Inst::Alt(steps) => steps.iter().any(|step| step.is_stuck(empty)),
             // A lookahead never moves, but it is also never what a repetition
-            // repeats: `~` and the suffixes only ever sit on an operand, and the
-            // wildcard below already answers for it.
+            // repeats: `~` and the suffixes only ever sit on a set or an
+            // operand, and the wildcard below already answers for it.
             Inst::Not(item) => item.is_stuck(empty),
             Inst::Except { item, .. } | Inst::Followed { item, .. } => item.is_stuck(empty),
             _ => false,
@@ -452,7 +452,7 @@ impl<'a> Builder<'a> {
 
     /// The program of an operand that carries no suffix of its own, which is
     /// what a `syntax` rule needs when it asks a character-level question
-    /// (`~X`, `[…]`) inside a pattern of nodes.
+    /// (`~ […]`, `[…]`) inside a pattern of nodes.
     pub(crate) fn operand<I: UnsynInput>(
         &self,
         expr: &ExprWithoutSuffix<I>,
@@ -464,7 +464,7 @@ impl<'a> Builder<'a> {
             ExprWithoutSuffix::Call(angle) => Ok(Inst::Matcher(angle.body.0.as_str().to_owned())),
             ExprWithoutSuffix::Paren(paren) => self.expr(&paren.body),
             ExprWithoutSuffix::Set(bracket) => self.set_of(bracket),
-            ExprWithoutSuffix::Tilde(_, target) => Ok(Inst::Not(Box::new(self.operand(target)?))),
+            ExprWithoutSuffix::Tilde(_, bracket) => Ok(Inst::Not(Box::new(self.set_of(bracket)?))),
         }
     }
 
