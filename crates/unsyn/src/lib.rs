@@ -48,8 +48,10 @@
 //!
 //! The spec of the language, written in the language itself, lives in
 //! `bootstrap.uns` next to this crate and is checked by the tests of
-//! [`semantics`].
+//! [`semantics`], and [`codegen`] is what turns a analyzed file into the Rust of
+//! the tree it describes.
 
+pub mod codegen;
 pub mod errors;
 pub mod input;
 pub mod lexical;

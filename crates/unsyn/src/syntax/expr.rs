@@ -260,9 +260,14 @@ pub enum ExprWithoutSuffix<I>
 where
     I: UnsynInput,
 {
-    /// `~`, which asks that the operand here not be matched. The operand is
-    /// tested at the position the complement is asked about, and is never
-    /// consumed as part of the match.
+    /// `~`, which asks that the operand here not be matched.
+    ///
+    /// The operand is tested at the position the complement is asked about, and
+    /// is never taken as part of the match itself: what `~` matches is the one
+    /// character after the question, which is what lets a line comment read to
+    /// the end of its line with `~[LF]*` rather than stopping short of it. A
+    /// complement therefore always takes exactly one character, and fails where
+    /// what it asked about would have fitted.
     Tilde(
         /// the tilde punct `~`
         Tilde<I>,

@@ -10,11 +10,14 @@ version.workspace = true
 [dependencies]
 thiserror = "2.0.17"
 unicode-ident = "1.0.22"
+proc-macro2 = "^1"
+quote = "^1"
 serde = { version = "1.0.228", optional = true }
 parserc = { path = "../parserc", version = "^0.13", default-features = false, features = ["syntax","input"] }
 
 [dev-dependencies]
 walkdir = "2"
+syn = { version = "^2", features = ["full"] }
 
 [features]
 default = ["serde"]

@@ -119,7 +119,7 @@ syntax Expr -> ExprNoTopAlt+ ( '|' ExprNoTopAlt+ )?;
 syntax ExprNoTopAlt -> ExprWithSuffix | ExprWithoutSuffix;
 
 syntax ExprWithoutSuffix ->
-      '~'  ExprWithoutSuffix
+      '~'  Range
     | '<' IDENTIFIER '>'
     | '(' Expr ')'
     | '[' ( SetItem ',' )* SetItem? ']'

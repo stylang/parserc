@@ -272,7 +272,10 @@ name = "unsyn"
 version = "0.13.1"
 dependencies = [
  "parserc",
+ "proc-macro2",
+ "quote",
  "serde",
+ "syn",
  "thiserror",
  "unicode-ident",
  "walkdir",
