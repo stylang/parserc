@@ -2,7 +2,7 @@
 //!
 //! A bare name in a body is a dependency on the node of that name, so the
 //! definitions of one file form a graph. A `<call>` is not part of that graph:
-//! it names an external the backend provides, which the semantic phase of a
+//! it names an external the caller supplies, which the semantic phase of a
 //! single file knows nothing about (see [`Module::externals`](super::Module::externals)).
 //!
 //! Three facts about a body drive the recursion checks: whether it can match the
@@ -264,7 +264,7 @@ fn without_suffix_refs<'a, I: UnsynInput, F: FnMut(&'a Ident<I>)>(
                 }
             }
         }
-        // A call names a backend external, so it is not a reference.
+        // A call names an external from outside the file, so it is not a reference.
         ExprWithoutSuffix::Call(_) => {}
         ExprWithoutSuffix::Ident(ident) => f(ident),
         ExprWithoutSuffix::Paren(paren) => walk_refs(&paren.body, f),
@@ -771,7 +771,7 @@ fn without_suffix_same_offset<'a, I: UnsynInput>(
             }
         }
         ExprWithoutSuffix::Paren(paren) => expr_same_offset(&paren.body, table, nullable, names),
-        // A call and its external are the backend's own affair, a string and a
+        // A call and its external are the caller's own affair, a string and a
         // code point are compared to the input directly, and the shape of a
         // referenced set member is deliberately not asked about here (see
         // `validate_set_item` in the `check` pass).

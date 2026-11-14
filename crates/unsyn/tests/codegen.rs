@@ -15,7 +15,7 @@ use std::{fs, path::PathBuf};
 use parserc::syntax::Syntax;
 use quote::quote;
 use unsyn::{
-    codegen::{Codegen, CodegenError, Paths},
+    codegen::{Codegen, CodegenError, CodegenKind, Paths},
     input::TokenStream,
     semantics::analyze,
     syntax::Crate,
@@ -68,29 +68,27 @@ fn plain(content: &'static str) -> String {
     }
 }
 
-/// A generator told what the two classes of [`unicode_ident`] call, which is
-/// what a spec needs as soon as it spells a keyword or names an identifier: a
-/// keyword asks after itself whether the character that follows would carry the
-/// word on, and that question is a `<NAME>` like any other.
+/// A generator told what the two names a spec of identifiers writes call.
 ///
-/// Nothing here gives those names as a default. Saying so is the point: the
-/// table is the only place a `.uns` file learns what its externals are.
-fn with_classes() -> Codegen {
+/// This is the caller's own table: the paths lead to a backend of the test's
+/// naming, since nothing in unsyn ships or assumes an implementation of a
+/// `<NAME>`. It is what a spec needs as soon as it writes an angle-bracketed
+/// call, and nothing more: a name the spec never wrote is a name no table is
+/// asked for, which is why the tests that spell no `<NAME>` use [`plain`]
+/// instead.
+fn with_a_backend() -> Codegen {
     Codegen::new().with_externals([
+        ("WORD_START".to_owned(), quote!(::my_backend::word_start)),
         (
-            "XID_Start".to_owned(),
-            quote!(::unsyn::runtime::external::XID_Start),
-        ),
-        (
-            "XID_Continue".to_owned(),
-            quote!(::unsyn::runtime::external::XID_Continue),
+            "WORD_CARRY_ON".to_owned(),
+            quote!(::my_backend::word_continue),
         ),
     ])
 }
 
 /// The same as [`plain`], for a spec that asks a name the generator was given.
 fn given(content: &'static str) -> String {
-    match generate(content, with_classes()) {
+    match generate(content, with_a_backend()) {
         Ok(file) => file,
         Err(errors) => panic!("this spec should be writable: {errors:?}"),
     }
@@ -306,20 +304,50 @@ fn a_keyword_does_not_match_the_front_of_a_longer_word() {
          syntax Let -> 'let' Letter 'x';",
     );
 
-    let file = given(content);
+    let file = plain(content);
 
     // The literal `'let'` is a token that asks where it ends: the character
-    // after it may not be one that would carry the word on. The question is
-    // asked of the name the table settled, over a copy of the stream.
+    // after it may not be one that would carry the word on. That ask belongs to
+    // the DSL and not to the spec, which never wrote an angle-bracketed call
+    // here, so it goes to the runtime by the `unsyn` path and not to the
+    // table — which is why this file takes a table of nothing at all.
     assert!(file.contains("pubstructLet<I>"), "{file}");
     assert!(
-        file.contains("external::XID_Continue"),
+        file.contains("unsyn::runtime::keyword::is_xid_continue"),
         "the keyword ends nowhere: {file}"
     );
-    assert!(file.contains("is_ok()"), "{file}");
     // The keyword is a token of its own, and the rule names it rather than the
     // characters it is made of.
     assert!(file.contains("pubLet_2<I>"), "{file}");
+}
+
+#[test]
+fn a_spec_that_writes_no_call_needs_no_table() {
+    // The other half of the same rule, said of the whole file rather than of
+    // one keyword: a spec with no `<NAME>` in it asks nothing of a caller, and
+    // a name no table was given is the only way that promise is broken.
+    let content = leaked(
+        "whitespace WS -> [' '];
+         lexer Letter -> ['a'-'z'];
+         syntax Let -> 'let' Letter 'x';",
+    );
+
+    plain(content);
+
+    // A name a spec did write is still nobody's business but the caller's.
+    let asked = leaked(
+        "whitespace WS -> [' '];
+         lexer Letter -> <WORD_START> ['a'-'z']*;",
+    );
+
+    let Err(errs) = generate(asked, Codegen::new()) else {
+        panic!("a name no table was given should be refused");
+    };
+
+    assert!(
+        matches!(&errs[0].kind, CodegenKind::Unmapped(name) if name == "WORD_START"),
+        "{errs:?}"
+    );
 }
 
 #[test]
@@ -388,12 +416,12 @@ fn a_name_no_table_gives_is_reported_and_not_written() {
     let content = leaked(
         "whitespace WS -> [' '];
          lexer Word -> ['a'-'z']+;
-         syntax Head -> <XID_Start> <XID_Continue>*;
-         syntax Tail -> <XID_Continue>+ Word;",
+         syntax Head -> <WORD_START> <WORD_CARRY_ON>*;
+         syntax Tail -> <WORD_CARRY_ON>+ Word;",
     );
 
     // A generator starts with an empty table and keeps one: nothing decides on
-    // a caller's behalf what one of its backend's names means. A file that
+    // a caller's behalf what one of its names means. A file that
     // called a function nobody had settled on would compile in a project that
     // never meant it to, so the name is reported instead.
     let refused =
@@ -406,11 +434,11 @@ fn a_name_no_table_gives_is_reported_and_not_written() {
         .join("\n");
 
     assert!(
-        what.contains("nothing is mapped to `<XID_Start>`"),
+        what.contains("nothing is mapped to `<WORD_START>`"),
         "{what}"
     );
     assert!(
-        what.contains("nothing is mapped to `<XID_Continue>`"),
+        what.contains("nothing is mapped to `<WORD_CARRY_ON>`"),
         "{what}"
     );
     // One report per name, not one per call: the rules that ask for the same
@@ -424,33 +452,27 @@ fn a_name_no_table_gives_is_reported_and_not_written() {
 
     // The same spec with both names given is writable, and each is called where
     // the table said.
-    let settled = generate(content, with_classes())
+    let settled = generate(content, with_a_backend())
         .expect("a spec whose names are all given should be writable");
 
-    assert!(
-        settled.contains("::unsyn::runtime::external::XID_Start"),
-        "{settled}"
-    );
-    assert!(
-        settled.contains("::unsyn::runtime::external::XID_Continue"),
-        "{settled}"
-    );
+    assert!(settled.contains("::my_backend::word_start"), "{settled}");
+    assert!(settled.contains("::my_backend::word_continue"), "{settled}");
 
     // A name given by a table is no less one pattern than a name the rules of
     // the file describe themselves, so the sharing of one type between the two
     // rules that ask for it does not depend on the table.
     assert!(
-        settled.contains("pubstructExternalXID_Continue<I>"),
+        settled.contains("pubstructExternalWORD_CARRY_ON<I>"),
         "{settled}"
     );
-    assert!(!settled.contains("ExternalXID_Continue_2"), "{settled}");
+    assert!(!settled.contains("ExternalWORD_CARRY_ON_2"), "{settled}");
 }
 
 #[test]
 fn a_moved_path_leaves_a_given_external_where_the_table_put_it() {
     let content = leaked(
         "whitespace WS -> [' '];
-         lexer Name -> <XID_Start> <XID_Continue>*;",
+         lexer Name -> <WORD_START> <WORD_CARRY_ON>*;",
     );
 
     // The table is the caller's own, so moving the crates the file reaches by
@@ -459,13 +481,10 @@ fn a_moved_path_leaves_a_given_external_where_the_table_put_it() {
         content,
         Codegen::new()
             .with_externals([
+                ("WORD_START".to_owned(), quote!(::my_grammar::word_start)),
                 (
-                    "XID_Start".to_owned(),
-                    quote!(::my_grammar::external::XID_Start),
-                ),
-                (
-                    "XID_Continue".to_owned(),
-                    quote!(::my_grammar::external::XID_Continue),
+                    "WORD_CARRY_ON".to_owned(),
+                    quote!(::my_grammar::word_continue),
                 ),
             ])
             .with_paths(Paths {
@@ -475,12 +494,12 @@ fn a_moved_path_leaves_a_given_external_where_the_table_put_it() {
     )
     .expect("a table of its own should still be writable");
 
-    assert!(file.contains("::my_grammar::external::XID_Start"), "{file}");
-    assert!(
-        file.contains("::my_grammar::external::XID_Continue"),
-        "{file}"
-    );
-    assert!(!file.contains("unsyn::runtime::external"), "{file}");
+    assert!(file.contains("::my_grammar::word_start"), "{file}");
+    assert!(file.contains("::my_grammar::word_continue"), "{file}");
+    // Moving the crates the file reaches by leaves the table where the caller
+    // put it: the two decisions are separate, and once both are made the file
+    // names no crate of unsyn's at all.
+    assert!(!file.contains("::unsyn::"), "{file}");
 }
 
 #[test]
@@ -505,6 +524,22 @@ fn a_name_rust_spends_on_its_own_grammar_is_callable_once_a_table_gives_it() {
     assert!(!settled.contains("<type>"), "{settled}");
 }
 
+/// A generator told what the two names `bootstrap.uns` writes call.
+///
+/// That spec asks for the two classes of [`unicode_ident`] by their Unicode
+/// names, and a name is only what the caller running the generator says it is.
+/// This test is that caller, so it is where the names are placed — on a module
+/// of the caller's own, which is all unsyn ever sees of them.
+fn with_the_bootstrap_backend() -> Codegen {
+    Codegen::new().with_externals([
+        ("XID_Start".to_owned(), quote!(::my_backend::xid_start)),
+        (
+            "XID_Continue".to_owned(),
+            quote!(::my_backend::xid_continue),
+        ),
+    ])
+}
+
 #[test]
 fn bootstrap_uns_is_generated_whole() {
     // The spec of `unsyn` written in `unsyn` is the input that exercises every
@@ -516,9 +551,10 @@ fn bootstrap_uns_is_generated_whole() {
     let file = Crate::parse(&mut tokens).expect("the spec should parse");
     let module = analyze(&file).expect("the spec should be well-formed");
 
-    // The spec names the two classes of `unicode_ident`, and a name is only
-    // what the caller's table says, so the generator is handed both.
-    let generated = match with_classes().generate(&module) {
+    // The spec names two externals, and a name is only what the caller's table
+    // says, so the generator is handed both under the paths the caller keeps
+    // them at.
+    let generated = match with_the_bootstrap_backend().generate(&module) {
         Ok(generated) => generated,
         Err(errors) => {
             let what = errors
@@ -549,8 +585,8 @@ fn bootstrap_uns_is_generated_whole() {
     }
 
     // The two externals the spec names are called, and not written out.
-    assert!(written.contains("external::XID_Start"), "{written}");
-    assert!(written.contains("external::XID_Continue"), "{written}");
+    assert!(written.contains("my_backend::xid_start"), "{written}");
+    assert!(written.contains("my_backend::xid_continue"), "{written}");
 
     // The trivia of the language is its own type, and the separators name it.
     assert!(written.contains("structWHITESPACE"), "{written}");

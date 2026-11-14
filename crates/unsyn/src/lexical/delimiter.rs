@@ -5,8 +5,8 @@
 //! missing close is a broken file rather than a rule that does not fit, so the
 //! parser reports it instead of backtracking over the typo.
 //!
-//! [`Angle`] is the pair a node uses to call an external of the backend, as in
-//! `<XID_Start>`; the other three group a pattern, as Rust does.
+//! [`Angle`] is the pair a node uses to call an external the caller provides,
+//! as in `<WORD_START>`; the other three group a pattern, as Rust does.
 
 use parserc::syntax::Delimiter;
 
@@ -18,7 +18,7 @@ pub type Brace<I, T> = Delimiter<BraceStart<I>, BraceEnd<I>, T>;
 pub type Bracket<I, T> = Delimiter<BracketStart<I>, BracketEnd<I>, T>;
 /// Parentheses `(…)`, a group inside a pattern.
 pub type Paren<I, T> = Delimiter<ParenStart<I>, ParenEnd<I>, T>;
-/// Angle brackets `<…>`, a call of an external the backend provides.
+/// Angle brackets `<…>`, a call of an external the caller provides.
 pub type Angle<I, T> = Delimiter<Lt<I>, Gt<I>, T>;
 
 #[cfg(test)]
@@ -56,13 +56,13 @@ mod tests {
 
     #[test]
     fn whitespace_is_allowed_on_the_inside_of_a_group() {
-        let mut input = TokenStream::from("< XID_Start >");
+        let mut input = TokenStream::from("< WORD_START >");
 
         let call = input
             .parse::<Angle<_, Ident<_>>>()
             .expect("the call should parse");
 
-        assert_eq!(call.body.0.as_str(), "XID_Start");
+        assert_eq!(call.body.0.as_str(), "WORD_START");
         assert_eq!(input.as_str(), "");
     }
 

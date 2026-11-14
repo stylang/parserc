@@ -2,10 +2,10 @@
 //! `tests/data/spec.rs`.
 //!
 //! This is the tool that keeps the compiled fixture in step with the generator:
-//! run it with `--nocapture`, format what it writes, and copy it over the
-//! fixture. `tests/generated.rs` is the test that says when that has not been
-//! done, since it regenerates the same file and compares the types the two
-//! declare.
+//! run it with `--nocapture`, format what it writes with `rustfmt --edition
+//! 2024`, and copy it over the fixture. `tests/generated.rs` is the test that
+//! says when that has not been done, since it regenerates the same file and
+//! compares the two whole.
 //!
 //! The spec is the one `bootstrap.uns` is written against in everything but
 //! scale: sets, ranges, the wildcard, complements, `concat`, `except`,
@@ -21,23 +21,17 @@ use unsyn::{codegen::Codegen, input::TokenStream, semantics::analyze, syntax::Cr
 
 include!("data/spec.rs");
 
-/// A generator told what the two classes the spec names call.
+/// A generator told what the one name the spec writes calls.
 ///
-/// The spec spells keywords and names `<XID_Start>` and `<XID_Continue>`, and a
-/// name is only ever what the caller of the generator says it is, so this is
-/// where the caller says it: both go to the functions unsyn's own runtime
-/// provides. `tests/generated.rs` compiles what this writes and must agree.
+/// The spec spells keywords and writes `<WORD_START>`, and a name is only ever
+/// what the caller of the generator says it is, so this is where the caller says
+/// it. The path leads to `tests/generated.rs`, which is the crate that compiles
+/// what this writes and so is where the function behind the name lives; that a
+/// keyword is not among the names said here is the point of the fixture — where
+/// a keyword ends is the DSL's question, not the spec's, and this file would not
+/// be writable if it were. `tests/generated.rs` must agree, name for name.
 fn codegen() -> Codegen {
-    Codegen::new().with_externals([
-        (
-            "XID_Start".to_owned(),
-            quote!(::unsyn::runtime::external::XID_Start),
-        ),
-        (
-            "XID_Continue".to_owned(),
-            quote!(::unsyn::runtime::external::XID_Continue),
-        ),
-    ])
+    Codegen::new().with_externals([("WORD_START".to_owned(), quote!(crate::backend::word_start))])
 }
 
 #[test]
@@ -63,9 +57,11 @@ fn dump() {
         panic!("the generated file is not valid Rust: {error}");
     }
 
+    // The header comes from the same file as the spec, so that copying what
+    // this writes over the fixture is the whole of what updating it takes.
     let filepath = PathBuf::from(env!("CARGO_TARGET_TMPDIR")).join("mini.rs");
 
-    fs::write(&filepath, generated).expect("the file should be written");
+    fs::write(&filepath, format!("{HEADER}{generated}")).expect("the file should be written");
 
     println!("WROTE {}", filepath.display());
 }

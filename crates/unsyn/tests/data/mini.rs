@@ -1,10 +1,10 @@
-//! The Rust the generator wrote for the spec below.
-//!
-//! This file is machine-made: `cargo test -p unsyn --test dump -- --nocapture`
-//! prints what `Codegen` produces for that spec, and the result is kept
-//! here so that the emitted types are compiled and run rather than only read
-//! back as tokens. `tests/generated.rs` says so when the two fall apart.
-
+// The Rust the generator wrote for the spec in `data/spec.rs`.
+//
+// This file is machine-made: `cargo test -p unsyn --test dump -- --nocapture`
+// prints what `Codegen` produces for that spec, and the result is kept here so
+// that the emitted types are compiled and run rather than only read back as
+// tokens. `tests/generated.rs` compares the two whole, and says so when they
+// fall apart.
 #[allow(non_camel_case_types, non_snake_case)]
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
 pub struct WS<I>(pub I);
@@ -182,15 +182,12 @@ where
         {
             let mut __from = input.clone();
             ::parserc::keyword("let").parse(input)?;
-            if {
-                let mut __probe = input.clone();
-                (|__probe: &mut I| -> ::core::result::Result<(), <I as ::parserc::Input>::Error> {
-                    ::unsyn::runtime::external::XID_Continue(__probe)?;
-                    ::core::result::Result::Ok(())
-                })
-                .parse(&mut __probe)
-                .is_ok()
-            } {
+            if input
+                .clone()
+                .iter()
+                .next()
+                .is_some_and(|c: char| ::unsyn::runtime::keyword::is_xid_continue(c))
+            {
                 return Err(::parserc::Kind::Token(
                     "LET",
                     ::parserc::ControlFlow::Recovable,
@@ -235,15 +232,12 @@ where
         {
             let mut __from = input.clone();
             ::parserc::keyword("fn").parse(input)?;
-            if {
-                let mut __probe = input.clone();
-                (|__probe: &mut I| -> ::core::result::Result<(), <I as ::parserc::Input>::Error> {
-                    ::unsyn::runtime::external::XID_Continue(__probe)?;
-                    ::core::result::Result::Ok(())
-                })
-                .parse(&mut __probe)
-                .is_ok()
-            } {
+            if input
+                .clone()
+                .iter()
+                .next()
+                .is_some_and(|c: char| ::unsyn::runtime::keyword::is_xid_continue(c))
+            {
                 return Err(::parserc::Kind::Token(
                     "FN",
                     ::parserc::ControlFlow::Recovable,
@@ -832,7 +826,7 @@ where
         };
         {
             let mut __from = input.clone();
-            ::unsyn::runtime::external::XID_Start(input)?;
+            crate::backend::word_start(input)?;
             if input.len() == __from.len() {
                 return Err(::parserc::Kind::Token(
                     "MATCHER",

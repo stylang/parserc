@@ -29,7 +29,8 @@
 //! decide that for it.
 //!
 //! A `<call>` is deliberately *not* resolved: it denotes the external the
-//! generated code calls, which may be provided by the backend, so the names a
+//! generated code calls, which whoever runs the generator supplies through the
+//! table of `Codegen::with_externals`, so the names a
 //! file expects from outside are collected in [`Module::externals`] for the
 //! linker instead of being diagnosed here. The analyzer never reads the file
 //! system: one source file at a time goes in, the diagnostics of that file come
@@ -127,8 +128,8 @@ where
     /// The externals this file calls, in declaration order and without
     /// duplicates.
     ///
-    /// An external whose name is not a node of this file has to be provided by
-    /// the backend, which is a question the linker answers rather than an error
+    /// An external whose name is not a node of this file has to be supplied
+    /// from outside, which is a question the linker answers rather than an error
     /// of one file.
     #[inline]
     pub fn externals(&self) -> &[&'a str] {
@@ -500,8 +501,8 @@ mod tests {
 
     #[test]
     fn a_call_is_not_a_reference() {
-        // `<MISSING>` is an external of the backend: only the linker can say
-        // whether it exists.
+        // `<MISSING>` is an external called from outside the file: only the
+        // linker can say whether it exists.
         assert_well_formed("lexer A -> <MISSING>;");
 
         let mut input = TokenStream::from("lexer A -> <X> <Y> <X>;");
@@ -515,7 +516,7 @@ mod tests {
 
     #[test]
     fn a_node_bound_to_an_external_of_its_name_is_not_recursive() {
-        assert_well_formed("lexer XID_Start -> <XID_Start>;");
+        assert_well_formed("lexer WORD_START -> <WORD_START>;");
     }
 
     #[test]

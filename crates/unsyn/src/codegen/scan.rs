@@ -131,7 +131,7 @@ impl<'a> Emitter<'a> {
 
         match step {
             Step::Class(class) => {
-                let cond = class.closure();
+                let cond = class.closure(self.paths);
 
                 Ok(vec![quote!(#parserc::next_if(#cond).parse(#var)?;)])
             }
@@ -274,7 +274,7 @@ impl<'a> Emitter<'a> {
         let parserc = &self.paths.parserc;
 
         if let Some(class) = item.char_class(self.classes) {
-            let cond = class.closure();
+            let cond = class.closure(self.paths);
 
             let take = match (min, max) {
                 // `take_while` is the unbounded form, and needs no bounds.
@@ -350,12 +350,12 @@ impl<'a> Emitter<'a> {
         {
             let take = match (*min, *max) {
                 (0, None) => {
-                    let cond = class.closure();
+                    let cond = class.closure(self.paths);
 
                     quote!(#parserc::take_till(#cond).parse(#var)?)
                 }
                 _ => {
-                    let cond = class.negated().closure();
+                    let cond = class.negated().closure(self.paths);
                     let bounds = bounds(*min, *max);
 
                     quote!(#parserc::take_while_with(#bounds, #cond).parse(#var)?)
@@ -368,7 +368,7 @@ impl<'a> Emitter<'a> {
         // A complement of one character is the class of every character that is
         // not it, which needs no question asked twice.
         if let Some(class) = item.char_class(self.classes) {
-            let cond = class.negated().closure();
+            let cond = class.negated().closure(self.paths);
 
             return Ok(quote!(#parserc::next_if(#cond).parse(#var)?;));
         }
@@ -408,7 +408,7 @@ impl<'a> Emitter<'a> {
         let parserc = &self.paths.parserc;
 
         if let Some(class) = step.char_class(self.classes) {
-            let cond = class.closure();
+            let cond = class.closure(self.paths);
 
             return Ok(quote!(#at.iter().next().is_some_and(#cond)));
         }
@@ -528,11 +528,12 @@ mod tests {
 
     /// The one mapping every pattern here that names a function needs: nothing
     /// in the generator is named on its own, so a `<NAME>` step is only
-    /// writable when the test says what the name stands for.
+    /// writable when the test says what the name stands for. The path is the
+    /// test's own; the generator never resolves one.
     fn externals() -> HashMap<String, TokenStream> {
         HashMap::from([(
-            "XID_Continue".to_owned(),
-            quote!(::unsyn::runtime::external::XID_Continue),
+            "WORD_CARRY_ON".to_owned(),
+            quote!(::my_backend::word_continue),
         )])
     }
 
@@ -587,7 +588,7 @@ mod tests {
             min: 0,
             max: None,
             item: Box::new(Step::External(
-                "XID_Continue".to_owned(),
+                "WORD_CARRY_ON".to_owned(),
                 parserc::Span::None,
             )),
         };
@@ -595,7 +596,8 @@ mod tests {
         let code = emit(&star);
 
         assert!(code.contains("loop"), "{code}");
-        assert!(code.contains("XID_Continue"), "{code}");
+        assert!(code.contains("my_backend"), "{code}");
+        assert!(code.contains("word_continue"), "{code}");
     }
 
     #[test]

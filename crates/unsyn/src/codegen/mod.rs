@@ -35,9 +35,9 @@
 //!
 //! let source = r#"
 //!     whitespace W -> U+0020 | U+0009;
-//!     lexer XID_Start -> <XID_Start>;
-//!     lexer XID_Continue -> <XID_Continue>;
-//!     lexer IDENTIFIER -> ( XID_Start | '_' ) XID_Continue*;
+//!     lexer WORD_START -> <WORD_START>;
+//!     lexer WORD_CARRY_ON -> <WORD_CARRY_ON>;
+//!     lexer IDENTIFIER -> ( WORD_START | '_' ) WORD_CARRY_ON*;
 //!     syntax PROGRAM -> IDENTIFIER;
 //! "#;
 //!
@@ -49,15 +49,18 @@
 //! assert_eq!(module.symbols().len(), 5);
 //! assert_eq!(module.definition("IDENTIFIER").unwrap().kind().keyword(), "lexer");
 //!
-//! // `<Name>` is a call of an external the backend provides, not a node.
-//! assert_eq!(module.externals(), ["XID_Start", "XID_Continue"]);
+//! // `<Name>` is a call of an external the caller provides, not a node.
+//! assert_eq!(module.externals(), ["WORD_START", "WORD_CARRY_ON"]);
 //!
 //! // A set whose members say nothing twice earns no lint.
 //! assert!(module.lints().is_empty());
 //! ```
 //!
-//! What those stages do one after the other, over `bootstrap.uns` and a small
-//! spec written inline, is what `examples/pipeline.rs` runs and reports.
+//! What those stages do one after the other is what the tests of this crate
+//! run: over a small spec written inline, whose generated file `tests/dump.rs`
+//! keeps as `tests/data/mini.rs` and `tests/generated.rs` compiles and drives,
+//! and over `bootstrap.uns` itself, which `tests/bootstrap.rs` reads and
+//! analyzes.
 //!
 //! # Two halves of one plan
 //!
@@ -154,7 +157,9 @@ pub(crate) fn set_items<T, P>(punctuated: &Punctuated<T, P>) -> impl Iterator<It
 ///
 /// What a `<NAME>` in a pattern calls is not one of these paths: a name is only
 /// ever given by the table of [`with_externals`](Codegen::with_externals), which
-/// is where the caller says what each name means.
+/// is where the caller says what each name means. What the DSL asks of its own
+/// machinery is the other side of that: it goes by the `unsyn` path, since it is
+/// unsyn's own question and not one the spec wrote.
 ///
 /// [`GeneratedInput`]: crate::runtime::GeneratedInput
 #[derive(Debug, Clone)]
@@ -198,8 +203,8 @@ pub struct Codegen {
 impl Default for Codegen {
     fn default() -> Self {
         Self {
-            // Nothing is settled here: a `<NAME>` is the backend's business, and
-            // only the caller knows what a name of that backend's means.
+            // Nothing is settled here: a `<NAME>` is the caller's business, and
+            // only they know what a name of theirs means.
             externals: HashMap::new(),
             paths: Paths::default(),
             visibility: quote!(pub),
@@ -267,24 +272,25 @@ impl Codegen {
     /// use unsyn::{codegen::Codegen, input::TokenStream, semantics::analyze, syntax::Crate};
     ///
     /// let spec = "whitespace WS -> [' '];\n\
-    ///             lexer Name -> <XID_Start> <XID_Continue>*;";
+    ///             lexer Name -> <WORD_START> <WORD_CARRY_ON>*;";
     /// let mut tokens = TokenStream::from(spec);
     /// let file = Crate::parse(&mut tokens).expect("the spec should parse");
     /// let module = analyze(&file).expect("the spec should be well-formed");
     ///
-    /// // This project takes both classes from unsyn's own runtime, and says so.
+    /// // Where a name lives is entirely the caller's business; unsyn has no
+    /// // opinion and never resolves the path it is handed.
     /// let written = Codegen::new()
     ///     .with_externals([
-    ///         ("XID_Start".to_owned(), quote!(::unsyn::runtime::external::XID_Start)),
-    ///         ("XID_Continue".to_owned(), quote!(::unsyn::runtime::external::XID_Continue)),
+    ///         ("WORD_START".to_owned(), quote!(::my_backend::word_start)),
+    ///         ("WORD_CARRY_ON".to_owned(), quote!(::my_backend::word_continue)),
     ///     ])
     ///     .generate(&module)
     ///     .expect("the file should be writable")
     ///     .to_string();
     /// let written: String = written.split_whitespace().collect();
     ///
-    /// assert!(written.contains("::unsyn::runtime::external::XID_Start"), "{written}");
-    /// assert!(written.contains("::unsyn::runtime::external::XID_Continue"), "{written}");
+    /// assert!(written.contains("::my_backend::word_start"), "{written}");
+    /// assert!(written.contains("::my_backend::word_continue"), "{written}");
     /// ```
     ///
     /// A name here does not have to be one Rust could spend on a function of its

@@ -33,10 +33,6 @@ runtime = []
 codegen = ["dep:proc-macro2", "dep:quote", "dep:thiserror", "parserc/syntax"]
 serde = ["dep:serde", "parserc/serde"]
 
-[[example]]
-name = "pipeline"
-required-features = ["codegen"]
-
 [[test]]
 name = "bootstrap"
 required-features = ["codegen"]

@@ -56,7 +56,7 @@ syntax TUPLE -> OPEN IDENT (COMMA IDENT)+ CLOSE;
 
 syntax SHAPE -> SHARP DIGIT{4};
 
-lexer MATCHER -> <XID_Start>;
+lexer MATCHER -> <WORD_START>;
 lexer SLASH -> '/';
 lexer STAR -> '*';
 lexer UNDER -> '_';
@@ -69,3 +69,19 @@ syntax Either -> (IDENT | DIGIT) LEFT IDENT;
 syntax Dotted -> IDENT{2, 3};
 
 "#;
+
+//  The header `tests/data/mini.rs` carries and the generator does not write.
+//
+//  It is shared by the two tests that read and write that fixture, since the
+//  one says what the other keeps. It is line comments rather than a document
+//  comment because a comment is the one part of a generated file a kept copy
+//  may add without the copy ceasing to be what was generated.
+const HEADER: &str = "\
+// The Rust the generator wrote for the spec in `data/spec.rs`.
+//
+// This file is machine-made: `cargo test -p unsyn --test dump -- --nocapture`
+// prints what `Codegen` produces for that spec, and the result is kept here so
+// that the emitted types are compiled and run rather than only read back as
+// tokens. `tests/generated.rs` compares the two whole, and says so when they
+// fall apart.
+";

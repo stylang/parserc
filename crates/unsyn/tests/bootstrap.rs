@@ -22,7 +22,7 @@ fn read_bootstrap() -> &'static str {
 ///
 /// The spec of `unsyn` written in `unsyn` is the toughest input the analyzer
 /// has: it uses forward references, mutual recursion between the comment rules,
-/// and the backend externals `XID_Start` and `XID_Continue`.
+/// and the two externals its caller is asked to supply.
 fn parse_bootstrap() -> Crate<TokenStream<'static>> {
     let content = read_bootstrap();
 
@@ -81,7 +81,8 @@ fn bootstrap_semantics() {
     assert_eq!(module.definition("Expr").unwrap().kind(), NodeKind::Syntax);
     assert_eq!(module.definition("LF").unwrap().kind(), NodeKind::Lexer);
 
-    // The only externals the spec expects from the backend.
+    // The only externals the spec expects from outside the file. A spec may
+    // name them as it likes; nothing in unsyn knows either name.
     assert_eq!(module.externals(), ["XID_Start", "XID_Continue"]);
 
     // The spec says nothing twice: every member of every set it enumerates

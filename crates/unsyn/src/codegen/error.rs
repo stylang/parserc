@@ -132,11 +132,11 @@ mod tests {
 
     #[test]
     fn a_report_without_a_place_in_the_file_stops_at_what_it_could_not_do() {
-        let error = CodegenError::unmapped("XID_Continue", Span::None);
+        let error = CodegenError::unmapped("WORD_CARRY_ON", Span::None);
 
         assert_eq!(
             error.to_string(),
-            "nothing is mapped to `<XID_Continue>`: say what it calls with `Codegen::with_externals`"
+            "nothing is mapped to `<WORD_CARRY_ON>`: say what it calls with `Codegen::with_externals`"
         );
     }
 }

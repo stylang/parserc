@@ -19,12 +19,38 @@ use parserc::{
     AsStr, Span,
     syntax::{Syntax, SyntaxInput},
 };
-use quote::{ToTokens, quote};
+use quote::quote;
 use unsyn::{codegen::Codegen, input::TokenStream, semantics::analyze, syntax::Crate};
 
 #[allow(clippy::all, clippy::pedantic, unused_parens, dead_code)]
 #[path = "data/mini.rs"]
 mod mini;
+
+/// The caller's side of the fixture: what the spec's one `<NAME>` calls.
+///
+/// `data/mini.rs` writes `<WORD_START>`, and a name of a spec is only ever what
+/// whoever ran the generator said it was — unsyn ships no implementation of any
+/// name and reaches none of its own. So the function lives here, in the crate
+/// that keeps the generated file, which is exactly where the table said it
+/// lived when the file was written.
+mod backend {
+    use parserc::{Input, Parser};
+    use unsyn::runtime::GeneratedInput;
+
+    /// Takes one character that may start a word, leaving the rest in place.
+    ///
+    /// The contract of a `<NAME>`: at least one item consumed on success, and
+    /// `Ok` of what was taken, which is `parserc::Parser` with a function name.
+    /// What the answer is for a given character is entirely this file's choice,
+    /// which is the whole point: unsyn asks no question of a name it was not
+    /// given and ships no answer to any question a spec may ask.
+    pub fn word_start<I>(input: &mut I) -> Result<I, <I as Input>::Error>
+    where
+        I: GeneratedInput,
+    {
+        parserc::next_if(|c: char| c.is_alphabetic() || c == '_').parse(input)
+    }
+}
 
 //  The spec `data/mini.rs` was generated from, which `tests/dump.rs` prints too.
 //  It covers every construct `bootstrap.uns` is written with: sets, ranges, the
@@ -70,22 +96,18 @@ fn range_of<T: Syntax<TokenStream<'static>>>(taken: &T) -> (usize, usize) {
 ///
 /// The table is the one `tests/dump.rs` writes the fixture with, since a name
 /// is only what the caller says it is and the two have to agree about what the
-/// spec's `<NAME>`s call.
+/// spec's `<NAME>` calls: both send `WORD_START` to [`backend::word_start`],
+/// which is a function of these tests and not of unsyn. That the end of a
+/// keyword is not among the names said here is the point of the fixture — where
+/// a keyword ends is the DSL's question, not the spec's, and this file would not
+/// be writable if it were.
 fn regenerated() -> String {
     let mut tokens = TokenStream::from(SPEC);
     let file = Crate::parse(&mut tokens).expect("the spec should parse");
     let module = analyze(&file).expect("the spec should be well-formed");
 
-    let codegen = Codegen::new().with_externals([
-        (
-            "XID_Start".to_owned(),
-            quote!(::unsyn::runtime::external::XID_Start),
-        ),
-        (
-            "XID_Continue".to_owned(),
-            quote!(::unsyn::runtime::external::XID_Continue),
-        ),
-    ]);
+    let codegen = Codegen::new()
+        .with_externals([("WORD_START".to_owned(), quote!(crate::backend::word_start))]);
 
     match codegen.generate(&module) {
         Ok(generated) => generated.to_string(),
@@ -98,65 +120,53 @@ fn the_fixture_is_what_the_generator_writes() {
     let filepath = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("tests/data/mini.rs");
     let kept = fs::read_to_string(&filepath).expect("the fixture should be there");
 
-    let kept = declared(&kept);
-    let now = declared(&regenerated());
+    // The header of `dump.rs` and the body of the generator, put through the
+    // formatter the fixture is kept in, are the fixture: whole, byte for byte.
+    let now = formatted(&format!("{HEADER}{}", regenerated()));
 
     assert_eq!(
         kept,
         now,
-        "`{}` is behind the generator; run `cargo test -p unsyn --test dump -- --nocapture` and copy what it writes",
+        "`{}` is behind the generator; run `cargo test -p unsyn --test dump -- --nocapture`, format what it writes with `rustfmt --edition 2024`, and copy it over",
         filepath.display()
     );
 }
 
-/// The types a Rust file declares, each with the fields it declares: the
-/// inventory two files are the same when they share.
+/// The text of a Rust file as `rustfmt` would keep it, which is how the fixture
+/// is kept.
 ///
-/// A formatter may part the tokens of a generated file from the tokens the
-/// generator wrote — it puts a block around a long closure body and takes it
-/// away again from a short one — so the fixture is compared with what it stands
-/// for by what it declares, which is what a generated file is for.
-fn declared(text: &str) -> Vec<String> {
-    let file = syn::parse_file(text).expect("the file should be Rust");
+/// Both sides of the comparison above go through here, so it forgives nothing:
+/// two files are the same when their bytes are. That the kept copy is formatted
+/// is settled by asking the formatter rather than by excusing it, and `cargo
+/// fmt` is run over this crate anyway, so the tool is there whenever the test
+/// is.
+fn formatted(text: &str) -> String {
+    use std::{io::Write, process::Command};
 
-    let mut types = Vec::new();
+    let mut rustfmt = Command::new("rustfmt")
+        .args(["--edition", "2024", "--emit", "stdout", "--quiet"])
+        .stdin(std::process::Stdio::piped())
+        .stdout(std::process::Stdio::piped())
+        .stderr(std::process::Stdio::piped())
+        .spawn()
+        .expect("`rustfmt` is needed to compare the fixture with what the generator writes");
 
-    for item in &file.items {
-        match item {
-            syn::Item::Struct(given) => {
-                let fields = given
-                    .fields
-                    .iter()
-                    .map(|field| field.ty.to_token_stream().to_string())
-                    .collect::<Vec<_>>()
-                    .join("| ");
+    rustfmt
+        .stdin
+        .take()
+        .expect("a pipe to `rustfmt`")
+        .write_all(text.as_bytes())
+        .expect("the text should reach `rustfmt`");
 
-                types.push(format!("struct {}({fields})", given.ident));
-            }
-            syn::Item::Enum(given) => {
-                let variants = given
-                    .variants
-                    .iter()
-                    .map(|variant| {
-                        let fields = variant
-                            .fields
-                            .iter()
-                            .map(|field| field.ty.to_token_stream().to_string())
-                            .collect::<Vec<_>>()
-                            .join("| ");
+    let ran = rustfmt.wait_with_output().expect("`rustfmt` should run");
 
-                        format!("{}({fields})", variant.ident)
-                    })
-                    .collect::<Vec<_>>()
-                    .join(" | ");
+    assert!(
+        ran.status.success(),
+        "`rustfmt` refused the file: {}",
+        String::from_utf8_lossy(&ran.stderr)
+    );
 
-                types.push(format!("enum {}{{{variants}}}", given.ident));
-            }
-            _ => {}
-        }
-    }
-
-    types
+    String::from_utf8(ran.stdout).expect("`rustfmt` writes text")
 }
 
 #[test]
@@ -171,6 +181,10 @@ fn a_lexer_rule_keeps_the_text_it_took() {
     // one word and not the keyword `let` with `x` after it.
     assert!(mini::LET::parse(&mut TokenStream::from("letx")).is_err());
     assert_eq!(part::<mini::WORD<_>>("letx").0.0.as_str(), "letx");
+
+    // The end of the text is not a character that carries the word on, so a
+    // keyword with nothing after it is the keyword all the same.
+    assert_eq!(part::<mini::LET<_>>("let").1, "");
 }
 
 #[test]

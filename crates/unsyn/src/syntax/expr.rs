@@ -338,7 +338,7 @@ where
         /// the negated set, whose members are the values refused here.
         Bracket<I, Punctuated<SetItem<I>, Comma<I>>>,
     ),
-    /// `<…>`, a call of an external the backend provides, as in `<XID_Start>`.
+    /// `<…>`, a call of an external the caller provides, as in `<WORD_START>`.
     Call(Angle<I, Ident<I>>),
     /// `(<expr>)`, a group, so that an expression may sit inside a sequence or
     /// take a suffix as one operand.

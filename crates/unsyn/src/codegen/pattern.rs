@@ -28,6 +28,7 @@ use crate::syntax::{
     Expr, ExprNoTopAlt, ExprNoTopAlts, ExprWithSuffix, ExprWithoutSuffix, Range, Repeat, SetItem,
 };
 
+use super::Paths;
 use super::error::{CodegenError, CodegenKind};
 use super::set_items;
 
@@ -42,6 +43,16 @@ pub(crate) enum CharClass {
     Any,
     /// No character at all.
     Nothing,
+    /// Every character that may continue an identifier of the Unicode
+    /// standard.
+    ///
+    /// This is the one class the generator asks of itself rather than of a
+    /// caller: it ends every word-like literal, so that `'let'` is refused
+    /// inside `letter`, and a spec that never wrote a `<NAME>` has that
+    /// ending all the same. It is therefore written through the `unsyn` path
+    /// of a generation, and never through the path a table settles, which is
+    /// what keeps an empty table meaning no unmapped names.
+    XidContinue,
     /// Exactly these characters and these intervals of them.
     Chars(Vec<char>, Vec<(char, char)>),
     /// Whatever both sides take.
@@ -103,13 +114,18 @@ impl CharClass {
     }
 
     /// This class as a condition over one character named `c`.
-    pub(crate) fn render(&self) -> proc_macro2::TokenStream {
+    pub(crate) fn render(&self, paths: &Paths) -> proc_macro2::TokenStream {
         use proc_macro2::{Literal, TokenStream};
         use quote::quote;
 
         match self {
             CharClass::Any => quote!(true),
             CharClass::Nothing => quote!(false),
+            CharClass::XidContinue => {
+                let unsyn = &paths.unsyn;
+
+                quote!(#unsyn::runtime::keyword::is_xid_continue(c))
+            }
             CharClass::Chars(chars, ranges) => {
                 let tests = chars
                     .iter()
@@ -129,17 +145,17 @@ impl CharClass {
                 quote!(::core::matches!(c, #(#tests)|*))
             }
             CharClass::And(first, second) => {
-                let (first, second) = (first.render(), second.render());
+                let (first, second) = (first.render(paths), second.render(paths));
 
                 quote!((#first && #second))
             }
             CharClass::Or(first, second) => {
-                let (first, second) = (first.render(), second.render());
+                let (first, second) = (first.render(paths), second.render(paths));
 
                 quote!((#first || #second))
             }
             CharClass::Not(inner) => {
-                let inner = inner.render();
+                let inner = inner.render(paths);
 
                 quote!(!#inner)
             }
@@ -151,10 +167,10 @@ impl CharClass {
     /// A class that takes every character is written over a nameless character,
     /// since the question it answers does not turn on the one it is asked about
     /// and a generated file should not warn about a binding it never reads.
-    pub(crate) fn closure(&self) -> proc_macro2::TokenStream {
+    pub(crate) fn closure(&self, paths: &Paths) -> proc_macro2::TokenStream {
         use quote::quote;
 
-        let body = self.render();
+        let body = self.render(paths);
 
         match self {
             CharClass::Any => quote!(|_: char| #body),
@@ -170,13 +186,13 @@ pub(crate) enum Step {
     Class(CharClass),
     /// Take exactly these characters, in this order.
     Lit(String),
-    /// Take what an external of the backend takes, which is at least one character
-    /// and as many as it likes.
+    /// Take what an external of the caller's table takes, which is at least one
+    /// character and as many as it likes.
     ///
     /// The [`Span`] is where the `<NAME>` was written, kept so that a name no
     /// table was given can be reported against the source rather than as a bare
-    /// refusal. A step the generator itself asks for, which is the end of a
-    /// keyword, is written where the keyword was.
+    /// refusal. Only a `<NAME>` of the spec ever makes one: the generator asks
+    /// nothing of a caller's table on its own account.
     External(String, Span),
     /// Take what the token rule of that name takes.
     Ref(String),
@@ -543,7 +559,7 @@ impl<'a> PatternBuilder<'a> {
 /// A literal that reads as a word is a keyword of the language being described,
 /// and a keyword ends where an identifier would carry on: `'let'` must not match
 /// the front of `letter`. The question is asked after the literal and takes
-/// nothing, so it costs one probe of one character.
+/// nothing, and it is a question about one character, so it costs one probe.
 pub(crate) fn literal<I: UnsynInput>(lit: &LitStr<I>) -> Result<Step, CodegenError> {
     let (text, error) = str_value(lit);
 
@@ -563,25 +579,12 @@ pub(crate) fn literal<I: UnsynInput>(lit: &LitStr<I>) -> Result<Step, CodegenErr
     if text.chars().count() > 1 && super::name::is_word(&text) {
         return Ok(Step::Seq(vec![
             matched,
-            Step::NotFollowed(Box::new(Step::External(
-                KEYWORD_END.to_owned(),
-                lit.to_span(),
-            ))),
+            Step::NotFollowed(Box::new(Step::Class(CharClass::XidContinue))),
         ]));
     }
 
     Ok(matched)
 }
-
-/// The external a keyword asks about to find where it ends.
-///
-/// The name is asked for the way a `<NAME>` in a rule asks for one, so it is
-/// called wherever the table of the [`Codegen`](super::Codegen) gives it, and a
-/// run that gave no table is reported for it as it would be for any other name.
-/// Which name this is stays unsyn's own choice rather than a name the described
-/// language declares: a grammar that means something else by the end of a word
-/// says so by giving this name the function it wants.
-const KEYWORD_END: &str = "XID_Continue";
 
 /// The character a code point literal denotes.
 fn one_char<I: UnsynInput>(lit: &LitUnicode<I>) -> Result<CharClass, CodegenError> {
@@ -685,31 +688,5 @@ pub(crate) fn alternative_of(branches: Vec<Step>) -> Step {
         0 => Step::Lit(String::new()),
         1 => rest.into_iter().next().expect("one branch"),
         _ => Step::Alt(rest),
-    }
-}
-
-#[cfg(all(test, feature = "runtime"))]
-mod tests {
-    use super::KEYWORD_END;
-
-    #[test]
-    fn the_external_a_keyword_asks_is_one_the_runtime_gives() {
-        // A keyword of more than one character asks `KEYWORD_END` of the same
-        // table any other `<NAME>` is settled by, which makes the name unsyn's
-        // own choice rather than one its caller would have to invent. That is a
-        // promise unsyn has to keep: every file with a keyword in it is written
-        // against the function this name reaches, and nothing else here would
-        // say that a function of it exists at all. What the tests that map the
-        // name generate would only come apart in the crate that compiles the
-        // file it wrote, which is where this catches it instead.
-        let mut input = parserc::chars::TokenStream::<parserc::Kind>::from("a");
-
-        let given = match KEYWORD_END {
-            "XID_Start" => crate::runtime::external::XID_Start(&mut input).is_ok(),
-            "XID_Continue" => crate::runtime::external::XID_Continue(&mut input).is_ok(),
-            other => panic!("{other} is asked of a module that gives no such external"),
-        };
-
-        assert!(given, "{KEYWORD_END} matches nothing it should");
     }
 }

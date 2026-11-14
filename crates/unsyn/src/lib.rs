@@ -27,16 +27,19 @@
 //!
 //! - `runtime`, the [`runtime`] module, is what a grammar the generator writes
 //!   is *compiled against*: the [`GeneratedInput`](runtime::GeneratedInput)
-//!   every generated type is bounded by, and the functions a `<NAME>` in a
-//!   pattern is mapped onto when the generator is run.
+//!   every generated type is bounded by, and the one question the DSL asks of
+//!   itself, about where a keyword ends. What a `<NAME>` in a pattern calls is
+//!   deliberately not here: such a name is the caller's link, and unsyn ships no
+//!   answer to it.
 //!   It knows nothing of the DSL, and needs nothing but a character stream.
 //! - `codegen`, the same-named feature, is the DSL itself: the reader, the
 //!   analyzer and the generator, in the stages its own module document lays
 //!   out, over `quote` and `proc_macro2`.
 //!
 //! The spec of the language, written in the language itself, lives in
-//! `bootstrap.uns` next to this crate; `examples/pipeline.rs` runs the whole
-//! build phase over it, from source text to the Rust of the tree it describes.
+//! `bootstrap.uns` next to this crate, and `tests/bootstrap.rs` runs the reader
+//! and the analyzer over it, from source text to the module a tree is generated
+//! from.
 //!
 //! A crate that keeps a generated file and never produces one therefore takes
 //! the runtime alone, and leaves `quote` and `proc-macro2` out of its tree:
