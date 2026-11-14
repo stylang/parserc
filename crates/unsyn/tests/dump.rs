@@ -16,9 +16,29 @@
 use std::{fs, path::PathBuf};
 
 use parserc::syntax::Syntax;
+use quote::quote;
 use unsyn::{codegen::Codegen, input::TokenStream, semantics::analyze, syntax::Crate};
 
 include!("data/spec.rs");
+
+/// A generator told what the two classes the spec names call.
+///
+/// The spec spells keywords and names `<XID_Start>` and `<XID_Continue>`, and a
+/// name is only ever what the caller of the generator says it is, so this is
+/// where the caller says it: both go to the functions unsyn's own runtime
+/// provides. `tests/generated.rs` compiles what this writes and must agree.
+fn codegen() -> Codegen {
+    Codegen::new().with_externals([
+        (
+            "XID_Start".to_owned(),
+            quote!(::unsyn::runtime::external::XID_Start),
+        ),
+        (
+            "XID_Continue".to_owned(),
+            quote!(::unsyn::runtime::external::XID_Continue),
+        ),
+    ])
+}
 
 #[test]
 fn dump() {
@@ -26,7 +46,7 @@ fn dump() {
     let file = Crate::parse(&mut tokens).expect("the spec should parse");
     let module = analyze(&file).expect("the spec should be well formed");
 
-    let generated = match Codegen::new().generate(&module) {
+    let generated = match codegen().generate(&module) {
         Ok(generated) => generated.to_string(),
         Err(errors) => {
             for error in errors.iter() {

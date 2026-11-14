@@ -15,7 +15,7 @@ use crate::{
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub enum NodeKind {
-    /// A `whitespace` node: the trivia matcher of the language.
+    /// A `whitespace` node: the trivia of the language.
     Whitespace,
     /// A `lexer` node: a terminal pattern.
     Lexer,
@@ -348,7 +348,7 @@ mod tests {
         assert!(table.get_of_kind("A", NodeKind::Whitespace).is_none());
         assert!(table.get("no such node").is_none());
 
-        // There is one trivia matcher per file, and the table knows it by kind
+        // There is one trivia rule per file, and the table knows it by kind
         // alone.
         assert_eq!(table.whitespace().map(Definition::name), Some("W"));
 

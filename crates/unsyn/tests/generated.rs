@@ -19,7 +19,7 @@ use parserc::{
     AsStr, Span,
     syntax::{Syntax, SyntaxInput},
 };
-use quote::ToTokens;
+use quote::{ToTokens, quote};
 use unsyn::{codegen::Codegen, input::TokenStream, semantics::analyze, syntax::Crate};
 
 #[allow(clippy::all, clippy::pedantic, unused_parens, dead_code)]
@@ -67,12 +67,27 @@ fn range_of<T: Syntax<TokenStream<'static>>>(taken: &T) -> (usize, usize) {
 }
 
 /// The same module `data/mini.rs` holds, generated now.
+///
+/// The table is the one `tests/dump.rs` writes the fixture with, since a name
+/// is only what the caller says it is and the two have to agree about what the
+/// spec's `<NAME>`s call.
 fn regenerated() -> String {
     let mut tokens = TokenStream::from(SPEC);
     let file = Crate::parse(&mut tokens).expect("the spec should parse");
     let module = analyze(&file).expect("the spec should be well-formed");
 
-    match Codegen::new().generate(&module) {
+    let codegen = Codegen::new().with_externals([
+        (
+            "XID_Start".to_owned(),
+            quote!(::unsyn::runtime::external::XID_Start),
+        ),
+        (
+            "XID_Continue".to_owned(),
+            quote!(::unsyn::runtime::external::XID_Continue),
+        ),
+    ]);
+
+    match codegen.generate(&module) {
         Ok(generated) => generated.to_string(),
         Err(errors) => panic!("the spec should be writable: {errors:?}"),
     }
@@ -215,7 +230,7 @@ fn the_wildcard_stands_for_any_one_character() {
     assert_eq!(any.1.len(), 2, "{any:?}");
 
     // The run is of a group of two alternatives, so each of its elements says
-    // which of them it was read as: a character the matcher takes, or any one
+    // which of them it was read as: a character the external takes, or any one
     // character at all.
     assert!(
         matches!(
@@ -408,9 +423,9 @@ fn a_run_of_one_or_more_takes_at_least_one() {
 
 #[test]
 fn a_counted_run_is_checked_after_it_was_taken() {
-    let shape = taken::<mini::SHAPE<_>>("#1234");
+    let def = taken::<mini::SHAPE<_>>("#1234");
 
-    assert_eq!(shape.1.0.len(), 4, "{shape:?}");
+    assert_eq!(def.1.0.len(), 4, "{def:?}");
 
     // One character short of the count the rule stated is not a shape, and the
     // failure is one a caller may recover from.

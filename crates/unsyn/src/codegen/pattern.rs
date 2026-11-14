@@ -1,15 +1,15 @@
-//! What a token rule matches: the character program a definition body compiles
+//! What a token rule matches: the character pattern a definition body compiles
 //! to.
 //!
 //! A `lexer` definition is read against the source text rather than against
-//! other nodes, so its body is compiled here into a small program over
-//! characters ([`Inst`]) before any code is emitted. That step exists so the
+//! other nodes, so its body is compiled here into a small pattern over
+//! characters ([`Step`]) before any code is emitted. That step exists so the
 //! emission can be about running the pattern rather than about working out what
 //! it means: the shortcuts of [`scan`](super::scan) are all justified by a
-//! program that says the same thing more plainly, and the program is what the
+//! pattern that says the same thing more plainly, and the pattern is what the
 //! tests of this module can compare against.
 //!
-//! The program keeps the difference the DSL draws between *taking* something and
+//! The pattern keeps the difference the DSL draws between *taking* something and
 //! *asking* about it. `~`, `except` and `followed` ask; only `~` then takes
 //! something anyway, and takes exactly one character, which is why a line
 //! comment's `~[LF]*` reads to the end of the line rather than stopping before
@@ -37,7 +37,7 @@ use super::set_items;
 /// `['a'-'z', 'A'-'Z']` and `U+0061-U+007A | U+0041-U+005A` be read as one
 /// pattern, and lets a repetition of either be scanned in a single pass.
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub(crate) enum Pred {
+pub(crate) enum CharClass {
     /// Every character, which is what the wildcard `_` denotes.
     Any,
     /// No character at all.
@@ -45,14 +45,14 @@ pub(crate) enum Pred {
     /// Exactly these characters and these intervals of them.
     Chars(Vec<char>, Vec<(char, char)>),
     /// Whatever both sides take.
-    And(Box<Pred>, Box<Pred>),
+    And(Box<CharClass>, Box<CharClass>),
     /// Whatever either side takes.
-    Or(Box<Pred>, Box<Pred>),
+    Or(Box<CharClass>, Box<CharClass>),
     /// Every character the operand does not take.
-    Not(Box<Pred>),
+    Not(Box<CharClass>),
 }
 
-impl Pred {
+impl CharClass {
     /// The class of exactly one character.
     pub(crate) fn of(c: char) -> Self {
         Self::Chars(vec![c], vec![])
@@ -68,37 +68,37 @@ impl Pred {
     }
 
     /// The union of several classes.
-    pub(crate) fn union(classes: impl IntoIterator<Item = Pred>) -> Pred {
+    pub(crate) fn union(classes: impl IntoIterator<Item = CharClass>) -> CharClass {
         classes
             .into_iter()
-            .fold(Pred::Nothing, |acc, next| acc.or(next))
+            .fold(CharClass::Nothing, |acc, next| acc.or(next))
     }
 
     /// This class's complement.
-    pub(crate) fn negated(self) -> Pred {
+    pub(crate) fn negated(self) -> CharClass {
         match self {
             // `_` complemented is nothing, and a double complement cancels: both
             // read better composed than as `!Any` or `!!class`.
-            Pred::Any => Pred::Nothing,
-            Pred::Nothing => Pred::Any,
-            Pred::Not(inner) => *inner,
-            other => Pred::Not(Box::new(other)),
+            CharClass::Any => CharClass::Nothing,
+            CharClass::Nothing => CharClass::Any,
+            CharClass::Not(inner) => *inner,
+            other => CharClass::Not(Box::new(other)),
         }
     }
 
-    pub(crate) fn and(self, other: Pred) -> Pred {
+    pub(crate) fn and(self, other: CharClass) -> CharClass {
         match (self, other) {
-            (Pred::Nothing, _) | (_, Pred::Nothing) => Pred::Nothing,
-            (Pred::Any, other) | (other, Pred::Any) => other,
-            (first, second) => Pred::And(Box::new(first), Box::new(second)),
+            (CharClass::Nothing, _) | (_, CharClass::Nothing) => CharClass::Nothing,
+            (CharClass::Any, other) | (other, CharClass::Any) => other,
+            (first, second) => CharClass::And(Box::new(first), Box::new(second)),
         }
     }
 
-    pub(crate) fn or(self, other: Pred) -> Pred {
+    pub(crate) fn or(self, other: CharClass) -> CharClass {
         match (self, other) {
-            (Pred::Any, _) | (_, Pred::Any) => Pred::Any,
-            (Pred::Nothing, other) | (other, Pred::Nothing) => other,
-            (first, second) => Pred::Or(Box::new(first), Box::new(second)),
+            (CharClass::Any, _) | (_, CharClass::Any) => CharClass::Any,
+            (CharClass::Nothing, other) | (other, CharClass::Nothing) => other,
+            (first, second) => CharClass::Or(Box::new(first), Box::new(second)),
         }
     }
 
@@ -108,9 +108,9 @@ impl Pred {
         use quote::quote;
 
         match self {
-            Pred::Any => quote!(true),
-            Pred::Nothing => quote!(false),
-            Pred::Chars(chars, ranges) => {
+            CharClass::Any => quote!(true),
+            CharClass::Nothing => quote!(false),
+            CharClass::Chars(chars, ranges) => {
                 let tests = chars
                     .iter()
                     .map(|c| {
@@ -128,17 +128,17 @@ impl Pred {
 
                 quote!(::core::matches!(c, #(#tests)|*))
             }
-            Pred::And(first, second) => {
+            CharClass::And(first, second) => {
                 let (first, second) = (first.render(), second.render());
 
                 quote!((#first && #second))
             }
-            Pred::Or(first, second) => {
+            CharClass::Or(first, second) => {
                 let (first, second) = (first.render(), second.render());
 
                 quote!((#first || #second))
             }
-            Pred::Not(inner) => {
+            CharClass::Not(inner) => {
                 let inner = inner.render();
 
                 quote!(!#inner)
@@ -157,7 +157,7 @@ impl Pred {
         let body = self.render();
 
         match self {
-            Pred::Any => quote!(|_: char| #body),
+            CharClass::Any => quote!(|_: char| #body),
             _ => quote!(|c: char| #body),
         }
     }
@@ -165,20 +165,25 @@ impl Pred {
 
 /// One step of a token pattern.
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub(crate) enum Inst {
+pub(crate) enum Step {
     /// Take one character of this class.
-    Class(Pred),
+    Class(CharClass),
     /// Take exactly these characters, in this order.
     Lit(String),
-    /// Take what a matcher of the backend takes, which is at least one character
+    /// Take what an external of the backend takes, which is at least one character
     /// and as many as it likes.
-    Matcher(String),
+    ///
+    /// The [`Span`] is where the `<NAME>` was written, kept so that a name no
+    /// table was given can be reported against the source rather than as a bare
+    /// refusal. A step the generator itself asks for, which is the end of a
+    /// keyword, is written where the keyword was.
+    External(String, Span),
     /// Take what the token rule of that name takes.
     Ref(String),
     /// Take what each step takes, in order.
-    Seq(Vec<Inst>),
+    Seq(Vec<Step>),
     /// Take what the first alternative that fits takes.
-    Alt(Vec<Inst>),
+    Alt(Vec<Step>),
     /// Take the step as often as the text allows, at least `min` times and at
     /// most `max`.
     Rep {
@@ -187,24 +192,24 @@ pub(crate) enum Inst {
         /// The most number of times it is taken, or nothing when the text decides.
         max: Option<usize>,
         /// What is repeated.
-        item: Box<Inst>,
+        item: Box<Step>,
     },
     /// Fail when the set fits here, and take one character when it does not.
-    Not(Box<Inst>),
+    Not(Box<Step>),
     /// Take the operand unless what removes it fits where the operand starts.
     Except {
         /// What is taken.
-        item: Box<Inst>,
+        item: Box<Step>,
         /// What is taken out of it, tested at the start of the operand.
-        removed: Box<Inst>,
+        removed: Box<Step>,
     },
     /// Take the operand, and ask that what follows it come next without being
     /// taken here.
     Followed {
         /// What is taken.
-        item: Box<Inst>,
+        item: Box<Step>,
         /// What has to come after it.
-        next: Box<Inst>,
+        next: Box<Step>,
     },
     /// Fail when the operand fits next, and take nothing when it does not.
     ///
@@ -212,23 +217,23 @@ pub(crate) enum Inst {
     /// `'let'` is `'let'` only where an `XID_Continue` character does not
     /// follow, and the question is asked about the text without taking any of
     /// it, which is what separates it from `~`.
-    NotFollowed(Box<Inst>),
+    NotFollowed(Box<Step>),
 }
 
-impl Inst {
+impl Step {
     /// Returns `true` when this step can take nothing at all.
     fn takes_nothing(&self, empty: &HashSet<String>) -> bool {
         match self {
-            Inst::Class(_) | Inst::Matcher(_) => false,
-            Inst::Lit(text) => text.is_empty(),
-            Inst::Ref(name) => empty.contains(name.as_str()),
-            Inst::Seq(steps) => steps.iter().all(|step| step.takes_nothing(empty)),
-            Inst::Alt(steps) => steps.iter().any(|step| step.takes_nothing(empty)),
-            Inst::Rep { min, item, .. } => *min == 0 && item.takes_nothing(empty),
+            Step::Class(_) | Step::External(..) => false,
+            Step::Lit(text) => text.is_empty(),
+            Step::Ref(name) => empty.contains(name.as_str()),
+            Step::Seq(steps) => steps.iter().all(|step| step.takes_nothing(empty)),
+            Step::Alt(steps) => steps.iter().any(|step| step.takes_nothing(empty)),
+            Step::Rep { min, item, .. } => *min == 0 && item.takes_nothing(empty),
             // A complement always takes the one character it was asked about, the
             // other two always take their operand, and a lookahead takes nothing.
-            Inst::Not(_) | Inst::Except { .. } | Inst::Followed { .. } => false,
-            Inst::NotFollowed(_) => true,
+            Step::Not(_) | Step::Except { .. } | Step::Followed { .. } => false,
+            Step::NotFollowed(_) => true,
         }
     }
 
@@ -236,19 +241,19 @@ impl Inst {
     /// forever.
     fn is_stuck(&self, empty: &HashSet<String>) -> bool {
         match self {
-            Inst::Rep { max, item, .. } => {
+            Step::Rep { max, item, .. } => {
                 // Only an unbounded repetition can turn forever: a bound is
                 // counted out of the loop, however the item behaves, and `X?` is
                 // tried once. An unbounded one is entered again whenever its
                 // item fits, which it always does when the item takes nothing.
                 max.is_none() && item.takes_nothing(empty)
             }
-            Inst::Seq(steps) | Inst::Alt(steps) => steps.iter().any(|step| step.is_stuck(empty)),
+            Step::Seq(steps) | Step::Alt(steps) => steps.iter().any(|step| step.is_stuck(empty)),
             // A lookahead never moves, but it is also never what a repetition
             // repeats: `~` and the suffixes only ever sit on a set or an
             // operand, and the wildcard below already answers for it.
-            Inst::Not(item) => item.is_stuck(empty),
-            Inst::Except { item, .. } | Inst::Followed { item, .. } => item.is_stuck(empty),
+            Step::Not(item) => item.is_stuck(empty),
+            Step::Except { item, .. } | Step::Followed { item, .. } => item.is_stuck(empty),
             _ => false,
         }
     }
@@ -257,9 +262,9 @@ impl Inst {
     /// where one is reached, or nothing when the operand is written out.
     fn named(&self) -> Option<&str> {
         match self {
-            Inst::Ref(name) => Some(name),
-            Inst::Seq(steps) | Inst::Alt(steps) => steps.iter().find_map(Inst::named),
-            Inst::Rep { item, .. } => item.named(),
+            Step::Ref(name) => Some(name),
+            Step::Seq(steps) | Step::Alt(steps) => steps.iter().find_map(Step::named),
+            Step::Rep { item, .. } => item.named(),
             _ => None,
         }
     }
@@ -269,14 +274,14 @@ impl Inst {
     /// reads less of the text than it was offered.
     fn reaches(&self) -> usize {
         match self {
-            Inst::Lit(text) => text.chars().count(),
-            Inst::Seq(steps) => steps.iter().map(Inst::reaches).sum(),
-            Inst::Alt(steps) => steps.iter().map(Inst::reaches).min().unwrap_or_default(),
-            Inst::Rep { min, item, .. } => *min * item.reaches(),
-            Inst::Except { item, .. } | Inst::Followed { item, .. } => item.reaches(),
+            Step::Lit(text) => text.chars().count(),
+            Step::Seq(steps) => steps.iter().map(Step::reaches).sum(),
+            Step::Alt(steps) => steps.iter().map(Step::reaches).min().unwrap_or_default(),
+            Step::Rep { min, item, .. } => *min * item.reaches(),
+            Step::Except { item, .. } | Step::Followed { item, .. } => item.reaches(),
             // A lookahead promises nothing about the text it does not take.
-            Inst::NotFollowed(_) => 0,
-            // A class, a matcher, a reference or a complement: one character is
+            Step::NotFollowed(_) => 0,
+            // A class, an external, a reference or a complement: one character is
             // all any of them promises, since none of them is measured here.
             _ => 1,
         }
@@ -284,51 +289,51 @@ impl Inst {
 
     /// The class this step takes, when it takes exactly one character and
     /// nothing else about the text decides the answer.
-    pub(crate) fn single_char(&self, classes: &HashMap<String, Pred>) -> Option<Pred> {
+    pub(crate) fn char_class(&self, classes: &HashMap<String, CharClass>) -> Option<CharClass> {
         match self {
-            Inst::Class(pred) => Some(pred.clone()),
-            Inst::Lit(text) => {
+            Step::Class(class) => Some(class.clone()),
+            Step::Lit(text) => {
                 let mut chars = text.chars();
 
                 match (chars.next(), chars.next()) {
-                    (Some(one), None) => Some(Pred::of(one)),
+                    (Some(one), None) => Some(CharClass::of(one)),
                     _ => None,
                 }
             }
-            Inst::Ref(name) => classes.get(name).cloned(),
-            // A matcher's length is its own business, so it is never a class.
-            Inst::Matcher(_) => None,
-            Inst::Seq(steps) => steps
+            Step::Ref(name) => classes.get(name).cloned(),
+            // An external's length is its own business, so it is never a class.
+            Step::External(..) => None,
+            Step::Seq(steps) => steps
                 .first()
                 .filter(|_| steps.len() == 1)
-                .and_then(|step| step.single_char(classes)),
-            Inst::Alt(steps) => steps
+                .and_then(|step| step.char_class(classes)),
+            Step::Alt(steps) => steps
                 .iter()
-                .map(|step| step.single_char(classes))
+                .map(|step| step.char_class(classes))
                 .collect::<Option<Vec<_>>>()
-                .map(Pred::union),
-            Inst::Not(item) => item.single_char(classes).map(Pred::negated),
-            Inst::Rep { .. } => None,
-            Inst::Except { item, removed } => {
+                .map(CharClass::union),
+            Step::Not(item) => item.char_class(classes).map(CharClass::negated),
+            Step::Rep { .. } => None,
+            Step::Except { item, removed } => {
                 // Removing is a complement of one character only when what is
                 // removed is one character too: `'a'-'c' except 'b'` is a class,
                 // while `IDENTIFIER except KEYWORDS` turns on the text that
                 // follows the character being decided on.
-                let item = item.single_char(classes)?;
-                let removed = removed.single_char(classes)?;
+                let item = item.char_class(classes)?;
+                let removed = removed.char_class(classes)?;
 
                 Some(item.and(removed.negated()))
             }
             // An assertion about what follows is not a question about one
             // character.
-            Inst::Followed { .. } | Inst::NotFollowed(_) => None,
+            Step::Followed { .. } | Step::NotFollowed(_) => None,
         }
     }
 }
 
 /// What a token pattern needs to know about the names it refers to.
 #[derive(Debug, Default)]
-pub(crate) struct LexRefs {
+pub(crate) struct RuleNames {
     /// The names of rules that read text, which a pattern may step over.
     pub(crate) tokens: HashSet<String>,
     /// The names of node rules, which a token cannot be built out of.
@@ -338,64 +343,64 @@ pub(crate) struct LexRefs {
     pub(crate) empty: HashSet<String>,
 }
 
-/// One token type to write: its name and the program its `parse` runs.
-pub(crate) struct Scanner {
+/// One token type to write: its name and the pattern its `parse` runs.
+pub(crate) struct TokenPattern {
     /// The name of the type.
     pub(crate) name: String,
-    /// The program of the rule it was built from.
-    pub(crate) inst: Inst,
+    /// The pattern of the rule it was built from.
+    pub(crate) step: Step,
 }
 
-impl Scanner {
-    /// A token type from the program it runs.
-    pub(crate) fn plain(name: impl Into<String>, inst: Inst) -> Self {
+impl TokenPattern {
+    /// A token type from the pattern it runs.
+    pub(crate) fn new(name: impl Into<String>, step: Step) -> Self {
         Self {
             name: name.into(),
-            inst,
+            step,
         }
     }
 }
 
-/// Builds the program of a token pattern out of the CST of a definition body.
-pub(crate) struct Builder<'a> {
-    refs: &'a LexRefs,
+/// Builds the pattern of a token pattern out of the CST of a definition body.
+pub(crate) struct PatternBuilder<'a> {
+    refs: &'a RuleNames,
 }
 
-impl<'a> Builder<'a> {
+impl<'a> PatternBuilder<'a> {
     /// Prepares a builder over the names `refs` describes.
-    pub(crate) fn new(refs: &'a LexRefs) -> Self {
+    pub(crate) fn new(refs: &'a RuleNames) -> Self {
         Self { refs }
     }
 
-    /// The program of a whole definition body.
-    pub(crate) fn expr<I: UnsynInput>(&self, expr: &Expr<I>) -> Result<Inst, CodegenError> {
+    /// The pattern of a whole definition body.
+    pub(crate) fn expr<I: UnsynInput>(&self, expr: &Expr<I>) -> Result<Step, CodegenError> {
         let mut branches = vec![self.alts(&expr.first)?];
 
         for (_, alts) in expr.rest.iter() {
             branches.push(self.alts(alts)?);
         }
 
-        Ok(alt_of(branches))
+        Ok(alternative_of(branches))
     }
 
-    fn alts<I: UnsynInput>(&self, seq: &ExprNoTopAlts<I>) -> Result<Inst, CodegenError> {
+    fn alts<I: UnsynInput>(&self, seq: &ExprNoTopAlts<I>) -> Result<Step, CodegenError> {
         let mut steps = vec![self.alt(&seq.first)?];
 
         for (_, expr) in seq.rest.iter() {
             steps.push(self.alt(expr)?);
         }
 
-        Ok(seq_of(steps))
+        Ok(sequence_of(steps))
     }
 
-    fn alt<I: UnsynInput>(&self, expr: &ExprNoTopAlt<I>) -> Result<Inst, CodegenError> {
+    fn alt<I: UnsynInput>(&self, expr: &ExprNoTopAlt<I>) -> Result<Step, CodegenError> {
         match expr {
             ExprNoTopAlt::WithSuffix(expr) => self.with_suffix(expr),
             ExprNoTopAlt::WithoutSuffix(expr) => self.operand(expr),
         }
     }
 
-    fn with_suffix<I: UnsynInput>(&self, expr: &ExprWithSuffix<I>) -> Result<Inst, CodegenError> {
+    fn with_suffix<I: UnsynInput>(&self, expr: &ExprWithSuffix<I>) -> Result<Step, CodegenError> {
         match expr {
             ExprWithSuffix::Star(target, _) => self.rep(0, None, target, expr),
             ExprWithSuffix::Question(target, _) => self.rep(0, Some(1), target, expr),
@@ -411,13 +416,13 @@ impl<'a> Builder<'a> {
             ExprWithSuffix::Concat { target, suffix, .. } => {
                 // Both operands are taken, the second from where the first
                 // ended, and the two together are one token.
-                Ok(seq_of(vec![self.operand(target)?, self.alt(suffix)?]))
+                Ok(sequence_of(vec![self.operand(target)?, self.alt(suffix)?]))
             }
-            ExprWithSuffix::Followed { target, suffix, .. } => Ok(Inst::Followed {
+            ExprWithSuffix::Followed { target, suffix, .. } => Ok(Step::Followed {
                 item: Box::new(self.operand(target)?),
                 next: Box::new(self.alt(suffix)?),
             }),
-            ExprWithSuffix::Except { target, tokens, .. } => Ok(Inst::Except {
+            ExprWithSuffix::Except { target, tokens, .. } => Ok(Step::Except {
                 item: Box::new(self.operand(target)?),
                 removed: Box::new(self.operand(tokens)?),
             }),
@@ -430,13 +435,13 @@ impl<'a> Builder<'a> {
         max: Option<usize>,
         target: &ExprWithoutSuffix<I>,
         reported: &ExprWithSuffix<I>,
-    ) -> Result<Inst, CodegenError> {
+    ) -> Result<Step, CodegenError> {
         let item = Box::new(self.operand(target)?);
 
-        let inst = Inst::Rep { min, max, item };
+        let step = Step::Rep { min, max, item };
 
-        if inst.is_stuck(&self.refs.empty) {
-            let name = inst
+        if step.is_stuck(&self.refs.empty) {
+            let name = step
                 .named()
                 .unwrap_or("an operand that can match nothing")
                 .to_owned();
@@ -447,36 +452,39 @@ impl<'a> Builder<'a> {
             });
         }
 
-        Ok(inst)
+        Ok(step)
     }
 
-    /// The program of an operand that carries no suffix of its own, which is
+    /// The pattern of an operand that carries no suffix of its own, which is
     /// what a `syntax` rule needs when it asks a character-level question
     /// (`~ […]`, `[…]`) inside a pattern of nodes.
     pub(crate) fn operand<I: UnsynInput>(
         &self,
         expr: &ExprWithoutSuffix<I>,
-    ) -> Result<Inst, CodegenError> {
+    ) -> Result<Step, CodegenError> {
         match expr {
             ExprWithoutSuffix::Str(lit) => literal(lit),
-            ExprWithoutSuffix::Unicode(lit) => one_char(lit).map(Inst::Class),
+            ExprWithoutSuffix::Unicode(lit) => one_char(lit).map(Step::Class),
             ExprWithoutSuffix::Ident(ident) => self.reference(ident.0.as_str(), &ident.to_span()),
-            ExprWithoutSuffix::Call(angle) => Ok(Inst::Matcher(angle.body.0.as_str().to_owned())),
+            ExprWithoutSuffix::Call(angle) => Ok(Step::External(
+                angle.body.0.as_str().to_owned(),
+                angle.to_span(),
+            )),
             ExprWithoutSuffix::Paren(paren) => self.expr(&paren.body),
             ExprWithoutSuffix::Set(bracket) => self.set_of(bracket),
-            ExprWithoutSuffix::Tilde(_, bracket) => Ok(Inst::Not(Box::new(self.set_of(bracket)?))),
+            ExprWithoutSuffix::Tilde(_, bracket) => Ok(Step::Not(Box::new(self.set_of(bracket)?))),
         }
     }
 
-    /// The program a name stands for: the rule it names, or any single character
+    /// The pattern a name stands for: the rule it names, or any single character
     /// for the wildcard.
-    fn reference(&self, name: &str, span: &Span) -> Result<Inst, CodegenError> {
+    fn reference(&self, name: &str, span: &Span) -> Result<Step, CodegenError> {
         if name == WILDCARD {
-            return Ok(Inst::Class(Pred::Any));
+            return Ok(Step::Class(CharClass::Any));
         }
 
         if self.refs.tokens.contains(name) {
-            return Ok(Inst::Ref(name.to_owned()));
+            return Ok(Step::Ref(name.to_owned()));
         }
 
         if self.refs.syntaxes.contains(name) {
@@ -490,13 +498,13 @@ impl<'a> Builder<'a> {
         Err(CodegenError::unresolved(name, span.clone()))
     }
 
-    /// The program of a set: one class of characters, plus whatever members
+    /// The pattern of a set: one class of characters, plus whatever members
     /// reach further than one character or ask a question about the text.
     pub(crate) fn set_of<I: UnsynInput>(
         &self,
         bracket: &super::SetOf<I>,
-    ) -> Result<Inst, CodegenError> {
-        let mut steps: Vec<Inst> = vec![];
+    ) -> Result<Step, CodegenError> {
+        let mut steps: Vec<Step> = vec![];
 
         for item in set_items(&bracket.body) {
             steps.push(self.set_item(item)?);
@@ -504,39 +512,39 @@ impl<'a> Builder<'a> {
 
         // A member that reaches further than one character is tried first,
         // because a set offers all of its members and taking less of the text
-        // than it offers would be reading the pattern narrowly. `alt_of` then
+        // than it offers would be reading the pattern narrowly. `alternative_of` then
         // folds the members that are one character each into the one class the
         // set is, and leaves it last of the branches.
         steps.sort_by_key(|step| std::cmp::Reverse(step.reaches()));
 
-        Ok(alt_of(steps))
+        Ok(alternative_of(steps))
     }
 
-    /// The program of one member of a set, which is a class where the member
+    /// The pattern of one member of a set, which is a class where the member
     /// reads as one character and a step of its own otherwise.
-    fn set_item<I: UnsynInput>(&self, item: &SetItem<I>) -> Result<Inst, CodegenError> {
+    fn set_item<I: UnsynInput>(&self, item: &SetItem<I>) -> Result<Step, CodegenError> {
         match item {
             SetItem::Str(lit) => literal(lit),
-            SetItem::Unicode(lit) => one_char(lit).map(Inst::Class),
+            SetItem::Unicode(lit) => one_char(lit).map(Step::Class),
             SetItem::Range(range) => {
                 let (start, end) = range_ends(range)?;
 
-                Ok(Inst::Class(Pred::of_range(start, end)))
+                Ok(Step::Class(CharClass::of_range(start, end)))
             }
-            // A member that names a rule is that rule's program, which joins the
+            // A member that names a rule is that rule's pattern, which joins the
             // set's class only when it turns out to be one character.
             SetItem::Ident(ident) => self.reference(ident.0.as_str(), &ident.to_span()),
         }
     }
 }
 
-/// The program of a string literal, which is one character where it can be.
+/// The pattern of a string literal, which is one character where it can be.
 ///
 /// A literal that reads as a word is a keyword of the language being described,
 /// and a keyword ends where an identifier would carry on: `'let'` must not match
 /// the front of `letter`. The question is asked after the literal and takes
 /// nothing, so it costs one probe of one character.
-pub(crate) fn literal<I: UnsynInput>(lit: &LitStr<I>) -> Result<Inst, CodegenError> {
+pub(crate) fn literal<I: UnsynInput>(lit: &LitStr<I>) -> Result<Step, CodegenError> {
     let (text, error) = str_value(lit);
 
     if error.is_some() {
@@ -547,31 +555,42 @@ pub(crate) fn literal<I: UnsynInput>(lit: &LitStr<I>) -> Result<Inst, CodegenErr
     }
 
     let matched = if text.chars().count() == 1 {
-        Inst::Class(Pred::of(text.chars().next().expect("one character")))
+        Step::Class(CharClass::of(text.chars().next().expect("one character")))
     } else {
-        Inst::Lit(text.clone())
+        Step::Lit(text.clone())
     };
 
     if text.chars().count() > 1 && super::name::is_word(&text) {
-        return Ok(Inst::Seq(vec![
+        return Ok(Step::Seq(vec![
             matched,
-            Inst::NotFollowed(Box::new(Inst::Matcher(KEYWORD_END.to_owned()))),
+            Step::NotFollowed(Box::new(Step::External(
+                KEYWORD_END.to_owned(),
+                lit.to_span(),
+            ))),
         ]));
     }
 
     Ok(matched)
 }
 
-/// The matcher a keyword asks about to find where it ends, which is one of the
-/// two the [`matcher`](crate::runtime::matcher) module gives without a backend.
+/// The external a keyword asks about to find where it ends.
+///
+/// The name is asked for the way a `<NAME>` in a rule asks for one, so it is
+/// called wherever the table of the [`Codegen`](super::Codegen) gives it, and a
+/// run that gave no table is reported for it as it would be for any other name.
+/// Which name this is stays unsyn's own choice rather than a name the described
+/// language declares: a grammar that means something else by the end of a word
+/// says so by giving this name the function it wants.
 const KEYWORD_END: &str = "XID_Continue";
 
 /// The character a code point literal denotes.
-fn one_char<I: UnsynInput>(lit: &LitUnicode<I>) -> Result<Pred, CodegenError> {
-    unicode_value(lit).map(Pred::of).map_err(|_| CodegenError {
-        kind: CodegenKind::Unsupported("a code point literal that denotes nothing"),
-        span: lit.to_span(),
-    })
+fn one_char<I: UnsynInput>(lit: &LitUnicode<I>) -> Result<CharClass, CodegenError> {
+    unicode_value(lit)
+        .map(CharClass::of)
+        .map_err(|_| CodegenError {
+            kind: CodegenKind::Unsupported("a code point literal that denotes nothing"),
+            span: lit.to_span(),
+        })
 }
 
 /// The two ends of a range, both of which the analysis already asked to be
@@ -597,7 +616,7 @@ fn range_ends<I: UnsynInput>(range: &Range<I>) -> Result<(char, char), CodegenEr
                 return ends(range.to_span());
             };
 
-            let (Inst::Class(Pred::Chars(start, _)), Inst::Class(Pred::Chars(end, _))) =
+            let (Step::Class(CharClass::Chars(start, _)), Step::Class(CharClass::Chars(end, _))) =
                 (start, end)
             else {
                 return ends(range.to_span());
@@ -632,39 +651,65 @@ pub(crate) fn repeat_bounds<I: UnsynInput>(repeat: &Repeat<I>) -> Option<(usize,
 
 /// A sequence of steps, read plainly: nothing in it that takes nothing at all,
 /// and one step only where that leaves one step.
-pub(crate) fn seq_of(steps: Vec<Inst>) -> Inst {
-    let steps: Vec<Inst> = steps
+pub(crate) fn sequence_of(steps: Vec<Step>) -> Step {
+    let steps: Vec<Step> = steps
         .into_iter()
-        .filter(|step| !matches!(step, Inst::Lit(text) if text.is_empty()))
+        .filter(|step| !matches!(step, Step::Lit(text) if text.is_empty()))
         .collect();
 
     match steps.len() {
-        0 => Inst::Lit(String::new()),
+        0 => Step::Lit(String::new()),
         1 => steps.into_iter().next().expect("one step"),
-        _ => Inst::Seq(steps),
+        _ => Step::Seq(steps),
     }
 }
 
 /// An alternation of branches, read plainly: the branches that are classes
 /// become one class, which is what a set of characters is.
-pub(crate) fn alt_of(branches: Vec<Inst>) -> Inst {
-    let mut classes: Vec<Pred> = vec![];
-    let mut rest: Vec<Inst> = vec![];
+pub(crate) fn alternative_of(branches: Vec<Step>) -> Step {
+    let mut classes: Vec<CharClass> = vec![];
+    let mut rest: Vec<Step> = vec![];
 
     for branch in branches {
         match branch {
-            Inst::Class(pred) => classes.push(pred),
+            Step::Class(class) => classes.push(class),
             other => rest.push(other),
         }
     }
 
     if !classes.is_empty() {
-        rest.push(Inst::Class(Pred::union(classes)));
+        rest.push(Step::Class(CharClass::union(classes)));
     }
 
     match rest.len() {
-        0 => Inst::Lit(String::new()),
+        0 => Step::Lit(String::new()),
         1 => rest.into_iter().next().expect("one branch"),
-        _ => Inst::Alt(rest),
+        _ => Step::Alt(rest),
+    }
+}
+
+#[cfg(all(test, feature = "runtime"))]
+mod tests {
+    use super::KEYWORD_END;
+
+    #[test]
+    fn the_external_a_keyword_asks_is_one_the_runtime_gives() {
+        // A keyword of more than one character asks `KEYWORD_END` of the same
+        // table any other `<NAME>` is settled by, which makes the name unsyn's
+        // own choice rather than one its caller would have to invent. That is a
+        // promise unsyn has to keep: every file with a keyword in it is written
+        // against the function this name reaches, and nothing else here would
+        // say that a function of it exists at all. What the tests that map the
+        // name generate would only come apart in the crate that compiles the
+        // file it wrote, which is where this catches it instead.
+        let mut input = parserc::chars::TokenStream::<parserc::Kind>::from("a");
+
+        let given = match KEYWORD_END {
+            "XID_Start" => crate::runtime::external::XID_Start(&mut input).is_ok(),
+            "XID_Continue" => crate::runtime::external::XID_Continue(&mut input).is_ok(),
+            other => panic!("{other} is asked of a module that gives no such external"),
+        };
+
+        assert!(given, "{KEYWORD_END} matches nothing it should");
     }
 }

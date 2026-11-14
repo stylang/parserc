@@ -2,8 +2,8 @@
 //!
 //! A bare name in a body is a dependency on the node of that name, so the
 //! definitions of one file form a graph. A `<call>` is not part of that graph:
-//! it names a matcher the backend provides, which the semantic phase of a
-//! single file knows nothing about (see [`Module::matchers`](super::Module::matchers)).
+//! it names an external the backend provides, which the semantic phase of a
+//! single file knows nothing about (see [`Module::externals`](super::Module::externals)).
 //!
 //! Three facts about a body drive the recursion checks: whether it can match the
 //! empty string, which nodes it can start with, and which nodes it must consult
@@ -24,7 +24,7 @@ use crate::{
     syntax::{Expr, ExprNoTopAlt, ExprNoTopAlts, ExprWithSuffix, ExprWithoutSuffix, SetItem},
 };
 
-/// The name of the built-in matcher of any single character.
+/// The name of the pattern that matches any single character.
 ///
 /// `_` is written like a node reference but is never declared, so it takes part
 /// in neither resolution nor recursion.
@@ -264,7 +264,7 @@ fn without_suffix_refs<'a, I: UnsynInput, F: FnMut(&'a Ident<I>)>(
                 }
             }
         }
-        // A call names a backend matcher, so it is not a reference.
+        // A call names a backend external, so it is not a reference.
         ExprWithoutSuffix::Call(_) => {}
         ExprWithoutSuffix::Ident(ident) => f(ident),
         ExprWithoutSuffix::Paren(paren) => walk_refs(&paren.body, f),
@@ -332,7 +332,7 @@ fn without_suffix_calls<'a, I: UnsynInput, F: FnMut(&'a Angle<I, Ident<I>>)>(
     f: &mut F,
 ) {
     match expr {
-        // A complement refuses a set, and a set holds no matcher call.
+        // A complement refuses a set, and a set holds no external call.
         ExprWithoutSuffix::Tilde(..)
         | ExprWithoutSuffix::Set(_)
         | ExprWithoutSuffix::Str(_)
@@ -771,7 +771,7 @@ fn without_suffix_same_offset<'a, I: UnsynInput>(
             }
         }
         ExprWithoutSuffix::Paren(paren) => expr_same_offset(&paren.body, table, nullable, names),
-        // A call and its matcher are the backend's own affair, a string and a
+        // A call and its external are the backend's own affair, a string and a
         // code point are compared to the input directly, and the shape of a
         // referenced set member is deliberately not asked about here (see
         // `validate_set_item` in the `check` pass).

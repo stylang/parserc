@@ -5,7 +5,7 @@
 //! missing close is a broken file rather than a rule that does not fit, so the
 //! parser reports it instead of backtracking over the typo.
 //!
-//! [`Angle`] is the pair a node uses to call a matcher of the backend, as in
+//! [`Angle`] is the pair a node uses to call an external of the backend, as in
 //! `<XID_Start>`; the other three group a pattern, as Rust does.
 
 use parserc::syntax::Delimiter;
@@ -18,7 +18,7 @@ pub type Brace<I, T> = Delimiter<BraceStart<I>, BraceEnd<I>, T>;
 pub type Bracket<I, T> = Delimiter<BracketStart<I>, BracketEnd<I>, T>;
 /// Parentheses `(…)`, a group inside a pattern.
 pub type Paren<I, T> = Delimiter<ParenStart<I>, ParenEnd<I>, T>;
-/// Angle brackets `<…>`, a call of a matcher the backend provides.
+/// Angle brackets `<…>`, a call of an external the backend provides.
 pub type Angle<I, T> = Delimiter<Lt<I>, Gt<I>, T>;
 
 #[cfg(test)]

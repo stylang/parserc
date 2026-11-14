@@ -27,8 +27,8 @@
 //!
 //! - `runtime`, the [`runtime`] module, is what a grammar the generator writes
 //!   is *compiled against*: the [`GeneratedInput`](runtime::GeneratedInput)
-//!   every generated type is bounded by, and the
-//!   [`matcher`](runtime::matcher) calls a `<NAME>` in a pattern turns into.
+//!   every generated type is bounded by, and the functions a `<NAME>` in a
+//!   pattern is mapped onto when the generator is run.
 //!   It knows nothing of the DSL, and needs nothing but a character stream.
 //! - `codegen`, the same-named feature, is the DSL itself: the reader, the
 //!   analyzer and the generator, in the stages its own module document lays

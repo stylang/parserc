@@ -68,6 +68,34 @@ fn plain(content: &'static str) -> String {
     }
 }
 
+/// A generator told what the two classes of [`unicode_ident`] call, which is
+/// what a spec needs as soon as it spells a keyword or names an identifier: a
+/// keyword asks after itself whether the character that follows would carry the
+/// word on, and that question is a `<NAME>` like any other.
+///
+/// Nothing here gives those names as a default. Saying so is the point: the
+/// table is the only place a `.uns` file learns what its externals are.
+fn with_classes() -> Codegen {
+    Codegen::new().with_externals([
+        (
+            "XID_Start".to_owned(),
+            quote!(::unsyn::runtime::external::XID_Start),
+        ),
+        (
+            "XID_Continue".to_owned(),
+            quote!(::unsyn::runtime::external::XID_Continue),
+        ),
+    ])
+}
+
+/// The same as [`plain`], for a spec that asks a name the generator was given.
+fn given(content: &'static str) -> String {
+    match generate(content, with_classes()) {
+        Ok(file) => file,
+        Err(errors) => panic!("this spec should be writable: {errors:?}"),
+    }
+}
+
 #[test]
 fn a_rule_of_one_alternative_becomes_a_struct_of_its_operands() {
     let content = leaked(
@@ -142,9 +170,9 @@ fn a_rule_of_several_alternatives_becomes_an_enum() {
          syntax Choice -> One Word | Two | Word Word;",
     );
 
-    let file = plain(content);
+    let file = given(content);
 
-    assert!(file.contains("pubenumChoice<I>{"), "{file}");
+    assert!(file.contains("pubenumChoice<I>"), "{file}");
     // Each alternative is named for what it opens with, which is what makes the
     // variants of a generated file say something the rule said.
     assert!(file.contains("ChoiceOne(One<I>,"), "{file}");
@@ -188,7 +216,7 @@ fn a_suffix_that_needs_a_check_of_its_own_gets_a_type_for_it() {
          syntax Asked -> Word except Key;",
     );
 
-    let file = plain(content);
+    let file = given(content);
 
     // The counted run is a type of its own, which checks its count after it.
     assert!(file.contains("pubstructFixed1<I>"), "{file}");
@@ -278,14 +306,14 @@ fn a_keyword_does_not_match_the_front_of_a_longer_word() {
          syntax Let -> 'let' Letter 'x';",
     );
 
-    let file = plain(content);
+    let file = given(content);
 
     // The literal `'let'` is a token that asks where it ends: the character
     // after it may not be one that would carry the word on. The question is
-    // asked of the matcher this crate gives, over a copy of the stream.
+    // asked of the name the table settled, over a copy of the stream.
     assert!(file.contains("pubstructLet<I>"), "{file}");
     assert!(
-        file.contains("matcher::XID_Continue"),
+        file.contains("external::XID_Continue"),
         "the keyword ends nowhere: {file}"
     );
     assert!(file.contains("is_ok()"), "{file}");
@@ -295,34 +323,186 @@ fn a_keyword_does_not_match_the_front_of_a_longer_word() {
 }
 
 #[test]
-fn a_call_of_a_matcher_the_backend_provides_is_a_call_of_it() {
+fn an_external_is_called_exactly_where_the_table_said() {
     let content = leaked(
         "whitespace WS -> [' '];
          lexer Name -> <Casing> ['a'-'z']*;",
     );
 
-    let file = plain(content);
+    // A `<NAME>` is only ever what whoever ran the generator said it was, so
+    // the file calls that one function and reaches it by the path the table
+    // spelled, not by a name the generator invented for it.
+    let file = generate(
+        content,
+        Codegen::new().with_externals([("Casing".to_owned(), quote!(::my_grammar::casing))]),
+    )
+    .expect("an external given by a table should be writable");
 
-    // The matcher is reached through the path the generator was given, so a
-    // project may keep its own implementations beside its generated file.
-    assert!(file.contains("unsyn::runtime::matcher::Casing"), "{file}");
+    assert!(file.contains("::my_grammar::casing"), "{file}");
 
-    // The same spec generated for a project that keeps the crates elsewhere.
+    // The same spec for a project that keeps the two crates elsewhere. The
+    // paths the file reaches the crates by and the paths the table gives are
+    // separate decisions, so moving one does not move the other.
     let moved = generate(
         content,
-        Codegen::new().with_paths(Paths {
-            unsyn: quote!(::my_unsyn),
-            parserc: quote!(::my_parserc),
-            matcher: quote!(::my_parserc::matchers),
-        }),
+        Codegen::new()
+            .with_paths(Paths {
+                unsyn: quote!(::my_unsyn),
+                parserc: quote!(::my_parserc),
+            })
+            .with_externals([("Casing".to_owned(), quote!(::my_grammar::casing))]),
     )
     .expect("a moved path should still be writable");
 
-    assert!(moved.contains("::my_parserc::matchers::Casing"), "{moved}");
+    assert!(moved.contains("::my_grammar::casing"), "{moved}");
     assert!(
         moved.contains("my_unsyn::runtime::GeneratedInput"),
         "{moved}"
     );
+}
+
+#[test]
+fn every_rule_that_calls_one_name_shares_the_type_that_calls_it() {
+    let content = leaked(
+        "whitespace WS -> [' '];
+         lexer Word -> ['a'-'z']+;
+         syntax Head -> Word <Casing>;
+         syntax Tail -> <Casing> Word;",
+    );
+
+    let file = generate(
+        content,
+        Codegen::new().with_externals([("Casing".to_owned(), quote!(::my_grammar::casing))]),
+    )
+    .expect("an external given by a table should still be writable");
+
+    // One name is one pattern however many rules ask for it, since the
+    // function behind the name was fixed before any of them was read: the two
+    // rules share one type instead of the call being written out twice.
+    assert!(file.contains("pubstructExternalCasing<I>"), "{file}");
+    assert!(!file.contains("ExternalCasing_2"), "{file}");
+}
+
+#[test]
+fn a_name_no_table_gives_is_reported_and_not_written() {
+    let content = leaked(
+        "whitespace WS -> [' '];
+         lexer Word -> ['a'-'z']+;
+         syntax Head -> <XID_Start> <XID_Continue>*;
+         syntax Tail -> <XID_Continue>+ Word;",
+    );
+
+    // A generator starts with an empty table and keeps one: nothing decides on
+    // a caller's behalf what one of its backend's names means. A file that
+    // called a function nobody had settled on would compile in a project that
+    // never meant it to, so the name is reported instead.
+    let refused =
+        generate(content, Codegen::new()).expect_err("a name no table gives should be reported");
+
+    let what = refused
+        .iter()
+        .map(|error| error.to_string())
+        .collect::<Vec<_>>()
+        .join("\n");
+
+    assert!(
+        what.contains("nothing is mapped to `<XID_Start>`"),
+        "{what}"
+    );
+    assert!(
+        what.contains("nothing is mapped to `<XID_Continue>`"),
+        "{what}"
+    );
+    // One report per name, not one per call: the rules that ask for the same
+    // name share the one type that calls it, and that type is written once.
+    assert_eq!(refused.len(), 2, "{what}");
+
+    // Each report says where the name was written: the span of the `<NAME>` is
+    // kept in the pattern that runs it, so a refusal points at the source
+    // rather than at nothing.
+    assert!(!what.contains(", at None"), "{what}");
+
+    // The same spec with both names given is writable, and each is called where
+    // the table said.
+    let settled = generate(content, with_classes())
+        .expect("a spec whose names are all given should be writable");
+
+    assert!(
+        settled.contains("::unsyn::runtime::external::XID_Start"),
+        "{settled}"
+    );
+    assert!(
+        settled.contains("::unsyn::runtime::external::XID_Continue"),
+        "{settled}"
+    );
+
+    // A name given by a table is no less one pattern than a name the rules of
+    // the file describe themselves, so the sharing of one type between the two
+    // rules that ask for it does not depend on the table.
+    assert!(
+        settled.contains("pubstructExternalXID_Continue<I>"),
+        "{settled}"
+    );
+    assert!(!settled.contains("ExternalXID_Continue_2"), "{settled}");
+}
+
+#[test]
+fn a_moved_path_leaves_a_given_external_where_the_table_put_it() {
+    let content = leaked(
+        "whitespace WS -> [' '];
+         lexer Name -> <XID_Start> <XID_Continue>*;",
+    );
+
+    // The table is the caller's own, so moving the crates the file reaches by
+    // does not rebuild the names it settled around the new paths.
+    let file = generate(
+        content,
+        Codegen::new()
+            .with_externals([
+                (
+                    "XID_Start".to_owned(),
+                    quote!(::my_grammar::external::XID_Start),
+                ),
+                (
+                    "XID_Continue".to_owned(),
+                    quote!(::my_grammar::external::XID_Continue),
+                ),
+            ])
+            .with_paths(Paths {
+                unsyn: quote!(::my_unsyn),
+                parserc: quote!(::my_parserc),
+            }),
+    )
+    .expect("a table of its own should still be writable");
+
+    assert!(file.contains("::my_grammar::external::XID_Start"), "{file}");
+    assert!(
+        file.contains("::my_grammar::external::XID_Continue"),
+        "{file}"
+    );
+    assert!(!file.contains("unsyn::runtime::external"), "{file}");
+}
+
+#[test]
+fn a_name_rust_spends_on_its_own_grammar_is_callable_once_a_table_gives_it() {
+    let content = leaked(
+        "whitespace WS -> [' '];
+         lexer Word -> ['a'-'z']+;
+         syntax Typed -> Word <type>;",
+    );
+
+    // A name is never written out as an identifier of its own, so `<type>` is
+    // as callable as any other once the table says where it lives: the path is
+    // copied as the table spells it, and the name itself never reaches the
+    // file. An unmapped `<type>` would be reported as any other name would.
+    let settled = generate(
+        content,
+        Codegen::new().with_externals([("type".to_owned(), quote!(::my_grammar::ty))]),
+    )
+    .expect("a settled name should be writable");
+
+    assert!(settled.contains("::my_grammar::ty"), "{settled}");
+    assert!(!settled.contains("<type>"), "{settled}");
 }
 
 #[test]
@@ -336,7 +516,9 @@ fn bootstrap_uns_is_generated_whole() {
     let file = Crate::parse(&mut tokens).expect("the spec should parse");
     let module = analyze(&file).expect("the spec should be well-formed");
 
-    let generated = match Codegen::new().generate(&module) {
+    // The spec names the two classes of `unicode_ident`, and a name is only
+    // what the caller's table says, so the generator is handed both.
+    let generated = match with_classes().generate(&module) {
         Ok(generated) => generated,
         Err(errors) => {
             let what = errors
@@ -366,9 +548,9 @@ fn bootstrap_uns_is_generated_whole() {
         );
     }
 
-    // The two matchers the spec calls are called, and not written out.
-    assert!(written.contains("matcher::XID_Start"), "{written}");
-    assert!(written.contains("matcher::XID_Continue"), "{written}");
+    // The two externals the spec names are called, and not written out.
+    assert!(written.contains("external::XID_Start"), "{written}");
+    assert!(written.contains("external::XID_Continue"), "{written}");
 
     // The trivia of the language is its own type, and the separators name it.
     assert!(written.contains("structWHITESPACE"), "{written}");

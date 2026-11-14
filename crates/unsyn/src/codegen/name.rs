@@ -254,20 +254,6 @@ pub(crate) fn type_ident(name: &str) -> Ident {
     Ident::new(name, proc_macro2::Span::call_site())
 }
 
-/// The identifier for the matcher function named `name`, which is written as
-/// the `.uns` file spells it.
-///
-/// A matcher whose name is a keyword of Rust could not be called at all, since
-/// the generated file writes the call out plainly, so such a name is reported
-/// rather than emitted as `r#dyn`.
-pub(crate) fn matcher_ident(name: &str) -> Option<Ident> {
-    if !is_type_name(name) {
-        return None;
-    }
-
-    Some(Ident::new(name, proc_macro2::Span::call_site()))
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -319,12 +305,6 @@ mod tests {
         assert_eq!(names.register("Or").as_deref(), Some("Or_2"));
         assert_eq!(names.register("Or").as_deref(), Some("Or_3"));
         assert_eq!(names.register_anonymous("Expr"), "Expr_2");
-    }
-
-    #[test]
-    fn a_matcher_is_called_by_the_name_it_is_written_with() {
-        assert_eq!(matcher_ident("XID_Start").unwrap().to_string(), "XID_Start");
-        assert!(matcher_ident("a-b").is_none());
     }
 
     #[test]

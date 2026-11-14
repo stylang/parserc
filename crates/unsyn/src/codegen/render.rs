@@ -3,8 +3,8 @@
 //!
 //! [`Renderer`] is the last step of the generator and the only one that knows
 //! anything about Rust syntax. It reads the two IRs and writes items in each
-//! one's own terms: a [`Scanner`] is a tuple of the text it took, whose `parse`
-//! is the program [`scan`] ran over the stream, and a [`Shape`] is a tuple of
+//! one's own terms: a [`TokenPattern`] is a tuple of the text it took, whose `parse`
+//! is the pattern [`scan`] ran over the stream, and a [`TypeDef`] is a tuple of
 //! the nodes it holds, whose `parse` takes one field after another.
 //!
 //! # What the generated file leans on
@@ -28,11 +28,11 @@
 //!
 //! A rule of nodes that writes its own separator out as an operand is given no
 //! field for the mention, since the run around it is the same trivia taken the
-//! same way (see the `Whitespace` section of [`super::shape`]).
+//! same way (see the `Whitespace` section of [`super::types`]).
 //!
 //! # Recursion
 //!
-//! A node whose type is in the `pointed` set of the shape being written is held
+//! A node whose type is in the `pointed` set of the type being written is held
 //! behind a [`Box`], since naming one's self — or naming one's way back to one's
 //! self — is the one thing a field of its own cannot do. The backend implements
 //! [`Syntax`](parserc::syntax::Syntax) for [`Box`], so the pointer is invisible
@@ -46,9 +46,9 @@ use quote::{format_ident, quote};
 use super::Paths;
 use super::error::CodegenError;
 use super::name::type_ident;
+use super::pattern::{CharClass, TokenPattern};
 use super::scan::Emitter;
-use super::shape::{Assert, Field, Shape, ShapeKind, Type, Variant};
-use super::token::{Pred, Scanner};
+use super::types::{Assert, Field, FieldType, TypeDef, TypeDefKind, Variant};
 
 /// The stream every generated type is written over, and the name its `parse`
 /// takes it by.
@@ -63,6 +63,8 @@ const STREAM: &str = "input";
 pub(crate) struct Renderer<'a> {
     /// The paths the generated file reaches the crates by.
     paths: &'a Paths,
+    /// Where a `<NAME>` the generator's table settles is called, by name.
+    externals: &'a HashMap<String, TokenStream>,
     /// The visibility of the types and their fields.
     visibility: &'a TokenStream,
     /// The derives every type is given.
@@ -77,27 +79,30 @@ impl<'a> Renderer<'a> {
     /// whose separators name the whitespace type `whitespace`.
     pub(crate) fn new(
         paths: &'a Paths,
+        externals: &'a HashMap<String, TokenStream>,
         visibility: &'a TokenStream,
         derives: &'a [String],
         whitespace: Option<&'a str>,
     ) -> Self {
         Self {
             paths,
+            externals,
             visibility,
             derives,
             whitespace,
         }
     }
 
-    /// The item of one type that reads text: the text it took, and the program
+    /// The item of one type that reads text: the text it took, and the pattern
     /// that took it.
-    pub(crate) fn scanner(
+    pub(crate) fn token_pattern(
         &self,
-        scanner: &Scanner,
-        classes: &HashMap<String, Pred>,
+        pattern: &TokenPattern,
+        classes: &HashMap<String, CharClass>,
     ) -> Result<TokenStream, CodegenError> {
-        let ty = type_ident(&scanner.name);
-        let body = Emitter::named(self.paths, classes, &scanner.name).scanner(&scanner.inst)?;
+        let ty = type_ident(&pattern.name);
+        let body = Emitter::named(self.paths, self.externals, classes, &pattern.name)
+            .parse_body(&pattern.step)?;
         let (parserc, unsyn) = (&self.paths.parserc, &self.paths.unsyn);
         let input = format_ident!("{STREAM}");
         let attrs = self.attrs();
@@ -131,10 +136,10 @@ impl<'a> Renderer<'a> {
     ///
     /// `pointed` is the set of node types that reach the type being written,
     /// which are the ones it has to hold behind a pointer.
-    pub(crate) fn node(&self, shape: &Shape, pointed: &HashSet<String>) -> TokenStream {
-        let ty = type_ident(&shape.name);
+    pub(crate) fn node(&self, def: &TypeDef, pointed: &HashSet<String>) -> TokenStream {
+        let ty = type_ident(&def.name);
         let input = format_ident!("{STREAM}");
-        let fail = self.fail(&shape.name, &input);
+        let fail = self.fail(&def.name, &input);
         let (parserc, unsyn) = (&self.paths.parserc, &self.paths.unsyn);
         let visibility = self.visibility;
 
@@ -143,8 +148,8 @@ impl<'a> Renderer<'a> {
             input: &input,
             fail: &fail,
         };
-        let (declaration, body, spanning) = match &shape.kind {
-            ShapeKind::Struct { fields } => {
+        let (declaration, body, spanning) = match &def.kind {
+            TypeDefKind::Struct { fields } => {
                 let parts = self.parts(fields, &writing);
                 let tys = &parts.tys;
                 let vals = &parts.vals;
@@ -155,7 +160,7 @@ impl<'a> Renderer<'a> {
                     self.union(&self.places(tys.len())),
                 )
             }
-            ShapeKind::Enum { variants } => {
+            TypeDefKind::Enum { variants } => {
                 let written = variants
                     .iter()
                     .map(|variant| self.variant(variant, &writing))
@@ -199,7 +204,7 @@ impl<'a> Renderer<'a> {
                     },
                 )
             }
-            ShapeKind::Bounds {
+            TypeDefKind::Bounds {
                 item,
                 min,
                 max,
@@ -209,7 +214,7 @@ impl<'a> Renderer<'a> {
 
                 (self.tuple_of(&ty, &[bounds]), body, spanning)
             }
-            ShapeKind::Asserted { item, assert } => {
+            TypeDefKind::Asserted { item, assert } => {
                 let (taken, body, spanning) = self.asserted(item, assert, &writing);
 
                 (self.tuple_of(&ty, &[taken]), body, spanning)
@@ -245,13 +250,13 @@ impl<'a> Renderer<'a> {
     /// The type of a counted run, the `parse` that takes it, and the `to_span`
     /// of the one field it holds.
     ///
-    /// A counted run is the one shape whose `parse` has to keep a count: the
+    /// A counted run is the one type whose `parse` has to keep a count: the
     /// operand is taken as often as it fits, up to the most the rule stated, and
     /// a run shorter than the least fails where it stands, which is recovable
     /// and so is rewound by whoever tried the rule.
     fn bounds(
         &self,
-        item: &Type,
+        item: &FieldType,
         min: usize,
         max: Option<usize>,
         separated: bool,
@@ -303,7 +308,7 @@ impl<'a> Renderer<'a> {
     /// around it, and the `to_span` of the one field it holds.
     fn asserted(
         &self,
-        item: &Type,
+        item: &FieldType,
         assert: &Assert,
         writing: &Writing<'_>,
     ) -> (TokenStream, TokenStream, TokenStream) {
@@ -395,14 +400,14 @@ impl<'a> Renderer<'a> {
     /// The type of a field and the expression that takes it, which is one call
     /// of `parse` whatever the field holds — except for a run of one or more,
     /// which is a `Vec` that has to be found non-empty once it was taken.
-    fn read(&self, ty: &Type, writing: &Writing<'_>) -> (TokenStream, TokenStream) {
+    fn read(&self, ty: &FieldType, writing: &Writing<'_>) -> (TokenStream, TokenStream) {
         let input = writing.input;
         let fail = writing.fail;
 
         let of = self.ty(ty, writing.pointed);
 
         match ty {
-            Type::OneOrMore { .. } => (
+            FieldType::OneOrMore { .. } => (
                 of.clone(),
                 quote! {
                     {
@@ -422,9 +427,9 @@ impl<'a> Renderer<'a> {
 
     /// The type a field holds, with a pointer wherever one is needed and the
     /// trivia of a run woven into its elements.
-    fn ty(&self, ty: &Type, pointed: &HashSet<String>) -> TokenStream {
+    fn ty(&self, ty: &FieldType, pointed: &HashSet<String>) -> TokenStream {
         match ty {
-            Type::Named(name) => {
+            FieldType::Named(name) => {
                 let named = type_ident(name);
 
                 if pointed.contains(name) {
@@ -433,17 +438,17 @@ impl<'a> Renderer<'a> {
                     quote!(#named<I>)
                 }
             }
-            Type::Opt(item) => {
+            FieldType::Opt(item) => {
                 let item = self.ty(item, pointed);
 
                 quote!(::core::option::Option<#item>)
             }
-            Type::Many { item, separated } | Type::OneOrMore { item, separated } => {
+            FieldType::Many { item, separated } | FieldType::OneOrMore { item, separated } => {
                 let item = self.element(item, *separated, pointed);
 
                 quote!(::std::vec::Vec<#item>)
             }
-            Type::Concat { first, second } => {
+            FieldType::Concat { first, second } => {
                 let (first, second) = (self.ty(first, pointed), self.ty(second, pointed));
 
                 quote!((#first, #second))
@@ -454,7 +459,7 @@ impl<'a> Renderer<'a> {
     /// The type of one element of a run, which carries the trivia before it
     /// when the run is separated, since the tokens of a run are reached over
     /// the same kind of gap as the tokens of a sequence.
-    fn element(&self, item: &Type, separated: bool, pointed: &HashSet<String>) -> TokenStream {
+    fn element(&self, item: &FieldType, separated: bool, pointed: &HashSet<String>) -> TokenStream {
         let item = self.ty(item, pointed);
 
         if separated {
@@ -488,7 +493,7 @@ impl<'a> Renderer<'a> {
     /// it: `except` asked before the operand, which fails where what it removes
     /// fits, and `followed` asked where the operand left off, which fails where
     /// what it requires does not fit.
-    fn probe(&self, asked: &Type, before: bool, writing: &Writing<'_>) -> TokenStream {
+    fn probe(&self, asked: &FieldType, before: bool, writing: &Writing<'_>) -> TokenStream {
         let input = writing.input;
         let fail = writing.fail;
 
@@ -584,7 +589,7 @@ impl<'a> Renderer<'a> {
     }
 
     /// The traits a generated body reaches by name, all of which the shortcuts
-    /// of [`scan`] and the fields of a shape are written against.
+    /// of [`scan`] and the fields of a type are written against.
     fn uses(&self) -> TokenStream {
         let parserc = &self.paths.parserc;
 
@@ -657,29 +662,30 @@ struct Written {
 mod tests {
     use super::*;
 
-    /// Renders `shape` the way the file would be written, with every run of
+    /// Renders `def` the way the file would be written, with every run of
     /// whitespace collapsed to nothing, so that a test says what the generator
     /// means without spelling out how `proc_macro2` separates its tokens.
-    fn render(shape: &Shape, pointed: &[&str], whitespace: Option<&str>) -> String {
+    fn render(def: &TypeDef, pointed: &[&str], whitespace: Option<&str>) -> String {
         let paths = Paths::default();
+        let externals = HashMap::new();
         let visibility = quote!(pub);
         let derives = ["Debug"].map(String::from).to_vec();
 
-        let written = Renderer::new(&paths, &visibility, &derives, whitespace)
-            .node(shape, &pointed.iter().copied().map(String::from).collect());
+        let written = Renderer::new(&paths, &externals, &visibility, &derives, whitespace)
+            .node(def, &pointed.iter().copied().map(String::from).collect());
 
         written.to_string().split_whitespace().collect()
     }
 
-    /// The shape of a rule of one alternative over the named operands.
-    fn struct_of(names: &[&str]) -> Shape {
-        Shape {
+    /// The type of a rule of one alternative over the named operands.
+    fn struct_of(names: &[&str]) -> TypeDef {
+        TypeDef {
             name: "Owner".to_owned(),
-            kind: ShapeKind::Struct {
+            kind: TypeDefKind::Struct {
                 fields: names
                     .iter()
                     .map(|name| Field {
-                        ty: Type::Named((*name).to_owned()),
+                        ty: FieldType::Named((*name).to_owned()),
                         separator: false,
                     })
                     .collect(),
@@ -687,13 +693,13 @@ mod tests {
         }
     }
 
-    /// The same shape with the field at `index` reached over a run of trivia.
-    fn separated(mut shape: Shape, index: usize) -> Shape {
-        if let ShapeKind::Struct { fields } = &mut shape.kind {
+    /// The same type with the field at `index` reached over a run of trivia.
+    fn separated(mut def: TypeDef, index: usize) -> TypeDef {
+        if let TypeDefKind::Struct { fields } = &mut def.kind {
             fields[index].separator = true;
         }
 
-        shape
+        def
     }
 
     #[test]
@@ -725,7 +731,7 @@ mod tests {
     #[test]
     fn a_file_with_no_trivia_declares_no_separators() {
         // With nothing between its tokens, a sequence of two is two fields and
-        // not four, which is what the shape of the rule says.
+        // not four, which is what the rule says.
         let written = render(&separated(struct_of(&["Abc", "Def"]), 1), &[], None);
 
         assert!(!written.contains("Option<"), "{written}");
@@ -744,12 +750,12 @@ mod tests {
 
     #[test]
     fn a_run_of_one_or_more_is_a_vec_that_has_to_have_something_in_it() {
-        let shape = Shape {
+        let def = TypeDef {
             name: "Owner".to_owned(),
-            kind: ShapeKind::Struct {
+            kind: TypeDefKind::Struct {
                 fields: vec![Field {
-                    ty: Type::OneOrMore {
-                        item: Box::new(Type::Named("Abc".to_owned())),
+                    ty: FieldType::OneOrMore {
+                        item: Box::new(FieldType::Named("Abc".to_owned())),
                         separated: true,
                     },
                     separator: false,
@@ -757,7 +763,7 @@ mod tests {
             },
         };
 
-        let written = render(&shape, &[], Some("WS"));
+        let written = render(&def, &[], Some("WS"));
 
         assert!(
             written.contains("Vec<(::std::vec::Vec<WS<I>>,Abc<I>)>"),
@@ -768,17 +774,17 @@ mod tests {
 
     #[test]
     fn a_counted_run_is_taken_as_greedily_as_it_fits_and_then_checked() {
-        let shape = Shape {
+        let def = TypeDef {
             name: "Owner1".to_owned(),
-            kind: ShapeKind::Bounds {
-                item: Type::Named("Abc".to_owned()),
+            kind: TypeDefKind::Bounds {
+                item: FieldType::Named("Abc".to_owned()),
                 min: 2,
                 max: Some(4),
                 separated: false,
             },
         };
 
-        let written = render(&shape, &[], None);
+        let written = render(&def, &[], None);
 
         // The run is taken up to the most the rule stated, and a run shorter
         // than the least is the failure, in that order.
@@ -793,17 +799,17 @@ mod tests {
 
     #[test]
     fn an_unbounded_count_asks_the_text_and_nothing_else() {
-        let shape = Shape {
+        let def = TypeDef {
             name: "Owner1".to_owned(),
-            kind: ShapeKind::Bounds {
-                item: Type::Named("Abc".to_owned()),
+            kind: TypeDefKind::Bounds {
+                item: FieldType::Named("Abc".to_owned()),
                 min: 1,
                 max: None,
                 separated: false,
             },
         };
 
-        let written = render(&shape, &[], None);
+        let written = render(&def, &[], None);
 
         assert!(!written.contains("len()>="), "{written}");
         assert!(written.contains("if__items.len()<1"), "{written}");
@@ -811,15 +817,15 @@ mod tests {
 
     #[test]
     fn except_is_asked_where_the_operand_starts() {
-        let shape = Shape {
+        let def = TypeDef {
             name: "Owner1".to_owned(),
-            kind: ShapeKind::Asserted {
-                item: Type::Named("Abc".to_owned()),
-                assert: Assert::Except(Type::Named("Def".to_owned())),
+            kind: TypeDefKind::Asserted {
+                item: FieldType::Named("Abc".to_owned()),
+                assert: Assert::Except(FieldType::Named("Def".to_owned())),
             },
         };
 
-        let written = render(&shape, &[], None);
+        let written = render(&def, &[], None);
 
         // The question is asked before the operand is taken, and it is the
         // answer "it fits" that loses.
@@ -832,15 +838,15 @@ mod tests {
 
     #[test]
     fn followed_is_asked_where_the_operand_left_off() {
-        let shape = Shape {
+        let def = TypeDef {
             name: "Owner1".to_owned(),
-            kind: ShapeKind::Asserted {
-                item: Type::Named("Abc".to_owned()),
-                assert: Assert::Followed(Type::Named("Def".to_owned())),
+            kind: TypeDefKind::Asserted {
+                item: FieldType::Named("Abc".to_owned()),
+                assert: Assert::Followed(FieldType::Named("Def".to_owned())),
             },
         };
 
-        let written = render(&shape, &[], None);
+        let written = render(&def, &[], None);
 
         assert!(written.contains("__fits.is_none()"), "{written}");
         assert!(
@@ -851,21 +857,21 @@ mod tests {
 
     #[test]
     fn every_alternative_is_tried_over_a_stream_that_is_rewound() {
-        let shape = Shape {
+        let def = TypeDef {
             name: "Owner".to_owned(),
-            kind: ShapeKind::Enum {
+            kind: TypeDefKind::Enum {
                 variants: vec![
                     Variant {
                         name: "OwnerAbc".to_owned(),
                         fields: vec![Field {
-                            ty: Type::Named("Abc".to_owned()),
+                            ty: FieldType::Named("Abc".to_owned()),
                             separator: false,
                         }],
                     },
                     Variant {
                         name: "OwnerDef".to_owned(),
                         fields: vec![Field {
-                            ty: Type::Named("Def".to_owned()),
+                            ty: FieldType::Named("Def".to_owned()),
                             separator: false,
                         }],
                     },
@@ -873,7 +879,7 @@ mod tests {
             },
         };
 
-        let written = render(&shape, &[], None);
+        let written = render(&def, &[], None);
 
         assert!(written.contains("pubenumOwner<I>{"), "{written}");
         assert!(
@@ -903,14 +909,14 @@ mod tests {
 
     #[test]
     fn a_literal_taken_back_to_back_with_another_is_one_tuple_field() {
-        let shape = Shape {
+        let def = TypeDef {
             name: "Owner".to_owned(),
-            kind: ShapeKind::Struct {
+            kind: TypeDefKind::Struct {
                 fields: vec![Field {
-                    ty: Type::Concat {
-                        first: Box::new(Type::Named("Uplus".to_owned())),
-                        second: Box::new(Type::Many {
-                            item: Box::new(Type::Named("Hex".to_owned())),
+                    ty: FieldType::Concat {
+                        first: Box::new(FieldType::Named("Uplus".to_owned())),
+                        second: Box::new(FieldType::Many {
+                            item: Box::new(FieldType::Named("Hex".to_owned())),
                             separated: false,
                         }),
                     },
@@ -919,7 +925,7 @@ mod tests {
             },
         };
 
-        let written = render(&shape, &[], None);
+        let written = render(&def, &[], None);
 
         assert!(
             written.contains("pub(Uplus<I>,::std::vec::Vec<Hex<I>>)"),

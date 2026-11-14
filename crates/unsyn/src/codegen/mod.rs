@@ -49,8 +49,8 @@
 //! assert_eq!(module.symbols().len(), 5);
 //! assert_eq!(module.definition("IDENTIFIER").unwrap().kind().keyword(), "lexer");
 //!
-//! // `<Name>` is a call of a matcher the backend provides, not a node.
-//! assert_eq!(module.matchers(), ["XID_Start", "XID_Continue"]);
+//! // `<Name>` is a call of an external the backend provides, not a node.
+//! assert_eq!(module.externals(), ["XID_Start", "XID_Continue"]);
 //!
 //! // A set whose members say nothing twice earns no lint.
 //! assert!(module.lints().is_empty());
@@ -59,20 +59,20 @@
 //! What those stages do one after the other, over `bootstrap.uns` and a small
 //! spec written inline, is what `examples/pipeline.rs` runs and reports.
 //!
-//! # Two programs, one plan
+//! # Two halves of one plan
 //!
-//! A `lexer` body reads text, so it is first compiled to a program over
-//! characters, and that program is then run; a `syntax` body reads nodes, so it
-//! is compiled to a *shape*: the fields of the type, and the order its `parse`
+//! A `lexer` body reads text, so it is first compiled to a pattern over
+//! characters, and that pattern is then run; a `syntax` body reads nodes, so it
+//! is compiled to a *type*: the fields it holds, and the order its `parse`
 //! takes them in. The two are kept apart because they answer different questions
 //! — how far along the text a token gets, and how many nodes a field holds — and
 //! each has its own shortcuts.
 //!
 //! # The shortcuts
 //!
-//! Where a program is only a question about single characters it is a *class*,
+//! Where a pattern is only a question about single characters it is a *class*,
 //! and a repetition of one is scanned by the combinators of [`parserc`] in a
-//! pass over the text rather than by looping over a matcher:
+//! pass over the text rather than by looping over an external:
 //! [`take_while`](parserc::take_while) for `X*`, [`take_till`](parserc::take_till)
 //! for `~ […]*`, [`keyword`](parserc::keyword) for a literal of more than one
 //! character, and [`take_until`](parserc::take_until) for `~ ['lit']*` where
@@ -83,29 +83,29 @@
 //!
 //! # Names
 //!
-//! A definition's name is the type's name, and the literals and groups written
-//! inside a `syntax` body are given types of their own: shared types for the
-//! literals, since `'if'` in one rule and `'if'` in another are the same token,
-//! and anonymous types for the groups of a rule, named after the rule they
-//! belong to. Every name is decided before anything is written, so no two types
-//! in a file collide.
+//! A definition's name is the type's name, and the literals, the names and the
+//! groups written inside a `syntax` body are given types of their own: shared
+//! types for the literals, since `'if'` in one rule and `'if'` in another are
+//! the same token, and for the `<NAME>`s a table settles, since one name reaches
+//! one function wherever it is asked; and anonymous types for the groups of a
+//! rule, named after the rule they belong to. Every name is decided before
+//! anything is written, so no two types in a file collide.
 //!
 //! # Recursion
 //!
 //! A rule that names itself, or that names its way back to itself, cannot hold
 //! what it names in a field of its own: the type would have no size. Those edges
-//! are found over the shapes that were built, and the field is written as a
+//! are found over the types that were built, and the field is written as a
 //! [`Box`], which the backend implements as syntax like everything else. The
 //! analysis has already refused the recursion that comes back to the same
 //! position without taking anything, so every cycle left is one a tree can hold.
 
-mod builtin;
 mod error;
-mod item;
 mod name;
+mod pattern;
+mod render;
 mod scan;
-mod shape;
-mod token;
+mod types;
 
 use std::collections::{HashMap, HashSet};
 
@@ -122,10 +122,10 @@ use crate::lexical::punct::Comma;
 use crate::semantics::{Module, NodeKind, nullable_nodes};
 use crate::syntax::SetItem;
 
-use item::Renderer;
 use name::is_type_name;
-use shape::{Shape, Shaper};
-use token::{Builder as Program, LexRefs, Scanner};
+use pattern::{PatternBuilder, RuleNames, TokenPattern};
+use render::Renderer;
+use types::{TypeBuilder, TypeDef};
 
 /// A set of characters written inside a rule of nodes.
 pub(crate) type SetOf<I> = Bracket<I, Punctuated<SetItem<I>, Comma<I>>>;
@@ -152,6 +152,10 @@ pub(crate) fn set_items<T, P>(punctuated: &Punctuated<T, P>) -> impl Iterator<It
 /// `::parserc` and `::unsyn` unless the project keeps them elsewhere, in which
 /// case the paths are given here.
 ///
+/// What a `<NAME>` in a pattern calls is not one of these paths: a name is only
+/// ever given by the table of [`with_externals`](Codegen::with_externals), which
+/// is where the caller says what each name means.
+///
 /// [`GeneratedInput`]: crate::runtime::GeneratedInput
 #[derive(Debug, Clone)]
 pub struct Paths {
@@ -160,9 +164,6 @@ pub struct Paths {
     pub unsyn: TokenStream,
     /// Where the combinators and [`Syntax`](parserc::syntax::Syntax) are.
     pub parserc: TokenStream,
-    /// Where the [`matcher`](crate::runtime::matcher) module is, which is what
-    /// `<NAME>` calls.
-    pub matcher: TokenStream,
 }
 
 impl Default for Paths {
@@ -170,7 +171,6 @@ impl Default for Paths {
         Self {
             unsyn: quote!(::unsyn),
             parserc: quote!(::parserc),
-            matcher: quote!(::unsyn::runtime::matcher),
         }
     }
 }
@@ -186,6 +186,9 @@ impl Default for Paths {
 pub struct Codegen {
     /// The paths the generated file reaches the crates by.
     paths: Paths,
+    /// What each `<NAME>` in a pattern calls, given by whoever runs the
+    /// generator: a name is only ever reached through this table.
+    externals: HashMap<String, TokenStream>,
     /// The visibility of every generated type.
     visibility: TokenStream,
     /// The derives every generated type is given.
@@ -195,6 +198,9 @@ pub struct Codegen {
 impl Default for Codegen {
     fn default() -> Self {
         Self {
+            // Nothing is settled here: a `<NAME>` is the backend's business, and
+            // only the caller knows what a name of that backend's means.
+            externals: HashMap::new(),
             paths: Paths::default(),
             visibility: quote!(pub),
             derives: ["Debug", "Clone", "PartialEq", "Eq", "PartialOrd", "Ord"]
@@ -208,18 +214,18 @@ impl Default for Codegen {
 /// What to write for one file: every type, in the order they are declared.
 ///
 /// This is the reading half of a generation finished: what was left ambiguous
-/// about the grammar is settled here, and nothing about the shape of the Rust
-/// file is.
+/// about the grammar is settled here, and nothing about how the Rust file is
+/// written is.
 pub(crate) struct Plan {
     /// The name of the whitespace rule's type, which is what every separator
     /// names, or nothing when the file declares no trivia.
     whitespace: Option<String>,
     /// The types that read text: the file's own rules, then the token types the
-    /// node shapes needed.
-    scanners: Vec<Scanner>,
+    /// node rules needed.
+    token_patterns: Vec<TokenPattern>,
     /// The types that hold nodes: the file's own rules, then the groups, the
     /// counted runs and the assertions cut out of them.
-    shapes: Vec<Shape>,
+    type_defs: Vec<TypeDef>,
 }
 
 impl Codegen {
@@ -234,6 +240,62 @@ impl Codegen {
     #[inline]
     pub fn with_paths(mut self, paths: Paths) -> Self {
         self.paths = paths;
+
+        self
+    }
+
+    /// Decides what a `<NAME>` in a pattern calls, name by name.
+    ///
+    /// A `<NAME>` stands for text this file's rules do not describe, so what it
+    /// means is not known here: it is known by whoever runs the generator, and
+    /// this table is the only place they say it. A name the table gives is called
+    /// exactly where the table says, and every rule that calls it shares one
+    /// type, since the function behind the name is fixed here and so means the
+    /// same thing wherever it appears.
+    ///
+    /// A name the table does not give is reported rather than guessed at, so a
+    /// grammar is never written into a file that calls a function nobody decided
+    /// on. The list of names a spec expects is already known before generating:
+    /// [`Module::externals`](crate::semantics::Module::externals) gives it, which
+    /// is what a build script hands to this table.
+    ///
+    /// A generator starts with an empty table, so every name has to be given:
+    ///
+    /// ```
+    /// use parserc::syntax::Syntax;
+    /// use quote::quote;
+    /// use unsyn::{codegen::Codegen, input::TokenStream, semantics::analyze, syntax::Crate};
+    ///
+    /// let spec = "whitespace WS -> [' '];\n\
+    ///             lexer Name -> <XID_Start> <XID_Continue>*;";
+    /// let mut tokens = TokenStream::from(spec);
+    /// let file = Crate::parse(&mut tokens).expect("the spec should parse");
+    /// let module = analyze(&file).expect("the spec should be well-formed");
+    ///
+    /// // This project takes both classes from unsyn's own runtime, and says so.
+    /// let written = Codegen::new()
+    ///     .with_externals([
+    ///         ("XID_Start".to_owned(), quote!(::unsyn::runtime::external::XID_Start)),
+    ///         ("XID_Continue".to_owned(), quote!(::unsyn::runtime::external::XID_Continue)),
+    ///     ])
+    ///     .generate(&module)
+    ///     .expect("the file should be writable")
+    ///     .to_string();
+    /// let written: String = written.split_whitespace().collect();
+    ///
+    /// assert!(written.contains("::unsyn::runtime::external::XID_Start"), "{written}");
+    /// assert!(written.contains("::unsyn::runtime::external::XID_Continue"), "{written}");
+    /// ```
+    ///
+    /// A name here does not have to be one Rust could spend on a function of its
+    /// own, since the path it gives is written out as the table spells it: `<dyn>`
+    /// is as callable as any other name once a table says where it lives.
+    #[inline]
+    pub fn with_externals(
+        mut self,
+        externals: impl IntoIterator<Item = (String, TokenStream)>,
+    ) -> Self {
+        self.externals = externals.into_iter().collect();
 
         self
     }
@@ -281,9 +343,9 @@ impl Codegen {
 
     /// What to write for a whole analyzed file, without writing it.
     ///
-    /// This is the half that reads the grammar: the programs of the rules that
-    /// take text, the shapes of the rules that hold nodes, and the types the
-    /// shapes needed along the way.
+    /// This is the half that reads the grammar: the patterns of the rules that
+    /// take text, the types of the rules that hold nodes, and the types those
+    /// needed along the way.
     pub(crate) fn plan<I: UnsynInput>(
         &self,
         module: &Module<'_, I>,
@@ -309,7 +371,7 @@ impl Codegen {
         let reserved = symbols.iter().map(|def| def.name().to_owned());
         let whitespace = symbols.whitespace().map(|def| def.name().to_owned());
 
-        let refs = LexRefs {
+        let refs = RuleNames {
             tokens: names(symbols, false),
             syntaxes: names(symbols, true),
             empty: nullable_nodes(symbols)
@@ -319,14 +381,14 @@ impl Codegen {
                 .collect(),
         };
 
-        // The programs of the rules that read text come first, since a node
-        // shape may name one of them and a token rule may name another.
-        let mut scanners = Vec::new();
+        // The patterns of the rules that read text come first, since a node
+        // type may name one of them and a token rule may name another.
+        let mut token_patterns = Vec::new();
         let mut errors = Vec::new();
 
         for def in symbols.iter().filter(|def| def.kind() != NodeKind::Syntax) {
-            match Program::new(&refs).expr(def.expr()) {
-                Ok(inst) => scanners.push(Scanner::plain(def.name(), inst)),
+            match PatternBuilder::new(&refs).expr(def.expr()) {
+                Ok(step) => token_patterns.push(TokenPattern::new(def.name(), step)),
                 Err(error) => errors.push(error),
             }
         }
@@ -335,12 +397,12 @@ impl Codegen {
             return Err(errors);
         }
 
-        let mut shaper = Shaper::new(&refs, reserved, whitespace.clone());
-        let mut shapes = Vec::new();
+        let mut builder = TypeBuilder::new(&refs, reserved, whitespace.clone());
+        let mut type_defs = Vec::new();
 
         for def in symbols.iter().filter(|def| def.kind() == NodeKind::Syntax) {
-            match shaper.shape(def.name(), def.expr()) {
-                Ok(shape) => shapes.push(shape),
+            match builder.type_def(def.name(), def.expr()) {
+                Ok(built) => type_defs.push(built),
                 Err(error) => errors.push(error),
             }
         }
@@ -349,15 +411,15 @@ impl Codegen {
             return Err(errors);
         }
 
-        let (built, more) = shaper.finish();
+        let (built, more) = builder.finish();
 
-        scanners.extend(built);
-        shapes.extend(more);
+        token_patterns.extend(built);
+        type_defs.extend(more);
 
         Ok(Plan {
             whitespace,
-            scanners,
-            shapes,
+            token_patterns,
+            type_defs,
         })
     }
 
@@ -367,6 +429,7 @@ impl Codegen {
         let classes = plan.classes();
         let renderer = Renderer::new(
             &self.paths,
+            &self.externals,
             &self.visibility,
             &self.derives,
             plan.whitespace.as_deref(),
@@ -375,15 +438,15 @@ impl Codegen {
         let mut items = Vec::new();
         let mut errors = Vec::new();
 
-        for scanner in &plan.scanners {
-            match renderer.scanner(scanner, &classes) {
+        for pattern in &plan.token_patterns {
+            match renderer.token_pattern(pattern, &classes) {
                 Ok(item) => items.push(item),
                 Err(error) => errors.push(error),
             }
         }
 
-        for shape in &plan.shapes {
-            items.push(renderer.node(shape, &plan.pointed(&edges, &shape.name)));
+        for def in &plan.type_defs {
+            items.push(renderer.node(def, &plan.pointed(&edges, &def.name)));
         }
 
         if !errors.is_empty() {
@@ -397,26 +460,22 @@ impl Codegen {
 impl Plan {
     /// The class each rule that reads text takes, which is what makes a
     /// repetition of one character scannable rather than looped.
-    fn classes(&self) -> HashMap<String, token::Pred> {
-        scan::classes(&self.scanners)
+    fn classes(&self) -> HashMap<String, pattern::CharClass> {
+        scan::classes(&self.token_patterns)
     }
 
     /// The node types each node type names, which is what a cycle is found in.
     fn edges(&self) -> HashMap<String, HashSet<String>> {
-        let nodes: HashSet<&str> = self
-            .shapes
-            .iter()
-            .map(|shape| shape.name.as_str())
-            .collect();
+        let nodes: HashSet<&str> = self.type_defs.iter().map(|def| def.name.as_str()).collect();
         let mut edges: HashMap<String, HashSet<String>> = HashMap::new();
 
-        for shape in &self.shapes {
+        for def in &self.type_defs {
             let mut named = Vec::new();
 
-            shape.names(&mut named);
+            def.names(&mut named);
 
             edges.insert(
-                shape.name.clone(),
+                def.name.clone(),
                 named
                     .into_iter()
                     .filter(|name| nodes.contains(name.as_str()))

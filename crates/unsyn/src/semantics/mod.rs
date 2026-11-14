@@ -28,9 +28,9 @@
 //! stricter language is free to treat a lint as fatal; the analyzer does not
 //! decide that for it.
 //!
-//! A `<call>` is deliberately *not* resolved: it denotes the matcher the
+//! A `<call>` is deliberately *not* resolved: it denotes the external the
 //! generated code calls, which may be provided by the backend, so the names a
-//! file expects from outside are collected in [`Module::matchers`] for the
+//! file expects from outside are collected in [`Module::externals`] for the
 //! linker instead of being diagnosed here. The analyzer never reads the file
 //! system: one source file at a time goes in, the diagnostics of that file come
 //! out.
@@ -104,7 +104,7 @@ where
     I: UnsynInput,
 {
     symbols: SymbolTable<'a, I>,
-    matchers: Vec<&'a str>,
+    externals: Vec<&'a str>,
     lints: Vec<Lint>,
 }
 
@@ -124,21 +124,21 @@ where
         self.symbols.get(name)
     }
 
-    /// The matchers this file calls, in declaration order and without
+    /// The externals this file calls, in declaration order and without
     /// duplicates.
     ///
-    /// A matcher whose name is not a node of this file has to be provided by
+    /// An external whose name is not a node of this file has to be provided by
     /// the backend, which is a question the linker answers rather than an error
     /// of one file.
     #[inline]
-    pub fn matchers(&self) -> &[&'a str] {
-        &self.matchers
+    pub fn externals(&self) -> &[&'a str] {
+        &self.externals
     }
 
-    /// Returns `true` when the file calls the matcher `name`.
+    /// Returns `true` when the file calls the external `name`.
     #[inline]
-    pub fn uses_matcher(&self, name: &str) -> bool {
-        self.matchers.contains(&name)
+    pub fn uses_external(&self, name: &str) -> bool {
+        self.externals.contains(&name)
     }
 
     /// The reports this file earned without ceasing to be a program.
@@ -200,7 +200,7 @@ where
         self.check_separators();
         self.check_recursion();
 
-        let matchers = self.collect_matchers();
+        let externals = self.collect_externals();
 
         // Only an error costs the file its model: a lint travels with it.
         let Diagnostics { errors, lints } = self.report;
@@ -208,7 +208,7 @@ where
         if errors.is_empty() {
             Ok(Module {
                 symbols: self.symbols,
-                matchers,
+                externals,
                 lints,
             })
         } else {
@@ -388,21 +388,21 @@ where
         self.report.errors.extend(errors);
     }
 
-    /// Gathers the matchers the file calls.
-    fn collect_matchers(&self) -> Vec<&'a str> {
-        let mut matchers: Vec<&'a str> = Vec::new();
+    /// Gathers the externals the file calls.
+    fn collect_externals(&self) -> Vec<&'a str> {
+        let mut externals: Vec<&'a str> = Vec::new();
 
         for def in self.symbols.iter() {
             walk_calls(def.expr(), &mut |call| {
                 let name = call.body.0.as_str();
 
-                if !matchers.contains(&name) {
-                    matchers.push(name);
+                if !externals.contains(&name) {
+                    externals.push(name);
                 }
             });
         }
 
-        matchers
+        externals
     }
 }
 
@@ -500,7 +500,7 @@ mod tests {
 
     #[test]
     fn a_call_is_not_a_reference() {
-        // `<MISSING>` is a matcher of the backend: only the linker can say
+        // `<MISSING>` is an external of the backend: only the linker can say
         // whether it exists.
         assert_well_formed("lexer A -> <MISSING>;");
 
@@ -508,13 +508,13 @@ mod tests {
         let file = Crate::parse(&mut input).unwrap();
         let module = analyze(&file).unwrap();
 
-        assert_eq!(module.matchers().to_vec(), vec!["X", "Y"]);
-        assert!(module.uses_matcher("Y"));
-        assert!(!module.uses_matcher("A"));
+        assert_eq!(module.externals().to_vec(), vec!["X", "Y"]);
+        assert!(module.uses_external("Y"));
+        assert!(!module.uses_external("A"));
     }
 
     #[test]
-    fn a_node_bound_to_a_matcher_of_its_name_is_not_recursive() {
+    fn a_node_bound_to_an_external_of_its_name_is_not_recursive() {
         assert_well_formed("lexer XID_Start -> <XID_Start>;");
     }
 
@@ -766,7 +766,7 @@ mod tests {
     fn a_repeated_alternative_is_not_a_matter_of_the_set_rules() {
         // A set enumerates the members of one union of characters, which is what
         // makes a repeated member worth saying; a body that repeats an
-        // alternative repeats a whole pattern, and the shapes it may match are
+        // alternative repeats a whole pattern, and the type_defs it may match are
         // not what a single file can compare.
         assert!(lints_of("lexer A -> 'a' | 'a';").is_empty());
         assert!(lints_of("lexer A -> ( 'a' | 'a' )+;").is_empty());

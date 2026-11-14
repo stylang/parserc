@@ -1,21 +1,21 @@
-//! The shape a `syntax` rule leaves behind: the fields of its type.
+//! The type a `syntax` rule leaves behind: the fields it holds.
 //!
 //! A node definition is read against other nodes rather than against characters,
-//! so its body is not compiled to a program but to the *shape* of the type: one
-//! field per element of the sequence the rule is, with the repetitions and the
-//! assertions the rule asks for written into the type of the field rather than
-//! into the code that reads it ([`Type`]).
+//! so its body is not compiled to a pattern over characters but to the *type* of
+//! the node it reads: one field per element of the sequence the rule is, with
+//! the repetitions and the assertions the rule asks for written into the type of
+//! the field rather than into the code that reads it ([`FieldType`]).
 //!
-//! Four things make a shape need a type of its own rather than a field:
+//! Four things make part of a rule need a type of its own rather than a field:
 //!
 //! - a repetition counted out (`X{n}`, `X{n}..{m}`), whose bound the code that
-//!   reads it has to check, which is [`ShapeKind::Bounds`];
+//!   reads it has to check, which is [`TypeDefKind::Bounds`];
 //! - an operand with a question asked about the text around it (`except`,
-//!   `followed`), which is [`ShapeKind::Asserted`];
+//!   `followed`), which is [`TypeDefKind::Asserted`];
 //! - a group with more than one alternative, which is a
-//!   [`ShapeKind::Enum`] of its own, named after the rule it was written in;
+//!   [`TypeDefKind::Enum`] of its own, named after the rule it was written in;
 //! - anything a rule reaches through more than sixteen operands, since the
-//!   shortcut of [`Type::Concat`] is a tuple and a tuple stops at sixteen.
+//!   shortcut of [`FieldType::Concat`] is a tuple and a tuple stops at sixteen.
 //!
 //! # Whitespace
 //!
@@ -30,7 +30,7 @@
 //!
 //! `concat` is the exception the DSL makes, and the only place the rule does not
 //! hold: it asks for both operands as one token, with nothing between, which is
-//! why it is [`Type::Concat`] and not a field and a separator.
+//! why it is [`FieldType::Concat`] and not a field and a separator.
 //!
 //! A file that declares no `whitespace` rule has no trivia to take, so it has no
 //! separators at all.
@@ -38,7 +38,7 @@
 //! A rule may still write its separator out, as `syntax Pair -> A WS B;` does
 //! when `WS` is the trivia node. Such a bare mention of the trivia asks for
 //! nothing the run between the operands around it does not already take, so it
-//! is folded away and earns no field: the shape is the one
+//! is folded away and earns no field: the type is the one
 //! `syntax Pair -> A B;` makes, and the [analysis](crate::semantics) notes the
 //! mention. At either end of a sequence the mention is folded for the same
 //! reason: the trivia before the first operand of a rule belongs to the
@@ -57,22 +57,22 @@ use crate::syntax::{Expr, ExprNoTopAlt, ExprNoTopAlts, ExprWithSuffix, ExprWitho
 
 use super::error::{CodegenError, CodegenKind};
 use super::name::{Names, keyword_name, literal_name, punct_name};
-use super::token::{Builder as Program, Inst, LexRefs, Pred, Scanner};
+use super::pattern::{CharClass, PatternBuilder, RuleNames, Step, TokenPattern};
 
 /// The most operands a sequence may be folded into, which is how many elements
 /// a tuple of the backend has.
 const MAX_TUPLE: usize = 16;
 
 /// One type codegen writes for a node rule, or for a construct inside one.
-pub(crate) struct Shape {
+pub(crate) struct TypeDef {
     /// The name of the type.
     pub(crate) name: String,
     /// What its fields are.
-    pub(crate) kind: ShapeKind,
+    pub(crate) kind: TypeDefKind,
 }
 
 /// The body of a shape, which decides the declaration its type is given.
-pub(crate) enum ShapeKind {
+pub(crate) enum TypeDefKind {
     /// A tuple struct of fields, which is what a rule of one alternative is.
     Struct {
         /// The elements of the sequence, in the order they are taken.
@@ -88,7 +88,7 @@ pub(crate) enum ShapeKind {
     /// the run it matched and a check that the run is long enough.
     Bounds {
         /// What each repetition takes.
-        item: Type,
+        item: FieldType,
         /// The least number of times it is taken.
         min: usize,
         /// The most, or nothing when the text decides.
@@ -99,7 +99,7 @@ pub(crate) enum ShapeKind {
     /// One operand with a question asked about the text around it.
     Asserted {
         /// What is taken.
-        item: Type,
+        item: FieldType,
         /// The question, and where it is asked.
         assert: Assert,
     },
@@ -117,49 +117,49 @@ pub(crate) struct Variant {
 /// The question an asserted operand asks.
 pub(crate) enum Assert {
     /// The operand is taken unless what removes it fits where the operand does.
-    Except(Type),
+    Except(FieldType),
     /// The operand is taken only where what follows it fits next.
-    Followed(Type),
+    Followed(FieldType),
 }
 
-/// One field of a shape.
+/// One field of a def.
 pub(crate) struct Field {
     /// What the field holds.
-    pub(crate) ty: Type,
+    pub(crate) ty: FieldType,
     /// Whether a run of trivia is taken before it, which is needed when neither
     /// the element before it nor this one carries the whitespace itself.
     pub(crate) separator: bool,
 }
 
 /// What a field holds, written so that taking it is one call of
-/// [`parse`](parserc::syntax::Syntax::parse) whatever the shape of the field's
-/// type is: the tuple and the collection are both syntax of their own.
+/// [`parse`](parserc::syntax::Syntax::parse) whatever the field's type holds:
+/// the tuple and the collection are both syntax of their own.
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub(crate) enum Type {
-    /// The type of one named rule, or of one the shaper wrote itself.
+pub(crate) enum FieldType {
+    /// The type of one named rule, or of one the builder wrote itself.
     Named(String),
     /// `T?`, which is the operand taken where it fits.
-    Opt(Box<Type>),
+    Opt(Box<FieldType>),
     /// `T*`, which is the run of them the text offers.
     Many {
         /// What each takes.
-        item: Box<Type>,
+        item: Box<FieldType>,
         /// Whether the trivia between two of them is part of the run.
         separated: bool,
     },
     /// `T+`, which is one and then as many more as there are.
     OneOrMore {
         /// What each takes.
-        item: Box<Type>,
+        item: Box<FieldType>,
         /// Whether the trivia between two of them is part of the run.
         separated: bool,
     },
     /// `A concat B`, which is both taken back to back with nothing between.
     Concat {
         /// What comes first.
-        first: Box<Type>,
+        first: Box<FieldType>,
         /// What comes next.
-        second: Box<Type>,
+        second: Box<FieldType>,
     },
 }
 
@@ -170,20 +170,20 @@ fn fields_of(fields: &[Field], out: &mut Vec<String>) {
     }
 }
 
-impl Shape {
-    /// The types a shape names, which are the edges of the recursion it may
+impl TypeDef {
+    /// The types a rule's type names, which are the edges of the recursion it may
     /// take part in: a rule that names itself, or names its way back to itself,
     /// has to hold what it names behind a pointer.
     pub(crate) fn names(&self, out: &mut Vec<String>) {
         match &self.kind {
-            ShapeKind::Struct { fields } => fields_of(fields, out),
-            ShapeKind::Enum { variants } => {
+            TypeDefKind::Struct { fields } => fields_of(fields, out),
+            TypeDefKind::Enum { variants } => {
                 for variant in variants {
                     fields_of(&variant.fields, out);
                 }
             }
-            ShapeKind::Bounds { item, .. } => item.names(out),
-            ShapeKind::Asserted { item, assert } => {
+            TypeDefKind::Bounds { item, .. } => item.names(out),
+            TypeDefKind::Asserted { item, assert } => {
                 item.names(out);
 
                 match assert {
@@ -195,14 +195,14 @@ impl Shape {
     }
 }
 
-impl Type {
+impl FieldType {
     /// Returns `true` when this type can be taken without moving the text.
     pub(crate) fn takes_nothing(&self, empty: &HashSet<String>) -> bool {
         match self {
-            Type::Named(name) => empty.contains(name),
-            Type::Opt(..) | Type::Many { .. } => true,
-            Type::OneOrMore { item, .. } => item.takes_nothing(empty),
-            Type::Concat { first, second, .. } => {
+            FieldType::Named(name) => empty.contains(name),
+            FieldType::Opt(..) | FieldType::Many { .. } => true,
+            FieldType::OneOrMore { item, .. } => item.takes_nothing(empty),
+            FieldType::Concat { first, second, .. } => {
                 first.takes_nothing(empty) && second.takes_nothing(empty)
             }
         }
@@ -211,11 +211,11 @@ impl Type {
     /// What the type is called in the report about it.
     pub(crate) fn describe(&self) -> String {
         match self {
-            Type::Named(name) => name.clone(),
-            Type::Opt(item) => format!("{}?", item.describe()),
-            Type::Many { item, .. } => format!("{}*", item.describe()),
-            Type::OneOrMore { item, .. } => format!("{}+", item.describe()),
-            Type::Concat { first, second } => {
+            FieldType::Named(name) => name.clone(),
+            FieldType::Opt(item) => format!("{}?", item.describe()),
+            FieldType::Many { item, .. } => format!("{}*", item.describe()),
+            FieldType::OneOrMore { item, .. } => format!("{}+", item.describe()),
+            FieldType::Concat { first, second } => {
                 format!("{} concat {}", first.describe(), second.describe())
             }
         }
@@ -225,11 +225,13 @@ impl Type {
     /// whether it has to be held behind a pointer.
     pub(crate) fn names(&self, out: &mut Vec<String>) {
         match self {
-            Type::Named(name) => out.push(name.clone()),
-            Type::Opt(item) | Type::Many { item, .. } | Type::OneOrMore { item, .. } => {
+            FieldType::Named(name) => out.push(name.clone()),
+            FieldType::Opt(item)
+            | FieldType::Many { item, .. }
+            | FieldType::OneOrMore { item, .. } => {
                 item.names(out);
             }
-            Type::Concat { first, second, .. } => {
+            FieldType::Concat { first, second, .. } => {
                 first.names(out);
                 second.names(out);
             }
@@ -237,12 +239,12 @@ impl Type {
     }
 }
 
-/// Builds the shapes of a file's node rules.
+/// Builds the types of a file's node rules.
 ///
-/// The shaper owns the names it hands out and the types it had to write for
+/// The builder owns the names it hands out and the types it had to write for
 /// itself, so a file's rules can be shaped one at a time while the anonymous
 /// types they need are collected in one place.
-pub(crate) struct Shaper {
+pub(crate) struct TypeBuilder {
     /// The names already given, so that none is given twice.
     names: Names,
     /// How many anonymous types each rule has needed so far.
@@ -256,8 +258,8 @@ pub(crate) struct Shaper {
     /// The name of the whitespace type, where the file declares one.
     whitespace: Option<String>,
     /// The type each construct that is shared between rules has already been
-    /// given, keyed by the name it is shared under: the matchers this crate
-    /// provides and the wildcard.
+    /// given, keyed by the name it is shared under: an external call and the
+    /// wildcard, each of which is the same pattern wherever it is written.
     shared: HashMap<String, String>,
     /// The type each literal has already been given, keyed by the text it
     /// matches, which is what makes `'if'` here and `'if'` there one token.
@@ -270,20 +272,20 @@ pub(crate) struct Shaper {
     /// The anonymous types of a rule that are separated runs, which carry the
     /// trivia before their own elements.
     runs: HashSet<String>,
-    /// The programs of the token types the shapes needed, which are written out
+    /// The patterns of the token types the types needed, which are written out
     /// beside the rules of the file.
-    anon_tokens: Vec<Scanner>,
+    anon_tokens: Vec<TokenPattern>,
     /// The types written for a construct inside a rule, which are emitted with
     /// the rule that needed them.
-    pub(crate) pending: Vec<Shape>,
+    pub(crate) pending: Vec<TypeDef>,
 }
 
-impl Shaper {
-    /// Prepares a shaper over the names `refs` describes, with the definitions'
+impl TypeBuilder {
+    /// Prepares a builder over the names `refs` describes, with the definitions'
     /// own `reserved` names already claimed and `whitespace` the type of the
-    /// trivia, where the file declares any.
+    /// trivia where the file declares any.
     pub(crate) fn new(
-        refs: &LexRefs,
+        refs: &RuleNames,
         reserved: impl Iterator<Item = String>,
         whitespace: Option<String>,
     ) -> Self {
@@ -307,30 +309,30 @@ impl Shaper {
         }
     }
 
-    /// The shape of one node rule, named `owner`, whose body is `expr`.
+    /// The type of one node rule, named `owner`, whose body is `expr`.
     ///
-    /// Any type the rule needed written for itself comes out of the shaper with
-    /// it, in [`Shaper::pending`].
-    pub(crate) fn shape<I: UnsynInput>(
+    /// Any type the rule needed written for itself comes out of the builder with
+    /// it, in [`TypeBuilder::pending`].
+    pub(crate) fn type_def<I: UnsynInput>(
         &mut self,
         owner: &str,
         expr: &Expr<I>,
-    ) -> Result<Shape, CodegenError> {
-        Ok(Shape {
+    ) -> Result<TypeDef, CodegenError> {
+        Ok(TypeDef {
             name: owner.to_owned(),
             kind: self.kind(owner, expr)?,
         })
     }
 
-    /// The body of the shape of a rule: the sum the top-level `|` makes, or the
+    /// The body of a rule's type: the sum the top-level `|` makes, or the
     /// product of the rule's one sequence.
     fn kind<I: UnsynInput>(
         &mut self,
         owner: &str,
         expr: &Expr<I>,
-    ) -> Result<ShapeKind, CodegenError> {
+    ) -> Result<TypeDefKind, CodegenError> {
         if expr.rest.is_empty() {
-            return Ok(ShapeKind::Struct {
+            return Ok(TypeDefKind::Struct {
                 fields: self.fields_of_sequence(owner, &expr.first)?,
             });
         }
@@ -375,10 +377,12 @@ impl Shaper {
     /// of its elements itself, which is what makes a separator in front of it
     /// both needless and wrong: it would be taken even when the run takes
     /// nothing at all.
-    fn opens_with_a_separator(&self, ty: &Type) -> bool {
+    fn opens_with_a_separator(&self, ty: &FieldType) -> bool {
         match ty {
-            Type::Many { separated, .. } | Type::OneOrMore { separated, .. } => *separated,
-            Type::Named(name) => self.runs.contains(name),
+            FieldType::Many { separated, .. } | FieldType::OneOrMore { separated, .. } => {
+                *separated
+            }
+            FieldType::Named(name) => self.runs.contains(name),
             _ => false,
         }
     }
@@ -400,7 +404,7 @@ impl Shaper {
         &mut self,
         owner: &str,
         expr: &ExprNoTopAlt<I>,
-    ) -> Result<Type, CodegenError> {
+    ) -> Result<FieldType, CodegenError> {
         match expr {
             ExprNoTopAlt::WithSuffix(expr) => self.with_suffix(owner, expr),
             ExprNoTopAlt::WithoutSuffix(expr) => self.leaf(owner, expr),
@@ -412,23 +416,23 @@ impl Shaper {
         &mut self,
         owner: &str,
         expr: &ExprWithSuffix<I>,
-    ) -> Result<Type, CodegenError> {
+    ) -> Result<FieldType, CodegenError> {
         match expr {
             ExprWithSuffix::Star(target, _) => self.repeated(target, 0, None, owner, expr),
             ExprWithSuffix::Question(target, _) => {
-                Ok(Type::Opt(Box::new(self.leaf(owner, target)?)))
+                Ok(FieldType::Opt(Box::new(self.leaf(owner, target)?)))
             }
             ExprWithSuffix::Plus(target, _) => self.repeated(target, 1, None, owner, expr),
             ExprWithSuffix::Repeat { target, suffix } => {
                 let (min, max) =
-                    super::token::repeat_bounds(&suffix.body).ok_or_else(|| CodegenError {
+                    super::pattern::repeat_bounds(&suffix.body).ok_or_else(|| CodegenError {
                         kind: CodegenKind::InvalidRepeat,
                         span: expr.to_span(),
                     })?;
 
                 self.counted(target, min, max, owner, &expr.to_span())
             }
-            ExprWithSuffix::Concat { target, suffix, .. } => Ok(Type::Concat {
+            ExprWithSuffix::Concat { target, suffix, .. } => Ok(FieldType::Concat {
                 first: Box::new(self.leaf(owner, target)?),
                 second: Box::new(self.ty(owner, suffix)?),
             }),
@@ -436,9 +440,9 @@ impl Shaper {
                 let item = self.leaf(owner, target)?;
                 let next = self.ty(owner, suffix)?;
 
-                Ok(Type::Named(self.anonymous(
+                Ok(FieldType::Named(self.anonymous(
                     owner,
-                    ShapeKind::Asserted {
+                    TypeDefKind::Asserted {
                         item,
                         assert: Assert::Followed(next),
                     },
@@ -448,9 +452,9 @@ impl Shaper {
                 let item = self.leaf(owner, target)?;
                 let removed = self.leaf(owner, tokens)?;
 
-                Ok(Type::Named(self.anonymous(
+                Ok(FieldType::Named(self.anonymous(
                     owner,
-                    ShapeKind::Asserted {
+                    TypeDefKind::Asserted {
                         item,
                         assert: Assert::Except(removed),
                     },
@@ -460,7 +464,7 @@ impl Shaper {
     }
 
     /// The type of a repetition whose bounds the text decides, which is one of
-    /// the shapes of [`Type`] where the count is only an upper bound or nothing.
+    /// the types of [`FieldType`] where the count is only an upper bound or nothing.
     fn repeated<I: UnsynInput>(
         &mut self,
         target: &ExprWithoutSuffix<I>,
@@ -468,7 +472,7 @@ impl Shaper {
         max: Option<usize>,
         owner: &str,
         reported: &ExprWithSuffix<I>,
-    ) -> Result<Type, CodegenError> {
+    ) -> Result<FieldType, CodegenError> {
         let item = self.leaf(owner, target)?;
 
         if item.takes_nothing(&self.empty) && max.is_none() {
@@ -481,18 +485,18 @@ impl Shaper {
         let separated = self.whitespace.is_some();
 
         match (min, max) {
-            (0, None) => Ok(Type::Many {
+            (0, None) => Ok(FieldType::Many {
                 item: Box::new(item),
                 separated,
             }),
-            (1, None) => Ok(Type::OneOrMore {
+            (1, None) => Ok(FieldType::OneOrMore {
                 item: Box::new(item),
                 separated,
             }),
             _ => {
-                let name = self.counted_shape(item, min, max, separated, owner);
+                let name = self.counted_type(item, min, max, separated, owner);
 
-                Ok(Type::Named(name))
+                Ok(FieldType::Named(name))
             }
         }
     }
@@ -506,7 +510,7 @@ impl Shaper {
         max: Option<usize>,
         owner: &str,
         span: &parserc::Span,
-    ) -> Result<Type, CodegenError> {
+    ) -> Result<FieldType, CodegenError> {
         let item = self.leaf(owner, target)?;
 
         if item.takes_nothing(&self.empty) {
@@ -518,15 +522,15 @@ impl Shaper {
 
         let separated = self.whitespace.is_some();
 
-        Ok(Type::Named(
-            self.counted_shape(item, min, max, separated, owner),
+        Ok(FieldType::Named(
+            self.counted_type(item, min, max, separated, owner),
         ))
     }
 
     /// Writes the type of a counted run and returns the name it was given.
-    fn counted_shape(
+    fn counted_type(
         &mut self,
-        item: Type,
+        item: FieldType,
         min: usize,
         max: Option<usize>,
         separated: bool,
@@ -534,7 +538,7 @@ impl Shaper {
     ) -> String {
         let name = self.anonymous(
             owner,
-            ShapeKind::Bounds {
+            TypeDefKind::Bounds {
                 item,
                 min,
                 max,
@@ -554,16 +558,16 @@ impl Shaper {
         &mut self,
         owner: &str,
         expr: &ExprWithoutSuffix<I>,
-    ) -> Result<Type, CodegenError> {
+    ) -> Result<FieldType, CodegenError> {
         match expr {
             // A literal is a token of its own, shared between every rule that
             // writes it the same way.
-            ExprWithoutSuffix::Str(lit) => Ok(Type::Named(self.literal(lit)?)),
-            ExprWithoutSuffix::Unicode(lit) => Ok(Type::Named(self.code_point(lit)?)),
+            ExprWithoutSuffix::Str(lit) => Ok(FieldType::Named(self.literal(lit)?)),
+            ExprWithoutSuffix::Unicode(lit) => Ok(FieldType::Named(self.code_point(lit)?)),
             ExprWithoutSuffix::Ident(ident) => {
                 self.reference(owner, ident.0.as_str(), &ident.to_span())
             }
-            ExprWithoutSuffix::Call(angle) => self.call(owner, angle.body.0.as_str()),
+            ExprWithoutSuffix::Call(angle) => self.call(angle.body.0.as_str(), &angle.to_span()),
             ExprWithoutSuffix::Set(bracket) => self.set(owner, bracket),
             ExprWithoutSuffix::Paren(paren) => self.group(owner, &paren.body),
             // `~` in a rule of nodes asks about text and takes one character of
@@ -578,42 +582,43 @@ impl Shaper {
         _owner: &str,
         name: &str,
         span: &parserc::Span,
-    ) -> Result<Type, CodegenError> {
+    ) -> Result<FieldType, CodegenError> {
         if name == WILDCARD {
             return self.wildcard();
         }
 
         if self.tokens.contains(name) || self.syntaxes.contains(name) {
-            return Ok(Type::Named(name.to_owned()));
+            return Ok(FieldType::Named(name.to_owned()));
         }
 
         Err(CodegenError::unresolved(name, span.clone()))
     }
 
-    /// The type of `<NAME>`, which is a token that runs the matcher.
+    /// The type of `<NAME>`, which is a token that runs the external.
     ///
-    /// A matcher this crate gives is the same program wherever it is called, so
-    /// one type of its own serves the whole file; one the backend has to provide
-    /// is named for the rule that called it, since what it matches is not known
-    /// here and two rules may mean two different things by the same name.
-    fn call(&mut self, owner: &str, name: &str) -> Result<Type, CodegenError> {
-        let inst = Inst::Matcher(name.to_owned());
-
-        if super::builtin::is_builtin(name) {
-            return Ok(Type::Named(self.shared(&format!("Match{name}"), inst)));
-        }
-
-        Ok(Type::Named(self.token(owner, inst)))
+    /// The call is the same pattern wherever it is written, whatever the table of
+    /// the [`Codegen`](super::Codegen) says the name means: what a name stands
+    /// for is settled before the file is written, so two rules cannot mean two
+    /// things by one name and the whole file shares one type per name. The type
+    /// keeps the span of the first rule that asked, which is where a name no
+    /// table gave is reported against.
+    fn call(&mut self, name: &str, span: &parserc::Span) -> Result<FieldType, CodegenError> {
+        Ok(FieldType::Named(self.shared(
+            &format!("External{name}"),
+            Step::External(name.to_owned(), span.clone()),
+        )))
     }
 
     /// The type of `_`, which is any one character.
-    fn wildcard(&mut self) -> Result<Type, CodegenError> {
-        Ok(Type::Named(self.shared("Any", Inst::Class(Pred::Any))))
+    fn wildcard(&mut self) -> Result<FieldType, CodegenError> {
+        Ok(FieldType::Named(
+            self.shared("Any", Step::Class(CharClass::Any)),
+        ))
     }
 
     /// The name of a type every operand that matches it shares, writing the
-    /// program out the first time it is asked for.
-    fn shared(&mut self, base: &str, inst: Inst) -> String {
+    /// pattern out the first time it is asked for.
+    fn shared(&mut self, base: &str, step: Step) -> String {
         if let Some(given) = self.shared.get(base) {
             return given.clone();
         }
@@ -621,7 +626,7 @@ impl Shaper {
         let name = self.name(base);
 
         self.shared.insert(base.to_owned(), name.clone());
-        self.anon_tokens.push(Scanner::plain(name.clone(), inst));
+        self.anon_tokens.push(TokenPattern::new(name.clone(), step));
 
         name
     }
@@ -631,16 +636,16 @@ impl Shaper {
         &mut self,
         owner: &str,
         bracket: &super::SetOf<I>,
-    ) -> Result<Type, CodegenError> {
-        let refs = LexRefs {
+    ) -> Result<FieldType, CodegenError> {
+        let refs = RuleNames {
             tokens: self.tokens.clone(),
             syntaxes: self.syntaxes.clone(),
             empty: self.empty.clone(),
         };
 
-        let inst = Program::new(&refs).set_of(bracket)?;
+        let step = PatternBuilder::new(&refs).set_of(bracket)?;
 
-        Ok(Type::Named(self.token(owner, inst)))
+        Ok(FieldType::Named(self.token(owner, step)))
     }
 
     /// The type of `~ […]` inside a rule of nodes.
@@ -648,39 +653,45 @@ impl Shaper {
         &mut self,
         owner: &str,
         set: &super::SetOf<I>,
-    ) -> Result<Type, CodegenError> {
-        let refs = LexRefs {
+    ) -> Result<FieldType, CodegenError> {
+        let refs = RuleNames {
             tokens: self.tokens.clone(),
             syntaxes: self.syntaxes.clone(),
             empty: self.empty.clone(),
         };
 
-        let program = Program::new(&refs);
+        let pattern = PatternBuilder::new(&refs);
 
-        let inst = Inst::Not(Box::new(program.set_of(set)?));
+        let step = Step::Not(Box::new(pattern.set_of(set)?));
 
-        Ok(Type::Named(self.token(owner, inst)))
+        Ok(FieldType::Named(self.token(owner, step)))
     }
 
-    /// Writes the program of a char-level operand as a token type of its own and
+    /// Writes the pattern of a char-level operand as a token type of its own and
     /// returns the name it was given.
-    fn token(&mut self, owner: &str, inst: Inst) -> String {
-        // A matcher call is named for the matcher it runs, since nothing about
-        // the rule it was written in distinguishes one call of it from another.
-        let base = match &inst {
-            Inst::Matcher(matcher) => format!("Match{matcher}"),
-            _ => self.next(owner),
-        };
+    fn token(&mut self, owner: &str, step: Step) -> String {
+        // An external call does not come this way, since it is named for the
+        // external it runs and nothing about the rule it was written in
+        // distinguishes one call of it from another.
+        debug_assert!(
+            !matches!(step, Step::External(..)),
+            "an external call shares the one type written for its name"
+        );
 
+        let base = self.next(owner);
         let name = self.name(&base);
 
-        self.anon_tokens.push(Scanner::plain(name.clone(), inst));
+        self.anon_tokens.push(TokenPattern::new(name.clone(), step));
 
         name
     }
 
     /// The type of a parenthesised group.
-    fn group<I: UnsynInput>(&mut self, owner: &str, expr: &Expr<I>) -> Result<Type, CodegenError> {
+    fn group<I: UnsynInput>(
+        &mut self,
+        owner: &str,
+        expr: &Expr<I>,
+    ) -> Result<FieldType, CodegenError> {
         // A group of one alternative, of no more operands than a tuple holds and
         // with nothing to keep between them, is the tuple they make: the trivia
         // before the group is the enclosing field's separator, and the group
@@ -695,7 +706,7 @@ impl Shaper {
                     CodegenError::unsupported("a group with nothing in it", expr.to_span())
                 })?;
 
-                return Ok(types.fold(first, |first, second| Type::Concat {
+                return Ok(types.fold(first, |first, second| FieldType::Concat {
                     first: Box::new(first),
                     second: Box::new(second),
                 }));
@@ -709,15 +720,15 @@ impl Shaper {
         let name = self.next(owner);
         let kind = self.kind(&name, expr)?;
 
-        Ok(Type::Named(self.anonymous_as(name, kind)))
+        Ok(FieldType::Named(self.anonymous_as(name, kind)))
     }
 
     /// Writes a type of its own for a construct of a rule under a name that has
     /// already been worked out for it.
-    fn anonymous_as(&mut self, base: String, kind: ShapeKind) -> String {
+    fn anonymous_as(&mut self, base: String, kind: TypeDefKind) -> String {
         let name = self.name(&base);
 
-        self.pending.push(Shape {
+        self.pending.push(TypeDef {
             name: name.clone(),
             kind,
         });
@@ -726,11 +737,11 @@ impl Shaper {
     }
 
     /// Writes a type of its own for a construct of a rule and names it.
-    fn anonymous(&mut self, owner: &str, kind: ShapeKind) -> String {
+    fn anonymous(&mut self, owner: &str, kind: TypeDefKind) -> String {
         let base = self.next(owner);
         let name = self.name(&base);
 
-        self.pending.push(Shape {
+        self.pending.push(TypeDef {
             name: name.clone(),
             kind,
         });
@@ -739,7 +750,7 @@ impl Shaper {
     }
 
     /// The next name of the anonymous types of one rule, which counts from one
-    /// and is only a candidate until [`Shaper::name`] gives it out: a name
+    /// and is only a candidate until [`TypeBuilder::name`] gives it out: a name
     /// handed out twice would be two types in one file.
     fn next(&mut self, owner: &str) -> String {
         let count = self.counters.entry(owner.to_owned()).or_insert(0);
@@ -759,7 +770,7 @@ impl Shaper {
         &mut self,
         owner: &str,
         expr: &Expr<I>,
-    ) -> Result<ShapeKind, CodegenError> {
+    ) -> Result<TypeDefKind, CodegenError> {
         let mut variants = Vec::new();
 
         variants.push(Variant {
@@ -774,7 +785,7 @@ impl Shaper {
             });
         }
 
-        Ok(ShapeKind::Enum { variants })
+        Ok(TypeDefKind::Enum { variants })
     }
 
     /// The name one alternative is given among its siblings, which is read from
@@ -810,7 +821,7 @@ impl Shaper {
             ExprNoTopAlt::WithoutSuffix(ExprWithoutSuffix::Tilde(..)) => "Tilde".to_owned(),
             ExprNoTopAlt::WithoutSuffix(ExprWithoutSuffix::Set(..)) => "Set".to_owned(),
             ExprNoTopAlt::WithoutSuffix(ExprWithoutSuffix::Paren(..)) => "Group".to_owned(),
-            // A matcher call is named for what it calls, which the rule around
+            // An external call is named for what it calls, which the rule around
             // it does not say.
             ExprNoTopAlt::WithoutSuffix(ExprWithoutSuffix::Call(angle)) => {
                 keyword_name(angle.body.0.as_str())
@@ -826,7 +837,7 @@ impl Shaper {
 
         // A variant is named within the type it belongs to, so only the
         // alternatives of one rule have to be kept apart from each other: a
-        // second alternative of the same shape steps aside rather than colliding.
+        // second alternative of the same rule steps aside rather than colliding.
         let given = self.variants.entry(owner.to_owned()).or_default();
         let named = if given.contains(&base) {
             format!("{base}Variant{}", given.len() + 1)
@@ -860,13 +871,13 @@ impl Shaper {
             .register(&literal_name(&text))
             .ok_or_else(|| CodegenError::unsupported("a literal", lit.to_span()))?;
 
-        // The program is the one the token rules use, so that a keyword shared
+        // The pattern is the one the token rules use, so that a keyword shared
         // between two rules ends where an identifier of the language would go
         // on in both of them.
-        let inst = super::token::literal(lit)?;
+        let step = super::pattern::literal(lit)?;
 
         self.literals.insert(text, name.clone());
-        self.anon_tokens.push(Scanner::plain(name.clone(), inst));
+        self.anon_tokens.push(TokenPattern::new(name.clone(), step));
 
         Ok(name)
     }
@@ -891,16 +902,18 @@ impl Shaper {
             .ok_or_else(|| CodegenError::unsupported("a code point", lit.to_span()))?;
 
         self.code_points.insert(c, name.clone());
-        self.anon_tokens
-            .push(Scanner::plain(name.clone(), Inst::Class(Pred::of(c))));
+        self.anon_tokens.push(TokenPattern::new(
+            name.clone(),
+            Step::Class(CharClass::of(c)),
+        ));
 
         Ok(name)
     }
 
-    /// The types the shapes needed, taken out of the shaper: the token programs
+    /// The types the types needed, taken out of the builder: the token patterns
     /// that belong beside the file's own rules, and the node types cut out of
     /// them.
-    pub(crate) fn finish(self) -> (Vec<Scanner>, Vec<Shape>) {
+    pub(crate) fn finish(self) -> (Vec<TokenPattern>, Vec<TypeDef>) {
         (self.anon_tokens, self.pending)
     }
 }
@@ -911,34 +924,35 @@ mod tests {
 
     use super::*;
 
-    /// A shaper over `names` as the node rules and `empty` as those that can
+    /// A builder over `names` as the node rules and `empty` as those that can
     /// match nothing, with a whitespace rule of the file.
-    fn shaper(tokens: &[&str], syntaxes: &[&str], empty: &[&str]) -> Shaper {
-        let refs = LexRefs {
+    fn builder(tokens: &[&str], syntaxes: &[&str], empty: &[&str]) -> TypeBuilder {
+        let refs = RuleNames {
             tokens: tokens.iter().copied().map(String::from).collect(),
             syntaxes: syntaxes.iter().copied().map(String::from).collect(),
             empty: empty.iter().copied().map(String::from).collect(),
         };
 
-        Shaper::new(&refs, std::iter::empty(), Some("WHITESPACE".to_owned()))
+        TypeBuilder::new(&refs, std::iter::empty(), Some("WHITESPACE".to_owned()))
     }
 
     #[test]
     fn a_counted_run_is_a_type_of_its_own() {
-        let mut shaper = shaper(&[], &[], &[]);
-        let name = shaper.counted_shape(Type::Named("X".to_owned()), 2, Some(4), true, "Owner");
+        let mut builder = builder(&[], &[], &[]);
+        let name =
+            builder.counted_type(FieldType::Named("X".to_owned()), 2, Some(4), true, "Owner");
 
         assert_eq!(name, "Owner1");
-        assert_eq!(shaper.pending.len(), 1);
+        assert_eq!(builder.pending.len(), 1);
 
-        match &shaper.pending[0].kind {
-            ShapeKind::Bounds {
+        match &builder.pending[0].kind {
+            TypeDefKind::Bounds {
                 item,
                 min,
                 max,
                 separated,
             } => {
-                assert_eq!(item, &Type::Named("X".to_owned()));
+                assert_eq!(item, &FieldType::Named("X".to_owned()));
                 assert_eq!((*min, *max, *separated), (2, Some(4), true));
             }
             other => panic!("expected bounds, got {:?}", std::mem::discriminant(other)),
@@ -947,11 +961,11 @@ mod tests {
 
     #[test]
     fn anonymous_names_of_two_rules_do_not_collide() {
-        let mut shaper = shaper(&[], &[], &[]);
+        let mut builder = builder(&[], &[], &[]);
 
-        let first = shaper.anonymous("Owner", empty_kind());
-        let second = shaper.anonymous("Owner", empty_kind());
-        let other = shaper.anonymous("Other", empty_kind());
+        let first = builder.anonymous("Owner", empty_kind());
+        let second = builder.anonymous("Owner", empty_kind());
+        let other = builder.anonymous("Other", empty_kind());
 
         assert_eq!(
             (first.as_str(), second.as_str(), other.as_str()),
@@ -960,9 +974,9 @@ mod tests {
     }
 
     /// The body of a type a test names without caring what it holds.
-    fn empty_kind() -> ShapeKind {
-        ShapeKind::Bounds {
-            item: Type::Named("X".to_owned()),
+    fn empty_kind() -> TypeDefKind {
+        TypeDefKind::Bounds {
+            item: FieldType::Named("X".to_owned()),
             min: 1,
             max: None,
             separated: false,
@@ -972,8 +986,8 @@ mod tests {
     #[test]
     fn a_type_of_nothing_to_take_says_so_and_what_it_was() {
         let empty: HashSet<String> = ["Space".to_owned()].into_iter().collect();
-        let stuck = Type::Many {
-            item: Box::new(Type::Named("Space".to_owned())),
+        let stuck = FieldType::Many {
+            item: Box::new(FieldType::Named("Space".to_owned())),
             separated: false,
         };
 
@@ -984,16 +998,16 @@ mod tests {
         // other way a repetition sticks, and `concat` sticks only when both of
         // its operands do.
         assert!(
-            Type::OneOrMore {
-                item: Box::new(Type::Named("Space".to_owned())),
+            FieldType::OneOrMore {
+                item: Box::new(FieldType::Named("Space".to_owned())),
                 separated: false,
             }
             .takes_nothing(&empty)
         );
         assert!(
-            !Type::Concat {
-                first: Box::new(Type::Named("Space".to_owned())),
-                second: Box::new(Type::Named("X".to_owned())),
+            !FieldType::Concat {
+                first: Box::new(FieldType::Named("Space".to_owned())),
+                second: Box::new(FieldType::Named("X".to_owned())),
             }
             .takes_nothing(&empty)
         );
@@ -1003,9 +1017,11 @@ mod tests {
     fn the_names_a_type_holds_are_what_a_pointer_is_asked_for() {
         let mut names = Vec::new();
 
-        Type::Concat {
-            first: Box::new(Type::Named("Expr".to_owned())),
-            second: Box::new(Type::Opt(Box::new(Type::Named("Stmt".to_owned())))),
+        FieldType::Concat {
+            first: Box::new(FieldType::Named("Expr".to_owned())),
+            second: Box::new(FieldType::Opt(Box::new(FieldType::Named(
+                "Stmt".to_owned(),
+            )))),
         }
         .names(&mut names);
 

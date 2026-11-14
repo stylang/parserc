@@ -1,7 +1,7 @@
 //! The Rust the generator wrote for the spec below.
 //!
-//! This file is machine-made: `cargo test -p unsyn --test generated -- --nocapture
-//! dump` prints what `Codegen` produces for that spec, and the result is kept
+//! This file is machine-made: `cargo test -p unsyn --test dump -- --nocapture`
+//! prints what `Codegen` produces for that spec, and the result is kept
 //! here so that the emitted types are compiled and run rather than only read
 //! back as tokens. `tests/generated.rs` says so when the two fall apart.
 
@@ -185,7 +185,7 @@ where
             if {
                 let mut __probe = input.clone();
                 (|__probe: &mut I| -> ::core::result::Result<(), <I as ::parserc::Input>::Error> {
-                    ::unsyn::runtime::matcher::XID_Continue(__probe)?;
+                    ::unsyn::runtime::external::XID_Continue(__probe)?;
                     ::core::result::Result::Ok(())
                 })
                 .parse(&mut __probe)
@@ -238,7 +238,7 @@ where
             if {
                 let mut __probe = input.clone();
                 (|__probe: &mut I| -> ::core::result::Result<(), <I as ::parserc::Input>::Error> {
-                    ::unsyn::runtime::matcher::XID_Continue(__probe)?;
+                    ::unsyn::runtime::external::XID_Continue(__probe)?;
                     ::core::result::Result::Ok(())
                 })
                 .parse(&mut __probe)
@@ -832,7 +832,7 @@ where
         };
         {
             let mut __from = input.clone();
-            ::unsyn::runtime::matcher::XID_Start(input)?;
+            ::unsyn::runtime::external::XID_Start(input)?;
             if input.len() == __from.len() {
                 return Err(::parserc::Kind::Token(
                     "MATCHER",
