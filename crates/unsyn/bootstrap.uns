@@ -1,22 +1,23 @@
 //! unsyn for `unsyn`
 
-whitespace WHITESPACE ->
-      U+0009
-    | U+000A
-    | U+000B
-    | U+000C
-    | U+000D
-    | U+0020
-    | U+0085
-    | U+200E
-    | U+200F
-    | U+2028
-    | U+2029;
+whitespace WHITESPACE -> [
+      U+0009-U+000D
+    , U+0020
+    , U+0085
+    , U+00A0
+    , U+1680
+    , U+2000-U+200A
+    , U+2028
+    , U+2029
+    , U+202F
+    , U+205F
+    , U+3000
+];
 
 lexer LF  -> U+000A;
 lexer CR  -> U+000D;
 
-lexer IDENTIFIER_OR_KEYWORD -> ( XID_Start | _ ) XID_Continue*;
+lexer IDENTIFIER_OR_KEYWORD -> ( XID_Start | '_' ) XID_Continue*;
 
 lexer XID_Start -> <XID_Start>;
 
@@ -73,7 +74,7 @@ lexer OCT_DIGIT -> ['0'-'7'];
 lexer DEC_DIGIT -> ['0'-'9'];
 lexer HEX_DIGIT -> ['0'-'9','a'-'f','A'-'F'];
 
-lexer DEC_LITERAL -> DEC_DIGIT ( DEC_DIGIT | _ )*;
+lexer DEC_LITERAL -> DEC_DIGIT ( DEC_DIGIT | '_' )*;
 
 lexer UNICODE_LITERAL -> 'U+' concat HEX_DIGIT{4};
 
