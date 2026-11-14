@@ -157,9 +157,11 @@ pub(crate) fn set_items<T, P>(punctuated: &Punctuated<T, P>) -> impl Iterator<It
 ///
 /// What a `<NAME>` in a pattern calls is not one of these paths: a name is only
 /// ever given by the table of [`with_externals`](Codegen::with_externals), which
-/// is where the caller says what each name means. What the DSL asks of its own
-/// machinery is the other side of that: it goes by the `unsyn` path, since it is
-/// unsyn's own question and not one the spec wrote.
+/// is where the caller says what each name means. The `unsyn` path is reached
+/// for one thing alone, the [`GeneratedInput`] bound every generated type is
+/// written over; the generator borrows no answer of its own from unsyn, since a
+/// question about the described language belongs either to the spec that writes
+/// it or to the caller who answers one.
 ///
 /// [`GeneratedInput`]: crate::runtime::GeneratedInput
 #[derive(Debug, Clone)]

@@ -97,10 +97,10 @@ fn range_of<T: Syntax<TokenStream<'static>>>(taken: &T) -> (usize, usize) {
 /// The table is the one `tests/dump.rs` writes the fixture with, since a name
 /// is only what the caller says it is and the two have to agree about what the
 /// spec's `<NAME>` calls: both send `WORD_START` to [`backend::word_start`],
-/// which is a function of these tests and not of unsyn. That the end of a
-/// keyword is not among the names said here is the point of the fixture — where
-/// a keyword ends is the DSL's question, not the spec's, and this file would not
-/// be writable if it were.
+/// which is a function of these tests and not of unsyn. Nothing else is said
+/// here, and nothing else the generated file needs comes from unsyn: the bound
+/// of `GeneratedInput` is the one thing it takes by its own name, which is what
+/// lets a spec of keywords be generated against a table this small.
 fn regenerated() -> String {
     let mut tokens = TokenStream::from(SPEC);
     let file = Crate::parse(&mut tokens).expect("the spec should parse");
@@ -177,27 +177,38 @@ fn a_lexer_rule_keeps_the_text_it_took() {
     assert_eq!(rest, " rest");
     assert_eq!(range_of(&word), (0, 5));
 
-    // A keyword of the language ends where a word would carry on, so `letx` is
-    // one word and not the keyword `let` with `x` after it.
-    assert!(mini::LET::parse(&mut TokenStream::from("letx")).is_err());
+    // `LET` is the literal `'let'` and every character of it, which is all the
+    // spec said: unsyn lends a word of the described language no ending, so the
+    // rule is ready to take the front of `letx` and leaves the `x` where it is.
+    let (keyword, rest) = part::<mini::LET<_>>("letx");
+    assert_eq!(keyword.0.as_str(), "let");
+    assert_eq!(rest, "x");
+
+    // `WORD` is a rule over characters of its own, and takes the whole of it.
     assert_eq!(part::<mini::WORD<_>>("letx").0.0.as_str(), "letx");
 
-    // The end of the text is not a character that carries the word on, so a
-    // keyword with nothing after it is the keyword all the same.
+    // A literal at the end of the text is the literal all the same.
     assert_eq!(part::<mini::LET<_>>("let").1, "");
 }
 
 #[test]
 fn a_name_is_a_word_that_is_not_a_keyword() {
-    let (name, rest) = part::<mini::IDENT<_>>("lett x");
+    let (name, rest) = part::<mini::IDENT<_>>("name x");
 
-    assert_eq!(name.0.as_str(), "lett");
+    assert_eq!(name.0.as_str(), "name");
     assert_eq!(rest, " x");
 
     // The operand `except` removes is asked about where the operand it removes
     // something from starts, and it takes nothing itself.
     assert!(mini::IDENT::parse(&mut TokenStream::from("let x")).is_err());
     assert!(mini::IDENT::parse(&mut TokenStream::from("fn x")).is_err());
+
+    // `KEYWORDS` is `'let' | 'fn'` with nothing said about where either ends, so
+    // it reaches the head of `lett` too and the `except` refuses the whole word.
+    // A spec that wanted `lett` to be a name had to bound its keywords; what it
+    // wrote is what the generated rules do.
+    assert!(mini::KEYWORDS::parse(&mut TokenStream::from("lett")).is_ok());
+    assert!(mini::IDENT::parse(&mut TokenStream::from("lett x")).is_err());
 }
 
 #[test]

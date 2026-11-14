@@ -27,11 +27,12 @@
 //!
 //! - `runtime`, the [`runtime`] module, is what a grammar the generator writes
 //!   is *compiled against*: the [`GeneratedInput`](runtime::GeneratedInput)
-//!   every generated type is bounded by, and the one question the DSL asks of
-//!   itself, about where a keyword ends. What a `<NAME>` in a pattern calls is
-//!   deliberately not here: such a name is the caller's link, and unsyn ships no
-//!   answer to it.
-//!   It knows nothing of the DSL, and needs nothing but a character stream.
+//!   every generated type is bounded by, and nothing else. Two things are
+//!   deliberately not here. What a `<NAME>` in a pattern calls is the caller's
+//!   link, and unsyn ships no answer to it. Where a word of the described
+//!   language ends is the spec's business, and unsyn assumes no boundary for it.
+//!   The module knows nothing of the DSL, and needs nothing but a character
+//!   stream.
 //! - `codegen`, the same-named feature, is the DSL itself: the reader, the
 //!   analyzer and the generator, in the stages its own module document lays
 //!   out, over `quote` and `proc_macro2`.

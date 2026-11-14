@@ -297,7 +297,7 @@ fn a_set_written_in_a_rule_of_nodes_is_a_token_of_its_own() {
 }
 
 #[test]
-fn a_keyword_does_not_match_the_front_of_a_longer_word() {
+fn a_literal_means_only_the_characters_it_spells() {
     let content = leaked(
         "whitespace WS -> [' '];
          lexer Letter -> ['a'-'z'];
@@ -306,25 +306,29 @@ fn a_keyword_does_not_match_the_front_of_a_longer_word() {
 
     let file = plain(content);
 
-    // The literal `'let'` is a token that asks where it ends: the character
-    // after it may not be one that would carry the word on. That ask belongs to
-    // the DSL and not to the spec, which never wrote an angle-bracketed call
-    // here, so it goes to the runtime by the `unsyn` path and not to the
-    // table — which is why this file takes a table of nothing at all.
+    // `'let'` is three characters and a rule over them, which is all the spec
+    // said of it. Whether the word ends before a longer one is a fact about the
+    // language being described, and a spec that wants a boundary there has to
+    // write one: the generator asks nothing after the literal.
     assert!(file.contains("pubstructLet<I>"), "{file}");
-    assert!(
-        file.contains("unsyn::runtime::keyword::is_xid_continue"),
-        "the keyword ends nowhere: {file}"
-    );
-    // The keyword is a token of its own, and the rule names it rather than the
-    // characters it is made of.
+    assert!(file.contains("::parserc::keyword(\"let\")"), "{file}");
     assert!(file.contains("pubLet_2<I>"), "{file}");
+
+    // The bound of `GeneratedInput` is the only thing a generated file may take
+    // from unsyn. Any other path into unsyn would be an answer the generator
+    // supplied about the language the spec describes.
+    for reached in file.split("::unsyn::runtime::").skip(1) {
+        assert!(
+            reached.starts_with("GeneratedInput"),
+            "the generator borrowed an answer of its own from unsyn: {file}"
+        );
+    }
 }
 
 #[test]
 fn a_spec_that_writes_no_call_needs_no_table() {
     // The other half of the same rule, said of the whole file rather than of
-    // one keyword: a spec with no `<NAME>` in it asks nothing of a caller, and
+    // one literal: a spec with no `<NAME>` in it asks nothing of a caller, and
     // a name no table was given is the only way that promise is broken.
     let content = leaked(
         "whitespace WS -> [' '];

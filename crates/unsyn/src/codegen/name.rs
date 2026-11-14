@@ -74,10 +74,11 @@ const PUNCT_PAIRS: &[(&str, &str)] = &[
 /// Returns `true` when `text` reads as a word: it could be an identifier of the
 /// language the file describes.
 ///
-/// A word matched in a pattern is a keyword, which is different from punctuation
-/// in more than its shape: it may not be followed by characters that would
-/// continue an identifier, and it owns the whitespace after it rather than the
-/// whitespace on both sides of it.
+/// This is a question about naming and nothing else. A word can be named after
+/// itself, so `'let'` becomes the type `Let`, while punctuation has to be named
+/// after what it is called, so `'->'` becomes `ArrowRight`. What a word means
+/// when it is matched — whether it ends before a longer one — is a fact about
+/// the described language, which the generator is not entitled to decide.
 pub(crate) fn is_word(text: &str) -> bool {
     let mut chars = text.chars();
 

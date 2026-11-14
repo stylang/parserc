@@ -8,7 +8,7 @@ repository = "https://github.com/stylang/stylang/crates/unsyn"
 version.workspace = true
 
 [dependencies]
-unicode-ident = "1.0.22"
+unicode-ident = { version = "1.0.22", optional = true }
 parserc = { path = "../parserc", version = "^0.13", default-features = false, features = ["input"] }
 serde = { version = "1.0.228", optional = true }
 thiserror = { version = "2.0.17", optional = true }
@@ -30,7 +30,7 @@ syn = { version = "^2", features = ["full"] }
 [features]
 default = ["serde", "codegen", "runtime"]
 runtime = []
-codegen = ["dep:proc-macro2", "dep:quote", "dep:thiserror", "parserc/syntax"]
+codegen = ["dep:proc-macro2", "dep:quote", "dep:thiserror", "dep:unicode-ident", "parserc/syntax"]
 serde = ["dep:serde", "parserc/serde"]
 
 [[test]]

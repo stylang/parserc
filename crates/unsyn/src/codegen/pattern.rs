@@ -28,7 +28,6 @@ use crate::syntax::{
     Expr, ExprNoTopAlt, ExprNoTopAlts, ExprWithSuffix, ExprWithoutSuffix, Range, Repeat, SetItem,
 };
 
-use super::Paths;
 use super::error::{CodegenError, CodegenKind};
 use super::set_items;
 
@@ -43,16 +42,6 @@ pub(crate) enum CharClass {
     Any,
     /// No character at all.
     Nothing,
-    /// Every character that may continue an identifier of the Unicode
-    /// standard.
-    ///
-    /// This is the one class the generator asks of itself rather than of a
-    /// caller: it ends every word-like literal, so that `'let'` is refused
-    /// inside `letter`, and a spec that never wrote a `<NAME>` has that
-    /// ending all the same. It is therefore written through the `unsyn` path
-    /// of a generation, and never through the path a table settles, which is
-    /// what keeps an empty table meaning no unmapped names.
-    XidContinue,
     /// Exactly these characters and these intervals of them.
     Chars(Vec<char>, Vec<(char, char)>),
     /// Whatever both sides take.
@@ -114,18 +103,17 @@ impl CharClass {
     }
 
     /// This class as a condition over one character named `c`.
-    pub(crate) fn render(&self, paths: &Paths) -> proc_macro2::TokenStream {
+    ///
+    /// A class is a question about characters alone, which is what lets it be
+    /// written without reaching outside the generated file for a name: what a
+    /// spec asks of a backend is an external, and never a class.
+    pub(crate) fn render(&self) -> proc_macro2::TokenStream {
         use proc_macro2::{Literal, TokenStream};
         use quote::quote;
 
         match self {
             CharClass::Any => quote!(true),
             CharClass::Nothing => quote!(false),
-            CharClass::XidContinue => {
-                let unsyn = &paths.unsyn;
-
-                quote!(#unsyn::runtime::keyword::is_xid_continue(c))
-            }
             CharClass::Chars(chars, ranges) => {
                 let tests = chars
                     .iter()
@@ -145,17 +133,17 @@ impl CharClass {
                 quote!(::core::matches!(c, #(#tests)|*))
             }
             CharClass::And(first, second) => {
-                let (first, second) = (first.render(paths), second.render(paths));
+                let (first, second) = (first.render(), second.render());
 
                 quote!((#first && #second))
             }
             CharClass::Or(first, second) => {
-                let (first, second) = (first.render(paths), second.render(paths));
+                let (first, second) = (first.render(), second.render());
 
                 quote!((#first || #second))
             }
             CharClass::Not(inner) => {
-                let inner = inner.render(paths);
+                let inner = inner.render();
 
                 quote!(!#inner)
             }
@@ -167,10 +155,10 @@ impl CharClass {
     /// A class that takes every character is written over a nameless character,
     /// since the question it answers does not turn on the one it is asked about
     /// and a generated file should not warn about a binding it never reads.
-    pub(crate) fn closure(&self, paths: &Paths) -> proc_macro2::TokenStream {
+    pub(crate) fn closure(&self) -> proc_macro2::TokenStream {
         use quote::quote;
 
-        let body = self.render(paths);
+        let body = self.render();
 
         match self {
             CharClass::Any => quote!(|_: char| #body),
@@ -227,13 +215,6 @@ pub(crate) enum Step {
         /// What has to come after it.
         next: Box<Step>,
     },
-    /// Fail when the operand fits next, and take nothing when it does not.
-    ///
-    /// This is what keeps a keyword from matching the front of a longer word:
-    /// `'let'` is `'let'` only where an `XID_Continue` character does not
-    /// follow, and the question is asked about the text without taking any of
-    /// it, which is what separates it from `~`.
-    NotFollowed(Box<Step>),
 }
 
 impl Step {
@@ -246,10 +227,9 @@ impl Step {
             Step::Seq(steps) => steps.iter().all(|step| step.takes_nothing(empty)),
             Step::Alt(steps) => steps.iter().any(|step| step.takes_nothing(empty)),
             Step::Rep { min, item, .. } => *min == 0 && item.takes_nothing(empty),
-            // A complement always takes the one character it was asked about, the
-            // other two always take their operand, and a lookahead takes nothing.
+            // A complement always takes the one character it was asked about,
+            // and a lookahead always takes its operand before it asks.
             Step::Not(_) | Step::Except { .. } | Step::Followed { .. } => false,
-            Step::NotFollowed(_) => true,
         }
     }
 
@@ -265,9 +245,9 @@ impl Step {
                 max.is_none() && item.takes_nothing(empty)
             }
             Step::Seq(steps) | Step::Alt(steps) => steps.iter().any(|step| step.is_stuck(empty)),
-            // A lookahead never moves, but it is also never what a repetition
-            // repeats: `~` and the suffixes only ever sit on a set or an
-            // operand, and the wildcard below already answers for it.
+            // A complement takes the one character it was asked about, so it is
+            // never what a repetition repeats forever; the set behind it is what
+            // a repetition of that would turn on.
             Step::Not(item) => item.is_stuck(empty),
             Step::Except { item, .. } | Step::Followed { item, .. } => item.is_stuck(empty),
             _ => false,
@@ -295,8 +275,6 @@ impl Step {
             Step::Alt(steps) => steps.iter().map(Step::reaches).min().unwrap_or_default(),
             Step::Rep { min, item, .. } => *min * item.reaches(),
             Step::Except { item, .. } | Step::Followed { item, .. } => item.reaches(),
-            // A lookahead promises nothing about the text it does not take.
-            Step::NotFollowed(_) => 0,
             // A class, an external, a reference or a complement: one character is
             // all any of them promises, since none of them is measured here.
             _ => 1,
@@ -342,7 +320,7 @@ impl Step {
             }
             // An assertion about what follows is not a question about one
             // character.
-            Step::Followed { .. } | Step::NotFollowed(_) => None,
+            Step::Followed { .. } => None,
         }
     }
 }
@@ -556,10 +534,10 @@ impl<'a> PatternBuilder<'a> {
 
 /// The pattern of a string literal, which is one character where it can be.
 ///
-/// A literal that reads as a word is a keyword of the language being described,
-/// and a keyword ends where an identifier would carry on: `'let'` must not match
-/// the front of `letter`. The question is asked after the literal and takes
-/// nothing, and it is a question about one character, so it costs one probe.
+/// A literal means exactly the characters it spells and nothing more, so
+/// `'let'` is ready to match the front of `letter` unless the spec says
+/// otherwise: whether a word of the described language ends there is a fact
+/// about that language, which only the spec can state.
 pub(crate) fn literal<I: UnsynInput>(lit: &LitStr<I>) -> Result<Step, CodegenError> {
     let (text, error) = str_value(lit);
 
@@ -570,20 +548,11 @@ pub(crate) fn literal<I: UnsynInput>(lit: &LitStr<I>) -> Result<Step, CodegenErr
         });
     }
 
-    let matched = if text.chars().count() == 1 {
+    Ok(if text.chars().count() == 1 {
         Step::Class(CharClass::of(text.chars().next().expect("one character")))
     } else {
         Step::Lit(text.clone())
-    };
-
-    if text.chars().count() > 1 && super::name::is_word(&text) {
-        return Ok(Step::Seq(vec![
-            matched,
-            Step::NotFollowed(Box::new(Step::Class(CharClass::XidContinue))),
-        ]));
-    }
-
-    Ok(matched)
+    })
 }
 
 /// The character a code point literal denotes.

@@ -131,7 +131,7 @@ impl<'a> Emitter<'a> {
 
         match step {
             Step::Class(class) => {
-                let cond = class.closure(self.paths);
+                let cond = class.closure();
 
                 Ok(vec![quote!(#parserc::next_if(#cond).parse(#var)?;)])
             }
@@ -187,12 +187,6 @@ impl<'a> Emitter<'a> {
                 Ok(vec![quote!(#chain.parse(#var)?;)])
             }
             Step::Rep { min, max, item } => self.repeat(*min, *max, item, var),
-            Step::NotFollowed(next) => {
-                let probe = self.probe(next, quote!(#var.clone()))?;
-                let fail = self.fail(var);
-
-                Ok(vec![quote!(if #probe { return Err(#fail); })])
-            }
             Step::Not(item) => self.complement(item, var).map(|stmt| vec![stmt]),
             Step::Except { item, removed } => {
                 let start = format_ident!("__start");
@@ -274,7 +268,7 @@ impl<'a> Emitter<'a> {
         let parserc = &self.paths.parserc;
 
         if let Some(class) = item.char_class(self.classes) {
-            let cond = class.closure(self.paths);
+            let cond = class.closure();
 
             let take = match (min, max) {
                 // `take_while` is the unbounded form, and needs no bounds.
@@ -350,12 +344,12 @@ impl<'a> Emitter<'a> {
         {
             let take = match (*min, *max) {
                 (0, None) => {
-                    let cond = class.closure(self.paths);
+                    let cond = class.closure();
 
                     quote!(#parserc::take_till(#cond).parse(#var)?)
                 }
                 _ => {
-                    let cond = class.negated().closure(self.paths);
+                    let cond = class.negated().closure();
                     let bounds = bounds(*min, *max);
 
                     quote!(#parserc::take_while_with(#bounds, #cond).parse(#var)?)
@@ -368,7 +362,7 @@ impl<'a> Emitter<'a> {
         // A complement of one character is the class of every character that is
         // not it, which needs no question asked twice.
         if let Some(class) = item.char_class(self.classes) {
-            let cond = class.negated().closure(self.paths);
+            let cond = class.negated().closure();
 
             return Ok(quote!(#parserc::next_if(#cond).parse(#var)?;));
         }
@@ -408,7 +402,7 @@ impl<'a> Emitter<'a> {
         let parserc = &self.paths.parserc;
 
         if let Some(class) = step.char_class(self.classes) {
-            let cond = class.closure(self.paths);
+            let cond = class.closure();
 
             return Ok(quote!(#at.iter().next().is_some_and(#cond)));
         }

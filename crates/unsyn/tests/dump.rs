@@ -23,13 +23,13 @@ include!("data/spec.rs");
 
 /// A generator told what the one name the spec writes calls.
 ///
-/// The spec spells keywords and writes `<WORD_START>`, and a name is only ever
-/// what the caller of the generator says it is, so this is where the caller says
-/// it. The path leads to `tests/generated.rs`, which is the crate that compiles
-/// what this writes and so is where the function behind the name lives; that a
-/// keyword is not among the names said here is the point of the fixture — where
-/// a keyword ends is the DSL's question, not the spec's, and this file would not
-/// be writable if it were. `tests/generated.rs` must agree, name for name.
+/// The spec writes `<WORD_START>`, and a name is only ever what the caller of
+/// the generator says it is, so this is where the caller says it. The path leads
+/// to `tests/generated.rs`, which is the crate that compiles what this writes and
+/// so is where the function behind the name lives. Nothing else is said here:
+/// a generated file takes the bound of `GeneratedInput` from unsyn by name and
+/// takes nothing else, which is why a spec of keywords needs no larger table
+/// than this one.
 fn codegen() -> Codegen {
     Codegen::new().with_externals([("WORD_START".to_owned(), quote!(crate::backend::word_start))])
 }

@@ -182,19 +182,6 @@ where
         {
             let mut __from = input.clone();
             ::parserc::keyword("let").parse(input)?;
-            if input
-                .clone()
-                .iter()
-                .next()
-                .is_some_and(|c: char| ::unsyn::runtime::keyword::is_xid_continue(c))
-            {
-                return Err(::parserc::Kind::Token(
-                    "LET",
-                    ::parserc::ControlFlow::Recovable,
-                    input.to_span_at(1),
-                )
-                .into());
-            }
             if input.len() == __from.len() {
                 return Err(::parserc::Kind::Token(
                     "LET",
@@ -232,19 +219,6 @@ where
         {
             let mut __from = input.clone();
             ::parserc::keyword("fn").parse(input)?;
-            if input
-                .clone()
-                .iter()
-                .next()
-                .is_some_and(|c: char| ::unsyn::runtime::keyword::is_xid_continue(c))
-            {
-                return Err(::parserc::Kind::Token(
-                    "FN",
-                    ::parserc::ControlFlow::Recovable,
-                    input.to_span_at(1),
-                )
-                .into());
-            }
             if input.len() == __from.len() {
                 return Err(::parserc::Kind::Token(
                     "FN",
