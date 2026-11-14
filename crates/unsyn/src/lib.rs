@@ -46,13 +46,12 @@
 //! unsyn = { version = "0.13", default-features = false, features = ["runtime"] }
 //! ```
 //!
-//! Both features off leaves a crate with nothing in it, which is not a build
-//! anyone should ship: the documentation of that case is allowed to point at the
-//! modules it cannot show.
-#![cfg_attr(
-    not(any(feature = "runtime", feature = "codegen")),
-    allow(rustdoc::broken_intra_doc_links)
-)]
+//! A build without the `runtime` feature has pages that point at items it does
+//! not hold: the two above point at each other's phase, and the generator's own
+//! documentation names the types a file it writes will call. Those links are
+//! allowed to break in that case rather than written twice, since nothing about
+//! the build changes, only what the documentation can show.
+#![cfg_attr(not(feature = "runtime"), allow(rustdoc::broken_intra_doc_links))]
 
 #[cfg(feature = "codegen")]
 pub mod codegen;

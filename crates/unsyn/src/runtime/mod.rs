@@ -14,7 +14,8 @@
 //! - `runtime`, this module: what generated code links against, needing only a
 //!   character stream of [`parserc`] and the two classes of [`unicode_ident`].
 //! - `codegen`: the reader, the analyzer and the generator, needing `quote` and
-//!   `proc-macro2` on top of this.
+//!   `proc-macro2` and nothing of this module, since what it takes from here is
+//!   only the names this module's items go by once they are written down.
 //!
 //! A crate that keeps a generated file and never produces one therefore takes
 //! this and leaves the defaults off, which is the case the split is there to

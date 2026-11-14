@@ -99,6 +99,7 @@
 //! analysis has already refused the recursion that comes back to the same
 //! position without taking anything, so every cycle left is one a tree can hold.
 
+mod builtin;
 mod error;
 mod item;
 mod name;

@@ -33,23 +33,14 @@
 //! Because a matcher's length is its own business, the generator never folds one
 //! into a character class: `<XID_Start>` is run as a step, one call per
 //! repetition, and is never scanned ahead.
+//!
+//! Which of these names a grammar may therefore use before a backend exists is
+//! kept as a list on the build side, in `codegen::builtin`, because it is the
+//! generator that acts on it; this module only has the functions.
 
 use parserc::{Input, Parser};
 
 use super::input::GeneratedInput;
-
-/// Returns `true` when the matcher `name` is one of the two this module gives,
-/// which is what lets a grammar that only needs an identifier be generated and
-/// compiled before its backend is written.
-///
-/// A backend that gives a matcher of its own under one of these names has to
-/// point the generated file at it by the `matcher` path of the generator's
-/// `Paths` rather than by this module, since the generator treats the two names
-/// as already provided.
-#[inline]
-pub fn is_builtin(name: &str) -> bool {
-    matches!(name, "XID_Start" | "XID_Continue")
-}
 
 /// Matches one character that may start an identifier of the Unicode standard.
 ///
@@ -138,18 +129,5 @@ mod tests {
 
         assert_eq!(taken, "abc");
         assert_eq!(input.as_str(), " 3");
-    }
-
-    #[test]
-    fn the_two_classes_written_here_are_the_builtins() {
-        // The generator treats a call of one of these as already provided, which
-        // is what lets a grammar of identifiers be written before a backend is.
-        assert!(is_builtin("XID_Start"));
-        assert!(is_builtin("XID_Continue"));
-
-        // Anything else is the project's own matcher, called at the path the
-        // generator is given for this module.
-        assert!(!is_builtin("Casing"));
-        assert!(!is_builtin(""));
     }
 }

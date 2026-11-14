@@ -21,12 +21,16 @@ syn = { version = "^2", features = ["full"] }
 
 # The crate has two phases, and they are the two features that say so:
 # `runtime` is what a generated grammar is compiled against, `codegen` is the
-# DSL front end and the generator that writes one. `codegen` needs `runtime`,
-# and a crate that only keeps a generated file leaves the defaults off.
+# DSL front end and the generator that writes one. Neither builds on the other:
+# the generator only writes the names of runtime items into the text it emits,
+# so a proc macro that produces a grammar leaves the runtime out of its own
+# tree, and a crate that only keeps a generated file leaves the defaults off.
+# The defaults carry both because a test here compiles a generated file, which
+# needs a runtime to compile it against.
 [features]
-default = ["serde", "codegen"]
+default = ["serde", "codegen", "runtime"]
 runtime = []
-codegen = ["runtime", "dep:proc-macro2", "dep:quote", "dep:thiserror", "parserc/syntax"]
+codegen = ["dep:proc-macro2", "dep:quote", "dep:thiserror", "parserc/syntax"]
 serde = ["dep:serde", "parserc/serde"]
 
 [[example]]
@@ -47,4 +51,4 @@ required-features = ["codegen"]
 
 [[test]]
 name = "generated"
-required-features = ["codegen"]
+required-features = ["codegen", "runtime"]
