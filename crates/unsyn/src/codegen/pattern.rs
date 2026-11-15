@@ -31,6 +31,16 @@ use crate::syntax::{
 use super::error::{CodegenError, CodegenKind};
 use super::set_items;
 
+/// How many strings a pattern may spell out and still be called a word.
+///
+/// The cap is only a limit on the work of listing them: a pattern that denotes
+/// more words than this claims no punctuation, which costs one field of trivia
+/// between two of its operands and nothing else.
+pub(crate) const MAX_FIXED_WORDS: usize = 32;
+
+/// How many characters a class may hold and still be listed.
+pub(crate) const MAX_FIXED_CHARS: usize = 32;
+
 /// The characters one step of a pattern may take.
 ///
 /// A class is a value rather than a piece of code, which is what lets
@@ -64,6 +74,52 @@ impl CharClass {
             Self::of(start)
         } else {
             Self::Chars(vec![], vec![(start, end)])
+        }
+    }
+
+    /// The characters this class takes, when the pattern spells out a small
+    /// enough set to enumerate.
+    ///
+    /// Nothing is decided about *which* characters a class is: the list is only
+    /// ever asked for to find out whether a terminal could take a character the
+    /// file's trivia takes, which is a question the file itself answers.
+    pub(crate) fn fixed_chars(&self) -> Option<Vec<char>> {
+        fn push(chars: &mut Vec<char>, c: char) -> Option<()> {
+            (chars.len() < MAX_FIXED_CHARS && !chars.contains(&c)).then(|| chars.push(c))
+        }
+
+        match self {
+            // Every character is not a list, and the complement or intersection
+            // of two classes is not one either: both are left as questions about
+            // the text rather than turned into the strings a token could be.
+            CharClass::Any | CharClass::And(..) | CharClass::Not(..) => None,
+            CharClass::Nothing => Some(vec![]),
+            CharClass::Chars(singles, ranges) => {
+                let mut out: Vec<char> = vec![];
+
+                for c in singles
+                    .iter()
+                    .copied()
+                    .chain(ranges.iter().flat_map(|(start, end)| {
+                        let (start, end) = (*start as u32, *end as u32);
+
+                        (start..=end).filter_map(char::from_u32)
+                    }))
+                {
+                    push(&mut out, c)?;
+                }
+
+                Some(out)
+            }
+            CharClass::Or(first, second) => {
+                let mut out = first.fixed_chars()?;
+
+                for c in second.fixed_chars()? {
+                    push(&mut out, c)?;
+                }
+
+                Some(out)
+            }
         }
     }
 
@@ -321,6 +377,94 @@ impl Step {
             // An assertion about what follows is not a question about one
             // character.
             Step::Followed { .. } => None,
+        }
+    }
+
+    /// The strings this step matches, when there are finitely many of them and
+    /// the pattern spells each one out.
+    ///
+    /// Such a step denotes a *word* of the described language and nothing else:
+    /// `'<'`, `';'`, `'->'`, `'lexer'`. That is what a terminal whose every
+    /// match is one of a few fixed strings is, and it is read off the shape of
+    /// the pattern, never off what the characters happen to be. Anything that
+    /// could reach as far as the text says — a repetition, another rule, an
+    /// external, a question about the text — has no such list, and `None` says
+    /// so.
+    pub(crate) fn fixed_strings(&self) -> Option<Vec<String>> {
+        match self {
+            Step::Lit(text) if !text.is_empty() => Some(vec![text.clone()]),
+            Step::Class(class) => class
+                .fixed_chars()
+                .map(|chars| chars.into_iter().map(|c| c.to_string()).collect()),
+            Step::Seq(steps) => {
+                let mut words = vec![String::new()];
+
+                for step in steps {
+                    let endings = step.fixed_strings()?;
+                    let mut next: Vec<String> = Vec::with_capacity(words.len() * endings.len());
+
+                    for word in &words {
+                        for ending in &endings {
+                            next.push(format!("{word}{ending}"));
+                        }
+                    }
+
+                    if next.len() > MAX_FIXED_WORDS {
+                        return None;
+                    }
+
+                    words = next;
+                }
+
+                Some(words)
+            }
+            Step::Alt(branches) => {
+                let mut words: Vec<String> = vec![];
+
+                for branch in branches {
+                    words.extend(branch.fixed_strings()?);
+
+                    if words.len() > MAX_FIXED_WORDS {
+                        return None;
+                    }
+                }
+
+                Some(words)
+            }
+            // A rule reached by name is whatever that rule is, and the rules
+            // that ask about the text or repeat it reach further than any list.
+            Step::Ref(..)
+            | Step::External(..)
+            | Step::Rep { .. }
+            | Step::Not(..)
+            | Step::Except { .. }
+            | Step::Followed { .. }
+            | Step::Lit(_) => None,
+        }
+    }
+
+    /// Adds the names this step reaches by `Ref`, which are the rules whose text
+    /// would be spoiled by a token taking the trivia around itself.
+    pub(crate) fn refers(&self, out: &mut HashSet<String>) {
+        match self {
+            Step::Ref(name) => {
+                out.insert(name.clone());
+            }
+            Step::Seq(steps) | Step::Alt(steps) => {
+                for step in steps {
+                    step.refers(out);
+                }
+            }
+            Step::Rep { item, .. } | Step::Not(item) => item.refers(out),
+            Step::Except { item, removed }
+            | Step::Followed {
+                item,
+                next: removed,
+            } => {
+                item.refers(out);
+                removed.refers(out);
+            }
+            Step::Class(_) | Step::Lit(_) | Step::External(..) => {}
         }
     }
 }

@@ -105,9 +105,9 @@ impl<'a> Emitter<'a> {
 
         Ok(quote! {
             {
-                // The pattern runs over a copy that stays where the token
-                // started, so what it took can be split off without moving the
-                // caller's stream a second time.
+                // The pattern runs over the caller's stream while a copy stays
+                // where the token started, so what it took can be split off
+                // without moving the stream a second time.
                 let mut __from = #input.clone();
 
                 #(#stmts)*
@@ -115,7 +115,100 @@ impl<'a> Emitter<'a> {
                 // A token is at least one character wide, and a pattern that
                 // got nowhere is not a token.
                 if #input.len() == __from.len() {
-                    return Err(#fail);
+                    return ::core::result::Result::Err(#fail);
+                }
+
+                let __taken = __from.len() - #input.len();
+
+                Ok(Self(__from.split_to(__taken)))
+            }
+        })
+    }
+
+    /// The body of a generated token that takes the trivia around itself: the run
+    /// before it, the text its pattern took, and the run after it.
+    ///
+    /// Only the middle is kept as the token's own text, which is what lets a
+    /// grammar write `A ;B` and `A; B` with the same tree.
+    pub(crate) fn parse_owning_body(
+        &self,
+        step: &Step,
+        trivia: &TokenStream,
+    ) -> Result<TokenStream, CodegenError> {
+        let input = format_ident!("input");
+        let stmts = self.stmts(step, &input)?;
+        let fail = self.fail(&input);
+
+        Ok(quote! {
+            {
+                let __leading = #input.parse::<#trivia>()?;
+
+                let mut __from = #input.clone();
+
+                #(#stmts)*
+
+                if #input.len() == __from.len() {
+                    return ::core::result::Result::Err(#fail);
+                }
+
+                let __taken = __from.len() - #input.len();
+
+                let __own = __from.split_to(__taken);
+
+                let __trailing = #input.parse::<#trivia>()?;
+
+                Ok(Self(__leading, __own, __trailing))
+            }
+        })
+    }
+
+    /// The body of the generated token that *is* one run of trivia: its pattern
+    /// taken as often as the text offers, and at least once.
+    ///
+    /// The run is one token rather than a list of them, which is what lets the
+    /// places that hold trivia hold `Option` of it: an empty run is `None`, and a
+    /// run of anything at all is the whole of what the text offered.
+    pub(crate) fn parse_run_body(&self, step: &Step) -> Result<TokenStream, CodegenError> {
+        let input = format_ident!("input");
+        let parserc = &self.paths.parserc;
+
+        // Where the pattern is a question about one character, the run is one
+        // scan over the text rather than a loop with a call in it.
+        if let Some(class) = step.char_class(self.classes) {
+            let cond = class.closure();
+            let least = bounds(1, None);
+
+            return Ok(quote! {
+                {
+                    let mut __from = #input.clone();
+
+                    #parserc::take_while_with(#least, #cond).parse(#input)?;
+
+                    let __taken = __from.len() - #input.len();
+
+                    Ok(Self(__from.split_to(__taken)))
+                }
+            });
+        }
+
+        let scan = format_ident!("input");
+        let step_closure = self.closure(step, &scan)?;
+        let fail = self.fail(&input);
+
+        Ok(quote! {
+            {
+                let mut __from = #input.clone();
+
+                loop {
+                    let __step = #step_closure;
+
+                    if __step.ok().parse(#input)?.is_none() {
+                        break;
+                    }
+                }
+
+                if #input.len() == __from.len() {
+                    return ::core::result::Result::Err(#fail);
                 }
 
                 let __taken = __from.len() - #input.len();

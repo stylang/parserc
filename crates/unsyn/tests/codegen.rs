@@ -104,9 +104,11 @@ fn a_rule_of_one_alternative_becomes_a_struct_of_its_operands() {
 
     let file = plain(content);
 
-    // The two operands are two fields, the second reached over a run of trivia.
+    // The two operands are two fields, and the trivia between them is a third,
+    // since neither of them reaches it: `Word` is a run of characters, which
+    // keeps nothing of its own but the text it matched.
     assert!(
-        file.contains("pubstructPair<I>(pubWord<I>,pub::std::vec::Vec<WS<I>>,pubWord<I>);"),
+        file.contains("pubstructPair<I>(pubWord<I>,pub::core::option::Option<WS<I>>,pubWord<I>);"),
         "{file}"
     );
     assert!(file.contains("input.parse::<Word<I>>()?"), "{file}");
@@ -128,17 +130,19 @@ fn a_trivia_node_written_out_as_an_operand_is_the_separator_of_its_rule() {
     // rule is shaped as `Word Word` is rather than holding a token of trivia
     // between two runs of it.
     assert!(
-        file.contains("pubstructPair<I>(pubWord<I>,pub::std::vec::Vec<WS<I>>,pubWord<I>);"),
+        file.contains("pubstructPair<I>(pubWord<I>,pub::core::option::Option<WS<I>>,pubWord<I>);"),
         "{file}"
     );
 
     // At either end of a sequence there is nothing for the mention to separate,
     // and the trivia it asks for belongs to the rule around it rather than to
-    // this one: the mention still earns no field, and no run either.
+    // this one: the mention still earns no field, and no gap either.
     assert!(file.contains("pubstructLead<I>(pubWord<I>);"), "{file}");
     assert!(file.contains("pubstructTail<I>(pubWord<I>);"), "{file}");
 
-    assert_eq!(file.matches("parse::<WS<I>>()").count(), 0, "{file}");
+    // The whitespace is never held one character at a time, which is what a run
+    // of the trivia type between two operands would have to be.
+    assert_eq!(file.matches("Vec<WS<I>>").count(), 0, "{file}");
 }
 
 #[test]
@@ -150,10 +154,12 @@ fn a_rule_about_the_trivia_itself_keeps_the_operands_it_names() {
 
     let file = plain(content);
 
-    // Nothing else is left for a separator to separate, so this rule is a run
-    // of trivia and not the separator of one.
+    // Nothing else is left for a mention to be folded into, so the two runs are
+    // held as the two operands they are, and a gap still stands between them:
+    // the trivia node keeps none of its own neighbours, so this rule holds a
+    // run, whatever lies between, and another run.
     assert!(
-        file.contains("pubstructBlanks<I>(pubWS<I>,pub::std::vec::Vec<WS<I>>,pubWS<I>);"),
+        file.contains("pubstructBlanks<I>(pubWS<I>,pub::core::option::Option<WS<I>>,pubWS<I>);"),
         "{file}"
     );
 }
@@ -197,9 +203,16 @@ fn a_rule_that_names_itself_holds_itself_behind_a_pointer() {
         "{file}"
     );
     // A run of nodes is reached over the trivia between its elements, which a
-    // `Vec` of the backend alone would not take.
+    // `Vec` of the backend alone would not take: each repetition carries the
+    // gap before it.
     assert!(
-        file.contains("Vec<(::std::vec::Vec<WS<I>>,Word<I>)>"),
+        file.contains("Vec<(::core::option::Option<WS<I>>,Word<I>)>"),
+        "{file}"
+    );
+    // The two brackets own the trivia on each side of themselves, so what lies
+    // between them is held as one delimited run rather than as four fields.
+    assert!(
+        file.contains("Delimiter<BracketStart<I>,BracketEnd<I>,"),
         "{file}"
     );
 }
@@ -266,14 +279,17 @@ fn a_group_that_needs_trivia_between_its_operands_gets_a_type() {
 
     let file = plain(content);
 
-    // The operands of the group are reached over trivia, which a tuple cannot
-    // carry, so the group is given a type of its own, named for its rule.
-    assert!(file.contains("pubstructOuter1<I>"), "{file}");
-    // It is not recursive, so it is held plainly.
+    // A gap is a field like any other, so the group is carried by a tuple of
+    // its own after all, and the whole of the rule is one delimited run: the
+    // two brackets own the trivia on either side of themselves, which is what
+    // lets the group sit between them as one field of the rule.
     assert!(
-        file.contains("pub::core::option::Option<Outer1<I>>") || file.contains("pubOuter1<I>"),
+        file.contains(
+            "Delimiter<ParenStart<I>,ParenEnd<I>,(Word<I>,::core::option::Option<WS<I>>,Word<I>)>"
+        ),
         "{file}"
     );
+    assert!(!file.contains("structOuter1"), "{file}");
 }
 
 #[test]
@@ -592,6 +608,89 @@ fn bootstrap_uns_is_generated_whole() {
     assert!(written.contains("my_backend::xid_start"), "{written}");
     assert!(written.contains("my_backend::xid_continue"), "{written}");
 
-    // The trivia of the language is its own type, and the separators name it.
+    // The trivia of the language is its own type, and the gaps name it.
     assert!(written.contains("structWHITESPACE"), "{written}");
+}
+
+// The two folds the generator knows about are the whole reason a rule of the
+// spec stays as small as the rule is written, so a run over the real spec is
+// what pins them: `a b*` becomes one list of the backend's own `Punctuated`,
+// and a run bounded by two terminals that own their trivia becomes one
+// `Delimiter` of the two ends and the body between them.
+#[test]
+fn a_bootstrap_spec_is_read_as_the_shapes_it_writes() {
+    let content = read_bootstrap();
+    let mut tokens = TokenStream::from(content);
+    let file = Crate::parse(&mut tokens).unwrap();
+    let module = analyze(&file).unwrap();
+
+    let text = with_the_bootstrap_backend()
+        .generate(&module)
+        .unwrap()
+        .to_string();
+    let written = text.split_whitespace().collect::<String>();
+
+    assert!(written.contains("Punctuated<"), "{written}");
+    assert!(written.contains("Delimiter<"), "{written}");
+
+    // `stmt: IDENTIFIER '->' Expr ';'`
+    //
+    // The name is what the statement is written with, the arrow and the
+    // semicolon close a delimiter around the expression they hold, and the
+    // only gap left is the one before the arrow, because the identifier does
+    // not own trivia.
+    assert!(
+        written.contains(
+            "structStmt<I>(pubLEADING_KEYWORDS<I>,pub::core::option::Option<WHITESPACE<I>>,\
+             pubIDENTIFIER<I>,pub::parserc::syntax::Delimiter<ArrowRight<I>,Semi<I>,Expr<I>>);"
+        ),
+        "`Stmt` is not the four fields the rule has: {written}"
+    );
+
+    // What one alternative of a rule folds into must be what the production
+    // actually says, not the widest reach of the terminals written in it.
+    //
+    // `bootstrap.uns:123` is `'~' '[' ( SetItem ',' )* SetItem? ']'`, and the
+    // hand-written node for it is `expr.rs:335`'s
+    // `Tilde(Tilde<I>, Bracket<I, Punctuated<SetItem<I>, Comma<I>>>)`: the `~`
+    // stands outside the brackets, which close a run of their own. Folding
+    // instead by leftmost reach would pair the `~` with the `]`.
+    //
+    // The three other alternatives are here for the same reason, each against
+    // the hand-written shape named beside it: `:124` is `Call(Angle<I, Ident<I>>)`,
+    // `:125` is `Paren(Paren<I, Box<Expr<I>>>)`, `:126` is
+    // `Set(Bracket<I, Punctuated<SetItem<I>, Comma<I>>>)`.
+    for variant in [
+        "ExprWithoutSuffixTilde(Tilde<I>,\
+         ::parserc::syntax::Delimiter<BracketStart<I>,BracketEnd<I>,\
+         ::parserc::syntax::Punctuated<SetItem<I>,Comma<I>>>)",
+        "ExprWithoutSuffixLt(::parserc::syntax::Delimiter<Lt<I>,Gt<I>,IDENTIFIER<I>>)",
+        "ExprWithoutSuffixParenStart(::parserc::syntax::Delimiter<ParenStart<I>,ParenEnd<I>,\
+         ::std::boxed::Box<Expr<I>>>)",
+        "ExprWithoutSuffixBracketStart(::parserc::syntax::Delimiter<BracketStart<I>,\
+         BracketEnd<I>,::parserc::syntax::Punctuated<SetItem<I>,Comma<I>>>)",
+    ] {
+        let folded = variant.split_whitespace().collect::<String>();
+
+        assert!(
+            written.contains(&folded),
+            "`{variant}` was not folded into the shape the hand-written node has"
+        );
+    }
+
+    // `'[' ( SetItem ',' )* SetItem? ']'` — the separator and the items are
+    // one list, and the brackets close a delimiter around what is inside.
+    assert!(
+        written.contains("Punctuated<SetItem<I>,Comma<I>>"),
+        "`a b*` was not folded into one list: {written}"
+    );
+
+    // `'{' Expr1+ '}'`
+    assert!(
+        written.contains(
+            "structRepeat<I>(pub::parserc::syntax::Delimiter<BraceStart<I>,BraceEnd<I>,\
+             Repeat1<I>>);"
+        ),
+        "`Repeat` is not a single delimiter over its body: {written}"
+    );
 }

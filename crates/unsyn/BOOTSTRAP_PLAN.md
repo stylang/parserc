@@ -130,7 +130,7 @@
 - [x] 决定：自举的验收标准是**行为等价**（同一批 `.uns` 上手写 parser 与生成 parser 的
       CST 与错误位置一致），不要求类型名/别名/字段数相同。因此 `Bracket`/`Angle` 这些
       `Delimiter` 别名不生成，`ExprNoTopAlts` 这个名字也不造（内联成元组即可）。
-- [ ] **trivia 归属规则**写进 DSL 文档（`codegen/types.rs` 的 `# Whitespace` 小节 +
+- [x] **trivia 归属规则**写进 DSL 文档（`codegen/types.rs` 的 `# Whitespace` 小节 +
       `lib.rs`）：**→ 已归入 P2**，与实现同一批改，否则文档会描述一个还不存在的行为。
       规则文本先记在这里；它只依赖被描述语言的**产生式结构**，不依赖任何字符集形状：
       - 一个终结符若其模式表示**有限个固定字符串**（`'<'`、`';'`、`'->'`、`'lexer'`），
@@ -147,76 +147,130 @@
       两处引用变了，生成体积 102,698 → 102,834 字节 —— 但不影响任何已提交的 fixture，
       因为 fixture 是从 `tests/data/spec.rs` 生成的）。
 
-## P1 — IR 承载节点代数
+## P1–P3 — 一次重构：IR 承载节点代数，trivia 归给终结符，形状由结构识别
 
-> **P0 已完成**（门全绿：`--all-features` 162/3/17/1/21/3；`--workspace` 15 个 ok；
-> `runtime` 2/0；`codegen` 全绿；三组 clippy 在 `crates/unsyn` 里 0 条；
-> 四组 `RUSTDOCFLAGS=-D warnings cargo doc` 干净；`cargo fmt --all --check` 干净）。
+> 这三段不可拆：新形状（`Gap`/`Punctuated`/`Delimited`）存在的唯一理由就是承载归属规则，
+> 而 `Punctuated<T,P>`/`Delimiter<S,E,B>` 能成立的前提又是 punct 自己吃掉两侧的 trivia。
+> 当成一次施工，中途不追求门全绿，只在完成后跑一次完整门表。
 
-- [ ] **阶段划分修正**：P1 / P2 / P3 实际上是**一个不可拆的改动**。因为：新的 IR 形状
-      （`Gap`、`Punctuated`、`Delimited`）存在的唯一理由就是承载 P2 的归属规则；
-      而 `Punctuated<T,P>` / `Delimiter<S,E,B>` 能成立的前提又是 P2 把 trivia 归给
-      `P`/`S`/`E` 这些 punct。先做 P1 会产出死代码，先做 P2 会没有形状可渲染。
-      所以下面三个阶段当成一次重构推，**中途不追求门全绿**，只在三者都完完后跑一次
-      完整门表（包括 `mini.rs` fixture 重生与 `tests/generated.rs` 断言修正）。
-      已拆小的可先行项：`tests/data/spec.rs` 里补上形状齐全的用例（逗号分隔的集合、
-      嵌套定界符、`T+` 带间隙），这样重构一完成就能被 fixture 测到。
-- [ ] `codegen/pattern.rs`：给 `Step` 增加/识别 `Delimiter{open, body, close}`、
-      `Punctuated{item, sep}` 所需的信息（或在 `types.rs` 侧识别，见下一项），
-      并实现 `denotes_finite_literals()` 供 P0 的归属规则使用。
-- [ ] `codegen/types.rs`：`FieldType` 增加
-      `Punctuated{item, sep}`、`Delimited{open, body, close}`、
-      `Run{item, min, max}`（元素计数语义）、`Gap`（`Option<WS>`）表达；
-      `TypeDefKind::Bounds` 与新的 `Run` 合并，避免两套上界循环。
-- [ ] `OneOrMore` 改成 `(T, Vec<(Gap, T)>)` 形态（元组本身就是 syntax），
-      不再产出 `Vec` + `is_empty()` 检查。
-- [ ] 单测：每条 IR 规则一个用例，断言"识别出的形状"而不是断言渲染文本
-      （渲染文本在 P2/P3 会变）。
-- [ ] 门：`cargo test -p unsyn --all-features -- codegen` 全绿。
+> **已完成**（门表全绿）。归属判定落在 `codegen/mod.rs` 的 `ownership()`，空隙与两个折叠
+> 落在 `codegen/types.rs` 的 `Trivia`（settle 阶段），三种终结符形状落在 `codegen/render.rs`
+> 的 `token_pattern()`，两个贪心 body 落在 `codegen/scan.rs`。文档小节按实际内容命名为
+> `# Trivia`（`codegen/types.rs`、`codegen/render.rs`），DSL 侧另有一节
+> `# Where the trivia goes`（`lib.rs`）。除下面留的一项外，本节的验收见
+> `tests/codegen.rs::a_bootstrap_spec_is_read_as_the_shapes_it_writes`。
 
-## P2 — trivia 归属改写（一次改完，不留兼容层）
+### 归属规则（同时写进 `codegen/types.rs` 的 `# Whitespace` 小节与 `lib.rs`）
 
-- [ ] `whitespace` 节点生成成**非空极大串**：`struct WHITESPACE<I>(pub I)` +
-      `take_while_with(1.., <规范列出的字符类>)`。
-- [ ] 把 P0 记下的 **trivia 归属规则**写进 DSL 文档（`codegen/types.rs` 的 `# Whitespace`
-      小节 + `lib.rs`），与下面两条实现同时落地。
-- [ ] 固定字面终结符生成成 `(Option<WS>, I, Option<WS>)`，`to_span` 只到自身字符结束
-      （参考：`lexical/punct.rs` 的 `the_span_of_a_punct_ends_with_its_own_characters`）。
-- [ ] 删除 `Field::separator` 与所有 `Vec<WHITESPACE<I>>` 字段；只在规则要求的位置插入
-      `Option<WS>` 空隙。
-- [ ] `tests/data/mini.rs` 重新生成（`cargo test -p unsyn --all-features --test dump
-      -- --nocapture` → `rustfmt --edition 2024` → 覆盖 fixture），
-      并检查 `tests/generated.rs` 的断言：`A;B` 与 `A ; B` 必须解析成同一棵树。
-- [ ] 门：全部门 + `dump` fixture 与生成字节一致。
+- [x] 一个终结符**拥有 trivia** 当且仅当四条都成立。判定全部从 `Step` 的结构得出，不看
+      被描述语言的字符集形状：
+  1. 它的模式表示**有限个固定的非空串**（`Step::fixed_strings`：只由 `Lit`、
+     `Class(Chars/Or)`、`Seq`、`Alt` 组成；遇到 `Rep`/`Ref`/`External`/`Not`/`Except`/
+     `Followed`/`Any`/超过上限的类就放弃归属）。注意 `pattern::literal` 把单字符字面值
+     编译成 `Class`，所以 `'('` 是 `Class('(')` —— 必须接受 `Class(Chars)`，否则标点全都不是 punct。
+  2. 它不是文件声明的 `whitespace` 节点（否则自己吃自己的串，无限递归）。
+  3. 它没有被任何**词法模式**直接 `Step::Ref`：`Ref` 编译成 `input.parse::<T>()?`，
+     被引用的类型若拥有 trivia，会把两侧的串吃进父 token 自己的文本里 ——
+     `QUOTE_ESCAPE -> '\\\''` 若拥有 trivia，`'a\ ''` 就成了合法字符串；
+     `LEADING_KEYWORDS` 被 `KEYWORDS` 引用，因此也不拥有。
+  4. 它能匹配的字符与 `whitespace` 的字符集**不相交**。反例：把 `' '` 声明成内容 token
+     的规则，拥有前导串就会让"极大串先吃光"抢掉它自己要匹配的字符。
+- [x] 拥有 trivia 的终结符渲染成 `struct X<I>(pub Option<WS<I>>, pub I, pub Option<WS<I>>)`，
+      `to_span` = 前导 ∪ 自身（**不含尾串**，否则兄弟节点区间重叠），与手写
+      `lexical/punct.rs` 同形；`whitespace` 节点渲染成**一个非空极大串**
+      `struct WS<I>(pub I)` + `take_while_with(1.., class)`（模式算不出字符类时退化成"整个
+      模式贪心循环"），与手写 `lexical/s.rs` 同形；其余终结符仍是 `struct X<I>(pub I)`。
+      手写的 keyword 只拥有尾侧，这里统一成两侧：串是极大且贪心的，同一串不可能被吃两次，
+      所以接受语言不变，只有归属位置变。
+- [x] **空隙**只在"两侧都不拥有 trivia"的两个操作数之间出现，类型是 `Option<WS<I>`（不再
+      是 `Vec<WS<I>>`：`WS` 自身已经是极大串）。
+- [x] 这些判定连同结构识别都放在 **settle 阶段**（`Plan` 把全部类型建完之后）：匿名 token
+      类型是边建边产生的，规划期还不知道最终有哪些类型拥有 trivia；而且 `Ref` 关系要看到
+      全部词法模式才能算。于是 `render.rs` 里不再有任何 trivia 决策。
+- [x] `X+` 不再渲染成 `Vec` + `is_empty()`，而是 `(X, Vec<(间隙, X)>)`：`FieldType::OneOrMore`
+      从 IR 删掉，`repeated()` 直接产出 `Concat` + `Many`。与手写
+      `ExprNoTopAlts{first, rest}` 同形，也少一次运行时检查。
+- [x] `TypeDefKind::Bounds`（`X{n,m}`）**保留**：`LimitsTo`/`LimitsFrom` 量的是
+      `to_span().len()`（源码单位，不是元素个数），且它们的 `Kind` 不带名字，报告会变差。
+      `Limits*` 有意不使用。
 
-## P3 — 结构识别（把产生式形状映射到代数节点）
+### 结构识别（把产生式形状映射到代数节点）
 
-> **前置已核实**（探针：`syntax ARGS -> '(' (IDENT ',')* IDENT? ')';` /
-> `syntax CHOICE -> '[' (IDENT ',')* IDENT? ']';` /
-> `lexer OPEN -> '('; lexer CLOSE -> ')'; syntax GROUP2 -> OPEN IDENT CLOSE;`）：
->
-> - 产生式里**内联的字面标点能正常工作**，且不跟声明的 lexer 冲突：`'('` → `ParenStart`、
->   `')'` → `ParenEnd`、`','` → `Comma`、`'['`/`']'` → `BracketStart`/`BracketEnd`。
->   但要注意：`lexer OPEN -> '('` 与内联 `'('` 生成的是**两个不同的类型**
->   （`OPEN<I>(pub I)` 和 `ParenStart<I>(pub I)`，匹配同一个字符）—— 字面值共享表
->   不查已声明的规则。bootstrap.uns 不依赖这一点，但 P5 可以把它收成同一个类型。
-> - `(T P)*` 的当前产物：`ARGS1<I>(pub IDENT<I>, pub Vec<WS<I>>, pub Comma<I>)` 加上外层
->   `Vec<(Vec<WS<I>>, ARGS1<I>)>`；整个 `ARGS` 是 6 个字段。目标形状：
->   `Delimiter<ParenStart, ParenEnd, Punctuated<IDENT, Comma>>`（**1 个字段**）。
-> - 同一个 `(T, WS, P)`  Anonymous 类型在 `ARGS1` 与 `CHOICE1` 里**各生一份**
->   （`shared` 表只覆盖外部调用与通配符）。
+- [x] **分组内联成元组**：`(...)` 内若只有一条序列且操作数不超过 `MAX_TUPLE / 2`（空隙最坏
+      让 arity 翻倍），直接产出 `Concat` 链，不再造匿名 struct。这样 `( SetItem ',' )` 在 IR
+      里是 `Concat{SetItem, Comma}`，才能被下一步识别；顺带消掉 `ARGS1`/`CHOICE1` 那种
+      逐字重复的匿名类型。
+- [x] **`Punctuated`**：字段序列里相邻的 `Many{Concat{A,B}}` + `Opt(A')`，`A'` 与 `A`
+      结构相等（比较**已建好的** `FieldType`，绝不重建类型来比 —— 重建会产生重复匿名类型），
+      且 `B`、`A` 之间不需要空隙 → `Punctuated<A,B>`。命中 `bootstrap.uns:122`、`:125`。
+- [x] **`Delimiter`**：在字段序列上取**最窄**窗口 `[i..=j]`（同宽取最左）：`fields[i]`、
+      `fields[j]` 都是拥有 trivia 的 `Named`，两者表示的文本不同，`j ≥ i+2`，且窗口内不含与
+      close 同文本的拥有类型（否则 `'(' A ')' '(' B ')'` 会被吃成一个跨两个括号的大窗口）→
+      `Delimited{open, body, close}`，折完一个再在剩下的序列上找下一个，body 内部同样递归。
+      "文本不同"顺带排除 `TEXT -> QUOTE … QUOTE`；识别**不查括号配对表**（那会是对目标语言
+      的假设）。命中 `:122`、`:123`、`:124`、`:125`、`:144-152`。
+      ◆ 本项原写"最左最短"，是错的：`'~' '[' … ']'` 里 `]` 同时够得着 `~` 和 `[`，最左的
+      `~` 会把 `]` 抢走，折出 `Delimited<Tilde, BracketEnd, …>` —— 把 `~` 和 `]` 当成一对，
+      而产生式从没这么说过。改成最窄，得到
+      `Tilde` + `Delimiter<BracketStart, BracketEnd, Punctuated<SetItem, Comma>>`，与手写
+      `syntax/expr.rs:335` 的 `Tilde(Tilde<I>, Bracket<I, Punctuated<…>>)` 同形。
+- [x] `eats_leading`/`eats_trailing`：`Named` 查归属表，`Concat` 看首/尾，`Delimited` 看
+      open/close，`Opt`/`Many`/`Punctuated`/`Gap` 一律 false（它们可以什么都不吃，不能指望）。
+      宁可多一个 `Option<WS>` 字段，不可少一个。
+- [ ] `<NAME>` 在 syntax 规则里只是被记录的文本（`Angle<I, Ident>`），在 lexer 规则里才展开成
+      外部函数调用；两条路径都要有测试钉住。
+      现状：两条路径没有分开 —— `types.rs` 的 `call()` 把每一处 `<NAME>` 都做成共享的
+      `ExternalNAME<I>` token，其 `parse` 调用表里给的函数，只有 lexer 那条有测试
+      （`spec.rs` 的 `MATCHER -> <WORD_START>`）。`bootstrap.uns` 只在 `lexer` 里写 `<NAME>`
+      （`:22`、`:24`），所以自举不受影响。syntax 位置上的 `<NAME>` 该记文本还是该调用，
+      是一个还没做的决定，留到 P5 一起判。
+- [x] `tests/data/spec.rs` 补形状：`(T P)* T?`、带空隙的 `T+`、拥有 trivia 的 punct 相邻处
+      不留字段，让 fixture 一上来就覆盖新形状。
 
-- [ ] `(T P)* T?` → `Punctuated<T,P>`。识别点：`bootstrap.uns:122`、`:125`
-      两处 `'[' ( SetItem ',' )* SetItem? ']'`。
-- [ ] `'x' B 'y'`（两侧是固定字面终结符的并列）→ `Delimiter<X, Y, B>`。识别点：
-      `:122`/`:125` 的方括号、`:123` 的 `'<' IDENTIFIER '>'`、`:124` 的 `'(' Expr ')'`、
-      `:144-152` 的花括号。别名（`Bracket`/`Angle`/`Paren`/`Brace`）**不生成**，
-      直接内联 `Delimiter<..>`；决定：自举要求的是行为等价，不要求类型名相同。
-- [ ] `T?`/`T*`/`T+`/`T{n,m}` → `Option` / `Vec` / 元组 / 计数检查（顺序处理）。
-- [ ] `<NAME>` 在 syntax 规则里只是被记录的文本（`Angle<I, Ident>`），
-      在 lexer 规则里才展开成外部函数调用；两条路径都要有测试钉住。
-- [ ] 门：`cargo test -p unsyn --all-features` 全绿；对 `bootstrap.uns` 重新生成一次，
-      `Punctuated`/`Delimiter` 计数必须 > 0（当前是 0）。
+### 落地清单
+
+- [x] `codegen/pattern.rs`：`Step::fixed_strings`、`CharClass::fixed_strings`、`Step::refers`。
+- [x] `codegen/types.rs`：`FieldType` 加 `Gap`/`Punctuated`/`Delimited`，删 `OneOrMore` 与所有
+      `separated`；删 `Field::separator`、`runs`、`opens_with_a_separator`；`group()` 内联；
+      新增 settle；`# Whitespace` 文档重写。
+- [x] `codegen/mod.rs`：`Plan` 存 `owning`（拥有 trivia 的 token → 它表示的串）与 `whitespace`；
+      `plan()` 末尾跑 settle。
+- [x] `codegen/render.rs`：`token_pattern` 三种形状；`ty`/`read` 支持新形状；`parts` 不再插
+      separator；单测随形状一起改。
+- [x] `codegen/scan.rs`：`Emitter` 增加"带前后 trivia 的 body"与"贪心循环 body"两个入口，
+      与现有 `parse_body` 共用同一个 `split_to` 外壳。
+- [x] 重生 `tests/data/mini.rs`（`cargo test -p unsyn --all-features --test dump -- --nocapture`
+      → `rustfmt --edition 2024` → 覆盖 fixture），修 `tests/generated.rs`：`A;B` 与 `A ; B`
+      必须解析成同一棵树。
+- [x] 验收：**每条产生式折出的形状，与手写 parser 里同一条产生式用的形状一致**。
+      这一条原先写的是"`Stmt` 字段数下降、重复匿名类型减少"，那是我自己加的指标，不是
+      要求：P0 定的验收标准是行为等价，且明写"不要求类型名/别名/字段数相同"（`:131`）。
+      拿字段数当指标还有更坏的一层：它给上面 `Delimiter` 那个真错打了高分 —— 窗口取得越
+      贪就越"省字段"，所以这个指标只会把错误方向奖励成成绩，把 `~` 和 `]` 配成一对这种
+      形状错误完全看不见。现在核对的四条（`bootstrap.uns:123-126` 对
+      `syntax/expr.rs:335-350`）：
+      - `'~' '[' … ']'` → `Tilde(Tilde, Delimiter<BracketStart, BracketEnd, Punctuated>)`
+        同形于手写的 `Tilde(Tilde<I>, Bracket<I, Punctuated<SetItem<I>, Comma<I>>>)`；
+      - `'[' … ']'` → 同形于手写的 `Set(Bracket<I, Punctuated<SetItem<I>, Comma<I>>>)`；
+      - `'<' IDENTIFIER '>'` → 同形于手写的 `Call(Angle<I, Ident<I>>)`；
+      - `'(' Expr ')'` → 同形于手写的 `Paren(Paren<I, Box<Expr<I>>>)`；
+      - `stmt: LEADING_KEYWORDS IDENTIFIER '->' Expr ';'`（`:167`）→ 生成的是
+        `Delimiter<ArrowRight, Semi, Expr>`，手写原先是 `arrow_right, expr, semi` 三个
+        平铺字段 —— **已改手写的一侧**：`syntax/expr.rs` 的 `Stmt` 三个变体现在都是
+        `definition: Delimiter<ArrowRight<I>, Semi<I>, Expr<I>>`，`symbol.rs::stmt_expr`
+        读 `definition.body`。改完既有断言全部原样通过（包括
+        `a_statement_without_a_semicolon_is_told_where_one_belongs`）：缺 `;` 的错误仍由
+        `Expr` 体内的 `map_expr_err` 先报，位置不变；另外把四种缺 `;` 的写法（EOF、`)`、
+        关键字、`|`）的 `Punct(Semi, Fatal, …)` 补成了永久断言。
+      关于"缺闭合符报 `Fatal`"：手写 `lexical/delimiter.rs:18` 的 `Bracket` 本就是
+      `parserc::syntax::Delimiter`，而 `Delimiter::parse` 对 `End` 加了 `.fatal()`
+      （`parserc/src/syntax.rs:209`），`delimiter.rs:82` 的既有断言就是 `ControlFlow::Fatal`。
+      所以那是后端与手写实现的既有行为，不是折叠引入的代价，我上一轮把它说成代价是错的。
+      钉住的地方：`tests/codegen.rs::a_bootstrap_spec_is_read_as_the_shapes_it_writes`
+      （对 `bootstrap.uns` 逐条比对上面四个形状）、
+      `tests/generated.rs::a_run_stops_at_the_nearest_end_that_closes_it`
+      （编译并运行同一条规则，fixture 加 `syntax RUNDED -> TILDE LEFT IDENT RIGHT;`）。
+- [x] 门：全部门表 + `dump` fixture 与生成字节一致。
 
 ## P4 — `except` 与加速函数
 
@@ -249,6 +303,21 @@
 
 ## P6 — 自举验收（本计划的终点）
 
+- [ ] **先补规范的洞**：`bootstrap.uns` 里**没有文件级规则**。手写的 `Crate{items: Vec<Item>}`
+      与 `Item = S | Stmt | InnerDoc | OuterDoc` 没有被自描述，因此生成的 parser 无从复现它。
+      建议加：
+      `syntax Item -> WHITESPACE | INNER_LINE_DOC | OUTER_LINE_DOC | INNER_BLOCK_DOC | OUTER_BLOCK_DOC | Stmt;`
+      `syntax Crate -> Item*;`
+      注意 `Item -> WHITESPACE | …` 里对 trivia 节点的**裸引用**会被 `fold_separators` 保留
+      （整条序列只有它自己），所以这一条能工作；生成的 `Crate` 会是 `Vec<Item>` 的 newtype
+      而不是命名字段 struct —— 按 P0 的「行为等价」决定，可以接受。
+- [ ] **第二个规范洞（本轮新发现）**：`Stmt` 的关键字。`bootstrap.uns:167` 把三种声明
+      写成**一条**规则 `syntax Stmt -> LEADING_KEYWORDS IDENTIFIER …`，而手写的 `Stmt`（
+      `syntax/expr.rs:53`）是一个**按关键字分三变体的 enum**，`semantics` 从变体名取
+      `NodeKind`（`graph.rs:811`、`mod.rs:233`、`symbol.rs:244`）。这一条不能靠“改手写
+      的一侧”解决：扁平成一个 struct 就会把“是哪三种声明”从结构里掉到文本里，语义阶段要
+      改成读 `LEADING_KEYWORDS` 的文本才能拿到 kind。要么把规范拆成三条规则（每个关键字
+      一条），要么定下 kind 从文本读。自举前必须定。
 - [ ] 搭一个 build 阶段：用 `codegen` 从 `bootstrap.uns` 生成 parser，编译进测试
       crate（`runtime`/`codegen` 两个 feature 已经分开，build 依赖放
       `[build-dependencies]`）。
@@ -270,6 +339,11 @@
 | 5 | `cargo clippy -p unsyn --all-targets`（三组 feature 组合） | `crates/unsyn` 里 0 条 |
 | 6 | `RUSTDOCFLAGS=-D warnings cargo doc --no-deps`（四组） | 0 警告 |
 | 7 | `cargo fmt --all --check` | 干净 |
+
+> P1–P3 收尾时跑过全表：1/3/4 全绿（179 lib / 3 bootstrap / 18 codegen / 1 dump /
+> 24 generated / 3 doctests），2 十五行全 `ok`；3 为 runtime-only（2 + 0）；5 在
+> `crates/unsyn` 里 0 条（`parserc` 4 条、`sourcespan` 1 条是既有的，不属本任务）；
+> 6 四组 feature 组合各 0 警告；7 干净。
 
 ## P7 — 收尾
 

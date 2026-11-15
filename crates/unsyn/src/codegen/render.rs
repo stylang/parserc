@@ -19,16 +19,22 @@
 //!
 //! # Trivia
 //!
-//! A generated token keeps only the text it matched, never the runs around it,
-//! so a field reached over a run of trivia carries a separator of its own — a
-//! run of the whitespace type, held as a `Vec` because two tokens may well be
-//! written with nothing between them. The separator is a field like any other,
-//! which is what keeps the tree concrete: what was between two tokens is part
-//! of the tree and not something the parser threw away.
+//! Where the trivia of a token goes is settled once for the whole file, and the
+//! renderer only reads what was settled. A terminal that owns its trivia holds
+//! the run on each side of the text it matched, so a node reached over such a
+//! token finds the run already taken and needs no field of its own; a gap
+//! stands as a field only between two operands that reach nothing, and it holds
+//! `Option` of the whitespace type, since two tokens may well be written with
+//! nothing between them (see the `Trivia` section of [`super::types`]).
 //!
-//! A rule of nodes that writes its own separator out as an operand is given no
-//! field for the mention, since the run around it is the same trivia taken the
-//! same way (see the `Whitespace` section of [`super::types`]).
+//! What the settled fields add up to is what the backend already has names for:
+//! a run of an operand and its separator, with the operand optional at the end,
+//! is one [`Punctuated`](parserc::syntax::Punctuated), and operands held between
+//! two terminals that own their trivia are one
+//! [`Delimiter`](parserc::syntax::Delimiter). The types of the backend are
+//! named through their crate rather than by a `use`, since a rule of the
+//! language being described is free to be called `Or` or `Comma` itself and
+//! generate a type of that name into the same module.
 //!
 //! # Recursion
 //!
@@ -48,7 +54,7 @@ use super::error::CodegenError;
 use super::name::type_ident;
 use super::pattern::{CharClass, TokenPattern};
 use super::scan::Emitter;
-use super::types::{Assert, Field, FieldType, TypeDef, TypeDefKind, Variant};
+use super::types::{Assert, Field, FieldType, Trivia, TypeDef, TypeDefKind, Variant};
 
 /// The stream every generated type is written over, and the name its `parse`
 /// takes it by.
@@ -69,45 +75,108 @@ pub(crate) struct Renderer<'a> {
     visibility: &'a TokenStream,
     /// The derives every type is given.
     derives: &'a [String],
-    /// The type of the file's trivia, which is what every separator names, or
-    /// nothing when the file declares none.
-    whitespace: Option<&'a str>,
+    /// What was settled about the file's trivia: which terminals own the runs
+    /// around them, and which type a gap holds a run of.
+    trivia: &'a Trivia,
 }
 
 impl<'a> Renderer<'a> {
-    /// Prepares a renderer for a file with the settings `codegen` was given,
-    /// whose separators name the whitespace type `whitespace`.
+    /// Prepares a renderer for a file with the settings `codegen` was given and
+    /// the trivia table the plan was settled with.
     pub(crate) fn new(
         paths: &'a Paths,
         externals: &'a HashMap<String, TokenStream>,
         visibility: &'a TokenStream,
         derives: &'a [String],
-        whitespace: Option<&'a str>,
+        trivia: &'a Trivia,
     ) -> Self {
         Self {
             paths,
             externals,
             visibility,
             derives,
-            whitespace,
+            trivia,
         }
     }
 
-    /// The item of one type that reads text: the text it took, and the pattern
-    /// that took it.
+    /// The item of one type that reads text: the text it took, the runs of
+    /// trivia around it where it owns them, and the pattern that took them.
     pub(crate) fn token_pattern(
         &self,
         pattern: &TokenPattern,
         classes: &HashMap<String, CharClass>,
     ) -> Result<TokenStream, CodegenError> {
         let ty = type_ident(&pattern.name);
-        let body = Emitter::named(self.paths, self.externals, classes, &pattern.name)
-            .parse_body(&pattern.step)?;
+        let emitter = Emitter::named(self.paths, self.externals, classes, &pattern.name);
         let (parserc, unsyn) = (&self.paths.parserc, &self.paths.unsyn);
         let input = format_ident!("{STREAM}");
         let attrs = self.attrs();
         let uses = self.uses();
         let visibility = self.visibility;
+
+        // The type that *is* a run of trivia is declared over the same one
+        // field as any other token, but it reads the run itself rather than one
+        // copy of its pattern, and it owns nothing beside it: one run is all
+        // there is to take at a time.
+        if self.trivia.is_trivia(&pattern.name) {
+            let body = emitter.parse_run_body(&pattern.step)?;
+
+            return Ok(quote! {
+                #attrs
+                #visibility struct #ty<I>(#visibility I);
+
+                impl<I> #parserc::syntax::Syntax<I> for #ty<I>
+                where
+                    I: #unsyn::runtime::GeneratedInput,
+                {
+                    fn parse(#input: &mut I) -> ::core::result::Result<Self, <I as #parserc::Input>::Error> {
+                        #uses
+
+                        #body
+                    }
+
+                    fn to_span(&self) -> #parserc::Span {
+                        #uses
+
+                        self.0.to_span()
+                    }
+                }
+            });
+        }
+
+        // A terminal that owns its trivia holds the run on each side of the
+        // text it matched, which is what lets a node reached over it say
+        // nothing about the trivia at all. Its span stops with its own text,
+        // as the trailing run belongs to whatever comes next.
+        if self.trivia.owns(&pattern.name) {
+            let ws = self.gap();
+            let body = emitter.parse_owning_body(&pattern.step, &ws)?;
+            let spanning = self.union(&[self.at(0), self.at(1)]);
+
+            return Ok(quote! {
+                #attrs
+                #visibility struct #ty<I>(#visibility #ws, #visibility I, #visibility #ws);
+
+                impl<I> #parserc::syntax::Syntax<I> for #ty<I>
+                where
+                    I: #unsyn::runtime::GeneratedInput,
+                {
+                    fn parse(#input: &mut I) -> ::core::result::Result<Self, <I as #parserc::Input>::Error> {
+                        #uses
+
+                        #body
+                    }
+
+                    fn to_span(&self) -> #parserc::Span {
+                        #uses
+
+                        #spanning
+                    }
+                }
+            });
+        }
+
+        let body = emitter.parse_body(&pattern.step)?;
 
         Ok(quote! {
             #attrs
@@ -204,13 +273,8 @@ impl<'a> Renderer<'a> {
                     },
                 )
             }
-            TypeDefKind::Bounds {
-                item,
-                min,
-                max,
-                separated,
-            } => {
-                let (bounds, body, spanning) = self.bounds(item, *min, *max, *separated, &writing);
+            TypeDefKind::Bounds { item, min, max } => {
+                let (bounds, body, spanning) = self.bounds(item, *min, *max, &writing);
 
                 (self.tuple_of(&ty, &[bounds]), body, spanning)
             }
@@ -259,13 +323,12 @@ impl<'a> Renderer<'a> {
         item: &FieldType,
         min: usize,
         max: Option<usize>,
-        separated: bool,
         writing: &Writing<'_>,
     ) -> (TokenStream, TokenStream, TokenStream) {
         let input = writing.input;
         let fail = writing.fail;
 
-        let elem = self.element(item, separated, writing.pointed);
+        let elem = self.ty(item, writing.pointed);
         let tys = quote!(::std::vec::Vec<#elem>);
         let least = Literal::usize_unsuffixed(min);
         let most: Vec<TokenStream> = max
@@ -375,59 +438,30 @@ impl<'a> Renderer<'a> {
     /// The declaration parts of a sequence of fields: the type of each one, the
     /// expression that takes it, and the name it is bound to in `to_span`.
     ///
-    /// A separator is a part like any other, so the three line up and a field
-    /// reached over trivia takes two of them.
+    /// The fields are taken in the order they are written, which is also the
+    /// order they are declared in, so a gap stands between the two operands it
+    /// lies between rather than becoming part of either of them.
     fn parts(&self, fields: &[Field], writing: &Writing<'_>) -> Parts {
         let input = writing.input;
 
         let mut parts = Parts::default();
 
         for field in fields {
-            if field.separator {
-                let ws = self.separator();
+            let ty = self.ty(&field.ty, writing.pointed);
 
-                parts.push(ws.clone(), quote!(#input.parse::<#ws>()?));
-            }
-
-            let (ty, read) = self.read(&field.ty, writing);
-
-            parts.push(ty, read);
+            parts.push(ty.clone(), quote!(#input.parse::<#ty>()?));
         }
 
         parts
     }
 
-    /// The type of a field and the expression that takes it, which is one call
-    /// of `parse` whatever the field holds — except for a run of one or more,
-    /// which is a `Vec` that has to be found non-empty once it was taken.
-    fn read(&self, ty: &FieldType, writing: &Writing<'_>) -> (TokenStream, TokenStream) {
-        let input = writing.input;
-        let fail = writing.fail;
-
-        let of = self.ty(ty, writing.pointed);
-
-        match ty {
-            FieldType::OneOrMore { .. } => (
-                of.clone(),
-                quote! {
-                    {
-                        let __run = #input.parse::<#of>()?;
-
-                        if __run.is_empty() {
-                            return ::core::result::Result::Err(#fail);
-                        }
-
-                        __run
-                    }
-                },
-            ),
-            _ => (of.clone(), quote!(#input.parse::<#of>()?)),
-        }
-    }
-
-    /// The type a field holds, with a pointer wherever one is needed and the
-    /// trivia of a run woven into its elements.
+    /// The type a field holds, with a pointer wherever one is needed.
+    ///
+    /// Every shape here is a type the backend already takes as one operand, so
+    /// taking a field of any of them is one call of `parse`.
     fn ty(&self, ty: &FieldType, pointed: &HashSet<String>) -> TokenStream {
+        let parserc = &self.paths.parserc;
+
         match ty {
             FieldType::Named(name) => {
                 let named = type_ident(name);
@@ -443,8 +477,8 @@ impl<'a> Renderer<'a> {
 
                 quote!(::core::option::Option<#item>)
             }
-            FieldType::Many { item, separated } | FieldType::OneOrMore { item, separated } => {
-                let item = self.element(item, *separated, pointed);
+            FieldType::Many { item } => {
+                let item = self.ty(item, pointed);
 
                 quote!(::std::vec::Vec<#item>)
             }
@@ -453,37 +487,57 @@ impl<'a> Renderer<'a> {
 
                 quote!((#first, #second))
             }
+            // A group of operands that needed no type of its own is a tuple, so
+            // it is taken as one field and holds its operands in the order the
+            // rule wrote them.
+            FieldType::Group(tys) => {
+                let flat: Vec<TokenStream> = tys.iter().map(|ty| self.ty(ty, pointed)).collect();
+
+                self.tuple(&flat)
+            }
+            FieldType::Gap => self.gap(),
+            FieldType::Punctuated { item, sep } => {
+                let (item, sep) = (self.ty(item, pointed), self.ty(sep, pointed));
+
+                quote!(#parserc::syntax::Punctuated<#item, #sep>)
+            }
+            FieldType::Delimited { open, body, close } => {
+                let (open, close) = (self.ty(open, pointed), self.ty(close, pointed));
+                let flat: Vec<TokenStream> = body
+                    .iter()
+                    .map(|ty| self.ty(ty, pointed))
+                    .collect::<Vec<_>>();
+                let body = self.tuple(&flat);
+
+                quote!(#parserc::syntax::Delimiter<#open, #close, #body>)
+            }
         }
     }
 
-    /// The type of one element of a run, which carries the trivia before it
-    /// when the run is separated, since the tokens of a run are reached over
-    /// the same kind of gap as the tokens of a sequence.
-    fn element(&self, item: &FieldType, separated: bool, pointed: &HashSet<String>) -> TokenStream {
-        let item = self.ty(item, pointed);
-
-        if separated {
-            let ws = self.separator();
-
-            quote!((#ws, #item))
-        } else {
-            item
+    /// The type of a run of operands written beside each other: one tuple when
+    /// there are several to hold, and the operand itself where there is only one
+    /// to hold.
+    fn tuple(&self, tys: &[TokenStream]) -> TokenStream {
+        match tys {
+            [] => quote!(()),
+            [only] => only.clone(),
+            tys => quote!(( #(#tys),* )),
         }
     }
 
-    /// The type of the trivia before a token: a run of the file's whitespace
-    /// type, which a file with no trivia of its own has no need of.
+    /// The type of a gap: one run of the file's trivia, which a file with no
+    /// trivia of its own has no need of.
     ///
-    /// A `whitespace` rule names one character of trivia, as any other token
-    /// does, and what lies between two tokens is a run of them. `Vec` is what
-    /// the backend already takes as often as the text offers, so the run may be
-    /// nothing at all where two tokens are written together.
-    fn separator(&self) -> TokenStream {
-        match self.whitespace {
+    /// A `whitespace` rule names one run of the characters that separate two
+    /// tokens, so a gap is `Option` of it rather than a list of them: what the
+    /// text offers between two tokens is one maximal run, and nothing at all is
+    /// the other thing a gap may hold.
+    fn gap(&self) -> TokenStream {
+        match self.trivia.whitespace() {
             Some(ws) => {
                 let ws = type_ident(ws);
 
-                quote!(::std::vec::Vec<#ws<I>>)
+                quote!(::core::option::Option<#ws<I>>)
             }
             None => quote!(()),
         }
@@ -632,9 +686,9 @@ struct Writing<'a> {
 /// The declaration parts of a sequence, in the order they are written.
 #[derive(Default)]
 struct Parts {
-    /// The type of each field, separators included.
+    /// The type of each field, gaps included.
     tys: Vec<TokenStream>,
-    /// The expression that takes each field, separators included.
+    /// The expression that takes each field, gaps included.
     vals: Vec<TokenStream>,
 }
 
@@ -650,7 +704,7 @@ impl Parts {
 struct Written {
     /// The name of the variant.
     name: Ident,
-    /// The types of its fields, separators included.
+    /// The types of its fields, gaps included.
     tys: Vec<TokenStream>,
     /// The names its fields are bound to in `to_span`.
     binds: Vec<Ident>,
@@ -662,19 +716,26 @@ struct Written {
 mod tests {
     use super::*;
 
-    /// Renders `def` the way the file would be written, with every run of
-    /// whitespace collapsed to nothing, so that a test says what the generator
-    /// means without spelling out how `proc_macro2` separates its tokens.
-    fn render(def: &TypeDef, pointed: &[&str], whitespace: Option<&str>) -> String {
+    /// Renders `def` the way the file would be written, so that a test says what
+    /// the generator means without spelling out how `proc_macro2` separates its
+    /// tokens.
+    fn render(def: &TypeDef, pointed: &[&str], trivia: &Trivia) -> String {
         let paths = Paths::default();
         let externals = HashMap::new();
         let visibility = quote!(pub);
         let derives = ["Debug"].map(String::from).to_vec();
 
-        let written = Renderer::new(&paths, &externals, &visibility, &derives, whitespace)
+        let written = Renderer::new(&paths, &externals, &visibility, &derives, trivia)
             .node(def, &pointed.iter().copied().map(String::from).collect());
 
         written.to_string().split_whitespace().collect()
+    }
+
+    /// The table of a file whose trivia is of type `ws` and whose terminals own
+    /// nothing, which is all that is left to know once the fields of a type were
+    /// settled: only the name of the whitespace type is read from here on.
+    fn trivia(ws: Option<&str>) -> Trivia {
+        Trivia::new(ws.map(str::to_owned), HashMap::new())
     }
 
     /// The type of a rule of one alternative over the named operands.
@@ -686,17 +747,16 @@ mod tests {
                     .iter()
                     .map(|name| Field {
                         ty: FieldType::Named((*name).to_owned()),
-                        separator: false,
                     })
                     .collect(),
             },
         }
     }
 
-    /// The same type with the field at `index` reached over a run of trivia.
-    fn separated(mut def: TypeDef, index: usize) -> TypeDef {
+    /// The same type with a gap let in before the operand at `index`.
+    fn gapped(mut def: TypeDef, index: usize) -> TypeDef {
         if let TypeDefKind::Struct { fields } = &mut def.kind {
-            fields[index].separator = true;
+            fields.insert(index, Field { ty: FieldType::Gap });
         }
 
         def
@@ -704,7 +764,7 @@ mod tests {
 
     #[test]
     fn a_rule_of_one_alternative_is_a_tuple_struct_of_its_fields() {
-        let written = render(&struct_of(&["Abc", "Def"]), &[], None);
+        let written = render(&struct_of(&["Abc", "Def"]), &[], &trivia(None));
 
         assert!(
             written.contains("pubstructOwner<I>(pubAbc<I>,pubDef<I>);"),
@@ -717,29 +777,40 @@ mod tests {
     }
 
     #[test]
-    fn a_field_reached_over_trivia_carries_the_run_as_a_field_of_its_own() {
-        let written = render(&separated(struct_of(&["Abc", "Def"]), 1), &[], Some("WS"));
+    fn a_gap_is_one_run_of_the_whitespace_type_taken_as_a_field_of_its_own() {
+        let written = render(
+            &gapped(struct_of(&["Abc", "Def"]), 1),
+            &[],
+            &trivia(Some("WS")),
+        );
 
-        assert!(written.contains("pub::std::vec::Vec<WS<I>>"), "{written}");
+        assert!(
+            written.contains("pub::core::option::Option<WS<I>>"),
+            "{written}"
+        );
         // The run is taken before the token it reaches, and both are fields.
         assert!(
-            written.contains("parse::<::std::vec::Vec<WS<I>>>()?,input.parse::<Def<I>>()?"),
+            written.contains("parse::<::core::option::Option<WS<I>>>()?,input.parse::<Def<I>>()?"),
             "{written}"
         );
     }
 
     #[test]
-    fn a_file_with_no_trivia_declares_no_separators() {
-        // With nothing between its tokens, a sequence of two is two fields and
-        // not four, which is what the rule says.
-        let written = render(&separated(struct_of(&["Abc", "Def"]), 1), &[], None);
+    fn a_file_with_no_trivia_holds_nothing_between_two_operands() {
+        // With nothing between its tokens, a gap is a field that takes nothing,
+        // and a sequence of two operands is two fields and not four.
+        let written = render(&gapped(struct_of(&["Abc", "Def"]), 1), &[], &trivia(None));
 
+        assert!(
+            written.contains("pubstructOwner<I>(pubAbc<I>,pub(),pubDef<I>);"),
+            "{written}"
+        );
         assert!(!written.contains("Option<"), "{written}");
     }
 
     #[test]
     fn a_node_that_reaches_its_owner_is_held_behind_a_pointer() {
-        let written = render(&struct_of(&["Owner", "Else"]), &["Owner"], None);
+        let written = render(&struct_of(&["Owner", "Else"]), &["Owner"], &trivia(None));
 
         assert!(
             written.contains("pub::std::boxed::Box<Owner<I>>"),
@@ -749,27 +820,109 @@ mod tests {
     }
 
     #[test]
-    fn a_run_of_one_or_more_is_a_vec_that_has_to_have_something_in_it() {
+    fn a_run_holds_one_repetition_with_the_trivia_before_it() {
+        // What each repetition of `Abc*` takes is settled by `Trivia` to a group
+        // of the gap and the operand, so the run of them is a `Vec` of that.
         let def = TypeDef {
             name: "Owner".to_owned(),
             kind: TypeDefKind::Struct {
                 fields: vec![Field {
-                    ty: FieldType::OneOrMore {
-                        item: Box::new(FieldType::Named("Abc".to_owned())),
-                        separated: true,
+                    ty: FieldType::Many {
+                        item: Box::new(FieldType::Group(vec![
+                            FieldType::Gap,
+                            FieldType::Named("Abc".to_owned()),
+                        ])),
                     },
-                    separator: false,
                 }],
             },
         };
 
-        let written = render(&def, &[], Some("WS"));
+        let written = render(&def, &[], &trivia(Some("WS")));
 
         assert!(
-            written.contains("Vec<(::std::vec::Vec<WS<I>>,Abc<I>)>"),
+            written.contains("Vec<(::core::option::Option<WS<I>>,Abc<I>)>"),
             "{written}"
         );
-        assert!(written.contains("if__run.is_empty()"), "{written}");
+        // A run of them may be nothing at all, so there is no length to check.
+        assert!(!written.contains("is_empty"), "{written}");
+    }
+
+    #[test]
+    fn an_item_and_its_separator_are_one_punctuated_list() {
+        let def = TypeDef {
+            name: "Owner".to_owned(),
+            kind: TypeDefKind::Struct {
+                fields: vec![Field {
+                    ty: FieldType::Punctuated {
+                        item: Box::new(FieldType::Named("Abc".to_owned())),
+                        sep: Box::new(FieldType::Named("Comma".to_owned())),
+                    },
+                }],
+            },
+        };
+
+        let written = render(&def, &[], &trivia(Some("WS")));
+
+        // The type is named through its crate, since the language being
+        // described is free to declare a rule of the same name itself.
+        assert!(
+            written.contains("pub::parserc::syntax::Punctuated<Abc<I>,Comma<I>>"),
+            "{written}"
+        );
+        assert!(
+            written.contains("input.parse::<::parserc::syntax::Punctuated<Abc<I>,Comma<I>>>()?"),
+            "{written}"
+        );
+    }
+
+    #[test]
+    fn two_terminals_holding_operands_are_one_delimiter() {
+        let def = TypeDef {
+            name: "Owner".to_owned(),
+            kind: TypeDefKind::Struct {
+                fields: vec![Field {
+                    ty: FieldType::Delimited {
+                        open: Box::new(FieldType::Named("Open".to_owned())),
+                        body: vec![
+                            FieldType::Named("Abc".to_owned()),
+                            FieldType::Named("Def".to_owned()),
+                        ],
+                        close: Box::new(FieldType::Named("Close".to_owned())),
+                    },
+                }],
+            },
+        };
+
+        let written = render(&def, &[], &trivia(Some("WS")));
+
+        // The backend names its delimiter open, then close, then body.
+        assert!(
+            written.contains("pub::parserc::syntax::Delimiter<Open<I>,Close<I>,(Abc<I>,Def<I>)>"),
+            "{written}"
+        );
+    }
+
+    #[test]
+    fn a_delimiter_holding_one_operand_names_no_tuple() {
+        let def = TypeDef {
+            name: "Owner".to_owned(),
+            kind: TypeDefKind::Struct {
+                fields: vec![Field {
+                    ty: FieldType::Delimited {
+                        open: Box::new(FieldType::Named("Open".to_owned())),
+                        body: vec![FieldType::Named("Abc".to_owned())],
+                        close: Box::new(FieldType::Named("Close".to_owned())),
+                    },
+                }],
+            },
+        };
+
+        let written = render(&def, &[], &trivia(Some("WS")));
+
+        assert!(
+            written.contains("Delimiter<Open<I>,Close<I>,Abc<I>>"),
+            "{written}"
+        );
     }
 
     #[test]
@@ -780,11 +933,10 @@ mod tests {
                 item: FieldType::Named("Abc".to_owned()),
                 min: 2,
                 max: Some(4),
-                separated: false,
             },
         };
 
-        let written = render(&def, &[], None);
+        let written = render(&def, &[], &trivia(None));
 
         // The run is taken up to the most the rule stated, and a run shorter
         // than the least is the failure, in that order.
@@ -805,11 +957,10 @@ mod tests {
                 item: FieldType::Named("Abc".to_owned()),
                 min: 1,
                 max: None,
-                separated: false,
             },
         };
 
-        let written = render(&def, &[], None);
+        let written = render(&def, &[], &trivia(None));
 
         assert!(!written.contains("len()>="), "{written}");
         assert!(written.contains("if__items.len()<1"), "{written}");
@@ -825,7 +976,7 @@ mod tests {
             },
         };
 
-        let written = render(&def, &[], None);
+        let written = render(&def, &[], &trivia(None));
 
         // The question is asked before the operand is taken, and it is the
         // answer "it fits" that loses.
@@ -846,7 +997,7 @@ mod tests {
             },
         };
 
-        let written = render(&def, &[], None);
+        let written = render(&def, &[], &trivia(None));
 
         assert!(written.contains("__fits.is_none()"), "{written}");
         assert!(
@@ -865,21 +1016,19 @@ mod tests {
                         name: "OwnerAbc".to_owned(),
                         fields: vec![Field {
                             ty: FieldType::Named("Abc".to_owned()),
-                            separator: false,
                         }],
                     },
                     Variant {
                         name: "OwnerDef".to_owned(),
                         fields: vec![Field {
                             ty: FieldType::Named("Def".to_owned()),
-                            separator: false,
                         }],
                     },
                 ],
             },
         };
 
-        let written = render(&def, &[], None);
+        let written = render(&def, &[], &trivia(None));
 
         assert!(written.contains("pubenumOwner<I>{"), "{written}");
         assert!(
@@ -899,7 +1048,7 @@ mod tests {
 
     #[test]
     fn a_span_is_every_field_of_the_type_unioned() {
-        let written = render(&struct_of(&["Abc", "Def"]), &[], None);
+        let written = render(&struct_of(&["Abc", "Def"]), &[], &trivia(None));
 
         assert!(
             written.contains("Span::None.union(&self.0.to_span()).union(&self.1.to_span())"),
@@ -917,15 +1066,13 @@ mod tests {
                         first: Box::new(FieldType::Named("Uplus".to_owned())),
                         second: Box::new(FieldType::Many {
                             item: Box::new(FieldType::Named("Hex".to_owned())),
-                            separated: false,
                         }),
                     },
-                    separator: false,
                 }],
             },
         };
 
-        let written = render(&def, &[], None);
+        let written = render(&def, &[], &trivia(None));
 
         assert!(
             written.contains("pub(Uplus<I>,::std::vec::Vec<Hex<I>>)"),

@@ -124,6 +124,8 @@ where
 mod tests {
     use parserc::{Span, syntax::SyntaxInput};
 
+    use parserc::syntax::Delimiter;
+
     use crate::{
         input::TokenStream,
         lexical::{
@@ -205,25 +207,29 @@ mod tests {
                         Some(S(TokenStream::from((17, " ")))),
                     ),
                     ident: Ident(TokenStream::from((18, "W"))),
-                    arrow_right: ArrowRight(
-                        Some(S(TokenStream::from((19, " ")))),
-                        TokenStream::from((20, "->")),
-                        Some(S(TokenStream::from((22, " ")))),
-                    ),
-                    expr: Expr {
-                        first: ExprNoTopAlts {
-                            first: ExprNoTopAlt::WithoutSuffix(ExprWithoutSuffix::Str(LitStr {
-                                delimiter_start: TokenStream::from((23, "'")),
-                                content: vec![StrSegment::CharWithException(TokenStream::from((
-                                    24, " ",
-                                )))],
-                                delimiter_end: TokenStream::from((25, "'")),
-                            })),
+                    definition: Delimiter {
+                        start: ArrowRight(
+                            Some(S(TokenStream::from((19, " ")))),
+                            TokenStream::from((20, "->")),
+                            Some(S(TokenStream::from((22, " ")))),
+                        ),
+                        body: Expr {
+                            first: ExprNoTopAlts {
+                                first: ExprNoTopAlt::WithoutSuffix(ExprWithoutSuffix::Str(
+                                    LitStr {
+                                        delimiter_start: TokenStream::from((23, "'")),
+                                        content: vec![StrSegment::CharWithException(
+                                            TokenStream::from((24, " ",))
+                                        )],
+                                        delimiter_end: TokenStream::from((25, "'")),
+                                    }
+                                )),
+                                rest: vec![],
+                            },
                             rest: vec![],
                         },
-                        rest: vec![],
+                        end: Semi(None, TokenStream::from((26, ";")), None),
                     },
-                    semi: Semi(None, TokenStream::from((26, ";")), None),
                 }),
             ],
         );

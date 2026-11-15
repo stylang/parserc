@@ -20,6 +20,36 @@
 //! recursion checks count on this, since whatever consumes is what stands
 //! between a definition and itself.
 //!
+//! # Where the trivia goes
+//!
+//! A run of trivia lies between two words of the language, and since the node
+//! that declares it is greedy and takes each run whole, that run belongs to
+//! exactly one of the two. Which one is settled by the shape of the productions,
+//! never by what the characters of the described language happen to be:
+//!
+//! - a terminal whose pattern denotes finitely many fixed words — `'<'`, `';'`,
+//!   `'->'`, `'lexer'` — *owns* the runs on each side of the text it matched, as
+//!   the punctuation of a hand-written parser does;
+//! - the node `whitespace` declares is the trivia itself, and owns nothing;
+//! - a terminal another pattern reaches by name owns nothing, since its text is
+//!   read into the text of the rule that reaches it, and a run taken there would
+//!   end up inside that other token;
+//! - a terminal that could match a character the trivia matches owns nothing,
+//!   since the run before it would eat what it stands there to take.
+//!
+//! Between two operands neither of which owns the run before it, the sequence
+//! that reads them carries one optional run of the trivia. An operand that may
+//! match nothing — an option, a repetition, a bound — never owns a run, so it is
+//! always content to let its neighbour keep it.
+//!
+//! None of this changes what a grammar accepts: the first operand that reaches a
+//! run keeps it, and keeps all of it. What it decides is where in the tree the
+//! run is filed away, which is why a rule over nodes names the trivia of its own
+//! language at most once.
+//!
+//! The `codegen` module's own documents say how the rule is decided and what the
+//! generated types look like once it has been.
+//!
 //! # Two phases, two features
 //!
 //! The crate does two jobs that have nothing to do with each other, and the

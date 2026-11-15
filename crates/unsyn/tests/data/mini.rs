@@ -20,19 +20,11 @@ where
         };
         {
             let mut __from = input.clone();
-            ::parserc::next_if(|c: char| {
+            ::parserc::take_while_with(1.., |c: char| {
                 ((::core::matches!(c, ' ') || ::core::matches!(c, '\t'))
                     || ::core::matches!(c, '\n'))
             })
             .parse(input)?;
-            if input.len() == __from.len() {
-                return Err(::parserc::Kind::Token(
-                    "WS",
-                    ::parserc::ControlFlow::Recovable,
-                    input.to_span_at(1),
-                )
-                .into());
-            }
             let __taken = __from.len() - input.len();
             Ok(Self(__from.split_to(__taken)))
         }
@@ -66,12 +58,14 @@ where
             })
             .parse(input)?;
             if input.len() == __from.len() {
-                return Err(::parserc::Kind::Token(
-                    "LETTER",
-                    ::parserc::ControlFlow::Recovable,
-                    input.to_span_at(1),
-                )
-                .into());
+                return ::core::result::Result::Err(
+                    ::parserc::Kind::Token(
+                        "LETTER",
+                        ::parserc::ControlFlow::Recovable,
+                        input.to_span_at(1),
+                    )
+                    .into(),
+                );
             }
             let __taken = __from.len() - input.len();
             Ok(Self(__from.split_to(__taken)))
@@ -103,12 +97,14 @@ where
             let mut __from = input.clone();
             ::parserc::next_if(|c: char| ::core::matches!(c, '0'..='9')).parse(input)?;
             if input.len() == __from.len() {
-                return Err(::parserc::Kind::Token(
-                    "DIGIT",
-                    ::parserc::ControlFlow::Recovable,
-                    input.to_span_at(1),
-                )
-                .into());
+                return ::core::result::Result::Err(
+                    ::parserc::Kind::Token(
+                        "DIGIT",
+                        ::parserc::ControlFlow::Recovable,
+                        input.to_span_at(1),
+                    )
+                    .into(),
+                );
             }
             let __taken = __from.len() - input.len();
             Ok(Self(__from.split_to(__taken)))
@@ -146,12 +142,14 @@ where
             })
             .parse(input)?;
             if input.len() == __from.len() {
-                return Err(::parserc::Kind::Token(
-                    "WORD",
-                    ::parserc::ControlFlow::Recovable,
-                    input.to_span_at(1),
-                )
-                .into());
+                return ::core::result::Result::Err(
+                    ::parserc::Kind::Token(
+                        "WORD",
+                        ::parserc::ControlFlow::Recovable,
+                        input.to_span_at(1),
+                    )
+                    .into(),
+                );
             }
             let __taken = __from.len() - input.len();
             Ok(Self(__from.split_to(__taken)))
@@ -183,12 +181,14 @@ where
             let mut __from = input.clone();
             ::parserc::keyword("let").parse(input)?;
             if input.len() == __from.len() {
-                return Err(::parserc::Kind::Token(
-                    "LET",
-                    ::parserc::ControlFlow::Recovable,
-                    input.to_span_at(1),
-                )
-                .into());
+                return ::core::result::Result::Err(
+                    ::parserc::Kind::Token(
+                        "LET",
+                        ::parserc::ControlFlow::Recovable,
+                        input.to_span_at(1),
+                    )
+                    .into(),
+                );
             }
             let __taken = __from.len() - input.len();
             Ok(Self(__from.split_to(__taken)))
@@ -220,12 +220,14 @@ where
             let mut __from = input.clone();
             ::parserc::keyword("fn").parse(input)?;
             if input.len() == __from.len() {
-                return Err(::parserc::Kind::Token(
-                    "FN",
-                    ::parserc::ControlFlow::Recovable,
-                    input.to_span_at(1),
-                )
-                .into());
+                return ::core::result::Result::Err(
+                    ::parserc::Kind::Token(
+                        "FN",
+                        ::parserc::ControlFlow::Recovable,
+                        input.to_span_at(1),
+                    )
+                    .into(),
+                );
             }
             let __taken = __from.len() - input.len();
             Ok(Self(__from.split_to(__taken)))
@@ -267,12 +269,14 @@ where
             )
             .parse(input)?;
             if input.len() == __from.len() {
-                return Err(::parserc::Kind::Token(
-                    "KEYWORDS",
-                    ::parserc::ControlFlow::Recovable,
-                    input.to_span_at(1),
-                )
-                .into());
+                return ::core::result::Result::Err(
+                    ::parserc::Kind::Token(
+                        "KEYWORDS",
+                        ::parserc::ControlFlow::Recovable,
+                        input.to_span_at(1),
+                    )
+                    .into(),
+                );
             }
             let __taken = __from.len() - input.len();
             Ok(Self(__from.split_to(__taken)))
@@ -321,12 +325,14 @@ where
                 .into());
             }
             if input.len() == __from.len() {
-                return Err(::parserc::Kind::Token(
-                    "IDENT",
-                    ::parserc::ControlFlow::Recovable,
-                    input.to_span_at(1),
-                )
-                .into());
+                return ::core::result::Result::Err(
+                    ::parserc::Kind::Token(
+                        "IDENT",
+                        ::parserc::ControlFlow::Recovable,
+                        input.to_span_at(1),
+                    )
+                    .into(),
+                );
             }
             let __taken = __from.len() - input.len();
             Ok(Self(__from.split_to(__taken)))
@@ -343,7 +349,11 @@ where
 }
 #[allow(non_camel_case_types, non_snake_case)]
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
-pub struct OPEN<I>(pub I);
+pub struct OPEN<I>(
+    pub ::core::option::Option<WS<I>>,
+    pub I,
+    pub ::core::option::Option<WS<I>>,
+);
 impl<I> ::parserc::syntax::Syntax<I> for OPEN<I>
 where
     I: ::unsyn::runtime::GeneratedInput,
@@ -355,18 +365,23 @@ where
             syntax::{Syntax, SyntaxInput},
         };
         {
+            let __leading = input.parse::<::core::option::Option<WS<I>>>()?;
             let mut __from = input.clone();
             ::parserc::next_if(|c: char| ::core::matches!(c, '(')).parse(input)?;
             if input.len() == __from.len() {
-                return Err(::parserc::Kind::Token(
-                    "OPEN",
-                    ::parserc::ControlFlow::Recovable,
-                    input.to_span_at(1),
-                )
-                .into());
+                return ::core::result::Result::Err(
+                    ::parserc::Kind::Token(
+                        "OPEN",
+                        ::parserc::ControlFlow::Recovable,
+                        input.to_span_at(1),
+                    )
+                    .into(),
+                );
             }
             let __taken = __from.len() - input.len();
-            Ok(Self(__from.split_to(__taken)))
+            let __own = __from.split_to(__taken);
+            let __trailing = input.parse::<::core::option::Option<WS<I>>>()?;
+            Ok(Self(__leading, __own, __trailing))
         }
     }
     fn to_span(&self) -> ::parserc::Span {
@@ -375,12 +390,18 @@ where
             AsStr, Find, Input, Parser, StartWith,
             syntax::{Syntax, SyntaxInput},
         };
-        self.0.to_span()
+        ::parserc::Span::None
+            .union(&self.0.to_span())
+            .union(&self.1.to_span())
     }
 }
 #[allow(non_camel_case_types, non_snake_case)]
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
-pub struct CLOSE<I>(pub I);
+pub struct CLOSE<I>(
+    pub ::core::option::Option<WS<I>>,
+    pub I,
+    pub ::core::option::Option<WS<I>>,
+);
 impl<I> ::parserc::syntax::Syntax<I> for CLOSE<I>
 where
     I: ::unsyn::runtime::GeneratedInput,
@@ -392,18 +413,23 @@ where
             syntax::{Syntax, SyntaxInput},
         };
         {
+            let __leading = input.parse::<::core::option::Option<WS<I>>>()?;
             let mut __from = input.clone();
             ::parserc::next_if(|c: char| ::core::matches!(c, ')')).parse(input)?;
             if input.len() == __from.len() {
-                return Err(::parserc::Kind::Token(
-                    "CLOSE",
-                    ::parserc::ControlFlow::Recovable,
-                    input.to_span_at(1),
-                )
-                .into());
+                return ::core::result::Result::Err(
+                    ::parserc::Kind::Token(
+                        "CLOSE",
+                        ::parserc::ControlFlow::Recovable,
+                        input.to_span_at(1),
+                    )
+                    .into(),
+                );
             }
             let __taken = __from.len() - input.len();
-            Ok(Self(__from.split_to(__taken)))
+            let __own = __from.split_to(__taken);
+            let __trailing = input.parse::<::core::option::Option<WS<I>>>()?;
+            Ok(Self(__leading, __own, __trailing))
         }
     }
     fn to_span(&self) -> ::parserc::Span {
@@ -412,12 +438,18 @@ where
             AsStr, Find, Input, Parser, StartWith,
             syntax::{Syntax, SyntaxInput},
         };
-        self.0.to_span()
+        ::parserc::Span::None
+            .union(&self.0.to_span())
+            .union(&self.1.to_span())
     }
 }
 #[allow(non_camel_case_types, non_snake_case)]
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
-pub struct COMMA<I>(pub I);
+pub struct COMMA<I>(
+    pub ::core::option::Option<WS<I>>,
+    pub I,
+    pub ::core::option::Option<WS<I>>,
+);
 impl<I> ::parserc::syntax::Syntax<I> for COMMA<I>
 where
     I: ::unsyn::runtime::GeneratedInput,
@@ -429,18 +461,23 @@ where
             syntax::{Syntax, SyntaxInput},
         };
         {
+            let __leading = input.parse::<::core::option::Option<WS<I>>>()?;
             let mut __from = input.clone();
             ::parserc::next_if(|c: char| ::core::matches!(c, ',')).parse(input)?;
             if input.len() == __from.len() {
-                return Err(::parserc::Kind::Token(
-                    "COMMA",
-                    ::parserc::ControlFlow::Recovable,
-                    input.to_span_at(1),
-                )
-                .into());
+                return ::core::result::Result::Err(
+                    ::parserc::Kind::Token(
+                        "COMMA",
+                        ::parserc::ControlFlow::Recovable,
+                        input.to_span_at(1),
+                    )
+                    .into(),
+                );
             }
             let __taken = __from.len() - input.len();
-            Ok(Self(__from.split_to(__taken)))
+            let __own = __from.split_to(__taken);
+            let __trailing = input.parse::<::core::option::Option<WS<I>>>()?;
+            Ok(Self(__leading, __own, __trailing))
         }
     }
     fn to_span(&self) -> ::parserc::Span {
@@ -449,12 +486,18 @@ where
             AsStr, Find, Input, Parser, StartWith,
             syntax::{Syntax, SyntaxInput},
         };
-        self.0.to_span()
+        ::parserc::Span::None
+            .union(&self.0.to_span())
+            .union(&self.1.to_span())
     }
 }
 #[allow(non_camel_case_types, non_snake_case)]
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
-pub struct SEMI<I>(pub I);
+pub struct SEMI<I>(
+    pub ::core::option::Option<WS<I>>,
+    pub I,
+    pub ::core::option::Option<WS<I>>,
+);
 impl<I> ::parserc::syntax::Syntax<I> for SEMI<I>
 where
     I: ::unsyn::runtime::GeneratedInput,
@@ -466,18 +509,23 @@ where
             syntax::{Syntax, SyntaxInput},
         };
         {
+            let __leading = input.parse::<::core::option::Option<WS<I>>>()?;
             let mut __from = input.clone();
             ::parserc::next_if(|c: char| ::core::matches!(c, ';')).parse(input)?;
             if input.len() == __from.len() {
-                return Err(::parserc::Kind::Token(
-                    "SEMI",
-                    ::parserc::ControlFlow::Recovable,
-                    input.to_span_at(1),
-                )
-                .into());
+                return ::core::result::Result::Err(
+                    ::parserc::Kind::Token(
+                        "SEMI",
+                        ::parserc::ControlFlow::Recovable,
+                        input.to_span_at(1),
+                    )
+                    .into(),
+                );
             }
             let __taken = __from.len() - input.len();
-            Ok(Self(__from.split_to(__taken)))
+            let __own = __from.split_to(__taken);
+            let __trailing = input.parse::<::core::option::Option<WS<I>>>()?;
+            Ok(Self(__leading, __own, __trailing))
         }
     }
     fn to_span(&self) -> ::parserc::Span {
@@ -486,12 +534,18 @@ where
             AsStr, Find, Input, Parser, StartWith,
             syntax::{Syntax, SyntaxInput},
         };
-        self.0.to_span()
+        ::parserc::Span::None
+            .union(&self.0.to_span())
+            .union(&self.1.to_span())
     }
 }
 #[allow(non_camel_case_types, non_snake_case)]
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
-pub struct ARROW<I>(pub I);
+pub struct ARROW<I>(
+    pub ::core::option::Option<WS<I>>,
+    pub I,
+    pub ::core::option::Option<WS<I>>,
+);
 impl<I> ::parserc::syntax::Syntax<I> for ARROW<I>
 where
     I: ::unsyn::runtime::GeneratedInput,
@@ -503,18 +557,23 @@ where
             syntax::{Syntax, SyntaxInput},
         };
         {
+            let __leading = input.parse::<::core::option::Option<WS<I>>>()?;
             let mut __from = input.clone();
             ::parserc::keyword("->").parse(input)?;
             if input.len() == __from.len() {
-                return Err(::parserc::Kind::Token(
-                    "ARROW",
-                    ::parserc::ControlFlow::Recovable,
-                    input.to_span_at(1),
-                )
-                .into());
+                return ::core::result::Result::Err(
+                    ::parserc::Kind::Token(
+                        "ARROW",
+                        ::parserc::ControlFlow::Recovable,
+                        input.to_span_at(1),
+                    )
+                    .into(),
+                );
             }
             let __taken = __from.len() - input.len();
-            Ok(Self(__from.split_to(__taken)))
+            let __own = __from.split_to(__taken);
+            let __trailing = input.parse::<::core::option::Option<WS<I>>>()?;
+            Ok(Self(__leading, __own, __trailing))
         }
     }
     fn to_span(&self) -> ::parserc::Span {
@@ -523,12 +582,18 @@ where
             AsStr, Find, Input, Parser, StartWith,
             syntax::{Syntax, SyntaxInput},
         };
-        self.0.to_span()
+        ::parserc::Span::None
+            .union(&self.0.to_span())
+            .union(&self.1.to_span())
     }
 }
 #[allow(non_camel_case_types, non_snake_case)]
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
-pub struct SHARP<I>(pub I);
+pub struct SHARP<I>(
+    pub ::core::option::Option<WS<I>>,
+    pub I,
+    pub ::core::option::Option<WS<I>>,
+);
 impl<I> ::parserc::syntax::Syntax<I> for SHARP<I>
 where
     I: ::unsyn::runtime::GeneratedInput,
@@ -540,18 +605,23 @@ where
             syntax::{Syntax, SyntaxInput},
         };
         {
+            let __leading = input.parse::<::core::option::Option<WS<I>>>()?;
             let mut __from = input.clone();
             ::parserc::next_if(|c: char| ::core::matches!(c, '#')).parse(input)?;
             if input.len() == __from.len() {
-                return Err(::parserc::Kind::Token(
-                    "SHARP",
-                    ::parserc::ControlFlow::Recovable,
-                    input.to_span_at(1),
-                )
-                .into());
+                return ::core::result::Result::Err(
+                    ::parserc::Kind::Token(
+                        "SHARP",
+                        ::parserc::ControlFlow::Recovable,
+                        input.to_span_at(1),
+                    )
+                    .into(),
+                );
             }
             let __taken = __from.len() - input.len();
-            Ok(Self(__from.split_to(__taken)))
+            let __own = __from.split_to(__taken);
+            let __trailing = input.parse::<::core::option::Option<WS<I>>>()?;
+            Ok(Self(__leading, __own, __trailing))
         }
     }
     fn to_span(&self) -> ::parserc::Span {
@@ -560,12 +630,18 @@ where
             AsStr, Find, Input, Parser, StartWith,
             syntax::{Syntax, SyntaxInput},
         };
-        self.0.to_span()
+        ::parserc::Span::None
+            .union(&self.0.to_span())
+            .union(&self.1.to_span())
     }
 }
 #[allow(non_camel_case_types, non_snake_case)]
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
-pub struct LEFT<I>(pub I);
+pub struct LEFT<I>(
+    pub ::core::option::Option<WS<I>>,
+    pub I,
+    pub ::core::option::Option<WS<I>>,
+);
 impl<I> ::parserc::syntax::Syntax<I> for LEFT<I>
 where
     I: ::unsyn::runtime::GeneratedInput,
@@ -577,18 +653,23 @@ where
             syntax::{Syntax, SyntaxInput},
         };
         {
+            let __leading = input.parse::<::core::option::Option<WS<I>>>()?;
             let mut __from = input.clone();
             ::parserc::next_if(|c: char| ::core::matches!(c, '[')).parse(input)?;
             if input.len() == __from.len() {
-                return Err(::parserc::Kind::Token(
-                    "LEFT",
-                    ::parserc::ControlFlow::Recovable,
-                    input.to_span_at(1),
-                )
-                .into());
+                return ::core::result::Result::Err(
+                    ::parserc::Kind::Token(
+                        "LEFT",
+                        ::parserc::ControlFlow::Recovable,
+                        input.to_span_at(1),
+                    )
+                    .into(),
+                );
             }
             let __taken = __from.len() - input.len();
-            Ok(Self(__from.split_to(__taken)))
+            let __own = __from.split_to(__taken);
+            let __trailing = input.parse::<::core::option::Option<WS<I>>>()?;
+            Ok(Self(__leading, __own, __trailing))
         }
     }
     fn to_span(&self) -> ::parserc::Span {
@@ -597,12 +678,18 @@ where
             AsStr, Find, Input, Parser, StartWith,
             syntax::{Syntax, SyntaxInput},
         };
-        self.0.to_span()
+        ::parserc::Span::None
+            .union(&self.0.to_span())
+            .union(&self.1.to_span())
     }
 }
 #[allow(non_camel_case_types, non_snake_case)]
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
-pub struct RIGHT<I>(pub I);
+pub struct RIGHT<I>(
+    pub ::core::option::Option<WS<I>>,
+    pub I,
+    pub ::core::option::Option<WS<I>>,
+);
 impl<I> ::parserc::syntax::Syntax<I> for RIGHT<I>
 where
     I: ::unsyn::runtime::GeneratedInput,
@@ -614,18 +701,23 @@ where
             syntax::{Syntax, SyntaxInput},
         };
         {
+            let __leading = input.parse::<::core::option::Option<WS<I>>>()?;
             let mut __from = input.clone();
             ::parserc::next_if(|c: char| ::core::matches!(c, ']')).parse(input)?;
             if input.len() == __from.len() {
-                return Err(::parserc::Kind::Token(
-                    "RIGHT",
-                    ::parserc::ControlFlow::Recovable,
-                    input.to_span_at(1),
-                )
-                .into());
+                return ::core::result::Result::Err(
+                    ::parserc::Kind::Token(
+                        "RIGHT",
+                        ::parserc::ControlFlow::Recovable,
+                        input.to_span_at(1),
+                    )
+                    .into(),
+                );
             }
             let __taken = __from.len() - input.len();
-            Ok(Self(__from.split_to(__taken)))
+            let __own = __from.split_to(__taken);
+            let __trailing = input.parse::<::core::option::Option<WS<I>>>()?;
+            Ok(Self(__leading, __own, __trailing))
         }
     }
     fn to_span(&self) -> ::parserc::Span {
@@ -634,12 +726,18 @@ where
             AsStr, Find, Input, Parser, StartWith,
             syntax::{Syntax, SyntaxInput},
         };
-        self.0.to_span()
+        ::parserc::Span::None
+            .union(&self.0.to_span())
+            .union(&self.1.to_span())
     }
 }
 #[allow(non_camel_case_types, non_snake_case)]
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
-pub struct TILDE<I>(pub I);
+pub struct TILDE<I>(
+    pub ::core::option::Option<WS<I>>,
+    pub I,
+    pub ::core::option::Option<WS<I>>,
+);
 impl<I> ::parserc::syntax::Syntax<I> for TILDE<I>
 where
     I: ::unsyn::runtime::GeneratedInput,
@@ -651,18 +749,23 @@ where
             syntax::{Syntax, SyntaxInput},
         };
         {
+            let __leading = input.parse::<::core::option::Option<WS<I>>>()?;
             let mut __from = input.clone();
             ::parserc::next_if(|c: char| ::core::matches!(c, '~')).parse(input)?;
             if input.len() == __from.len() {
-                return Err(::parserc::Kind::Token(
-                    "TILDE",
-                    ::parserc::ControlFlow::Recovable,
-                    input.to_span_at(1),
-                )
-                .into());
+                return ::core::result::Result::Err(
+                    ::parserc::Kind::Token(
+                        "TILDE",
+                        ::parserc::ControlFlow::Recovable,
+                        input.to_span_at(1),
+                    )
+                    .into(),
+                );
             }
             let __taken = __from.len() - input.len();
-            Ok(Self(__from.split_to(__taken)))
+            let __own = __from.split_to(__taken);
+            let __trailing = input.parse::<::core::option::Option<WS<I>>>()?;
+            Ok(Self(__leading, __own, __trailing))
         }
     }
     fn to_span(&self) -> ::parserc::Span {
@@ -671,7 +774,9 @@ where
             AsStr, Find, Input, Parser, StartWith,
             syntax::{Syntax, SyntaxInput},
         };
-        self.0.to_span()
+        ::parserc::Span::None
+            .union(&self.0.to_span())
+            .union(&self.1.to_span())
     }
 }
 #[allow(non_camel_case_types, non_snake_case)]
@@ -691,12 +796,14 @@ where
             let mut __from = input.clone();
             ::parserc::take_while_with(1.., |_: char| true).parse(input)?;
             if input.len() == __from.len() {
-                return Err(::parserc::Kind::Token(
-                    "LETTER_OR_ANY",
-                    ::parserc::ControlFlow::Recovable,
-                    input.to_span_at(1),
-                )
-                .into());
+                return ::core::result::Result::Err(
+                    ::parserc::Kind::Token(
+                        "LETTER_OR_ANY",
+                        ::parserc::ControlFlow::Recovable,
+                        input.to_span_at(1),
+                    )
+                    .into(),
+                );
             }
             let __taken = __from.len() - input.len();
             Ok(Self(__from.split_to(__taken)))
@@ -728,12 +835,14 @@ where
             let mut __from = input.clone();
             ::parserc::next_if(|c: char| ::core::matches!(c, '\'')).parse(input)?;
             if input.len() == __from.len() {
-                return Err(::parserc::Kind::Token(
-                    "QUOTE",
-                    ::parserc::ControlFlow::Recovable,
-                    input.to_span_at(1),
-                )
-                .into());
+                return ::core::result::Result::Err(
+                    ::parserc::Kind::Token(
+                        "QUOTE",
+                        ::parserc::ControlFlow::Recovable,
+                        input.to_span_at(1),
+                    )
+                    .into(),
+                );
             }
             let __taken = __from.len() - input.len();
             Ok(Self(__from.split_to(__taken)))
@@ -765,12 +874,14 @@ where
             let mut __from = input.clone();
             ::parserc::next_if(|c: char| ::core::matches!(c, '\\')).parse(input)?;
             if input.len() == __from.len() {
-                return Err(::parserc::Kind::Token(
-                    "BSLASH",
-                    ::parserc::ControlFlow::Recovable,
-                    input.to_span_at(1),
-                )
-                .into());
+                return ::core::result::Result::Err(
+                    ::parserc::Kind::Token(
+                        "BSLASH",
+                        ::parserc::ControlFlow::Recovable,
+                        input.to_span_at(1),
+                    )
+                    .into(),
+                );
             }
             let __taken = __from.len() - input.len();
             Ok(Self(__from.split_to(__taken)))
@@ -802,12 +913,14 @@ where
             let mut __from = input.clone();
             crate::backend::word_start(input)?;
             if input.len() == __from.len() {
-                return Err(::parserc::Kind::Token(
-                    "MATCHER",
-                    ::parserc::ControlFlow::Recovable,
-                    input.to_span_at(1),
-                )
-                .into());
+                return ::core::result::Result::Err(
+                    ::parserc::Kind::Token(
+                        "MATCHER",
+                        ::parserc::ControlFlow::Recovable,
+                        input.to_span_at(1),
+                    )
+                    .into(),
+                );
             }
             let __taken = __from.len() - input.len();
             Ok(Self(__from.split_to(__taken)))
@@ -824,7 +937,11 @@ where
 }
 #[allow(non_camel_case_types, non_snake_case)]
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
-pub struct SLASH<I>(pub I);
+pub struct SLASH<I>(
+    pub ::core::option::Option<WS<I>>,
+    pub I,
+    pub ::core::option::Option<WS<I>>,
+);
 impl<I> ::parserc::syntax::Syntax<I> for SLASH<I>
 where
     I: ::unsyn::runtime::GeneratedInput,
@@ -836,18 +953,23 @@ where
             syntax::{Syntax, SyntaxInput},
         };
         {
+            let __leading = input.parse::<::core::option::Option<WS<I>>>()?;
             let mut __from = input.clone();
             ::parserc::next_if(|c: char| ::core::matches!(c, '/')).parse(input)?;
             if input.len() == __from.len() {
-                return Err(::parserc::Kind::Token(
-                    "SLASH",
-                    ::parserc::ControlFlow::Recovable,
-                    input.to_span_at(1),
-                )
-                .into());
+                return ::core::result::Result::Err(
+                    ::parserc::Kind::Token(
+                        "SLASH",
+                        ::parserc::ControlFlow::Recovable,
+                        input.to_span_at(1),
+                    )
+                    .into(),
+                );
             }
             let __taken = __from.len() - input.len();
-            Ok(Self(__from.split_to(__taken)))
+            let __own = __from.split_to(__taken);
+            let __trailing = input.parse::<::core::option::Option<WS<I>>>()?;
+            Ok(Self(__leading, __own, __trailing))
         }
     }
     fn to_span(&self) -> ::parserc::Span {
@@ -856,7 +978,9 @@ where
             AsStr, Find, Input, Parser, StartWith,
             syntax::{Syntax, SyntaxInput},
         };
-        self.0.to_span()
+        ::parserc::Span::None
+            .union(&self.0.to_span())
+            .union(&self.1.to_span())
     }
 }
 #[allow(non_camel_case_types, non_snake_case)]
@@ -876,12 +1000,14 @@ where
             let mut __from = input.clone();
             ::parserc::next_if(|c: char| ::core::matches!(c, '*')).parse(input)?;
             if input.len() == __from.len() {
-                return Err(::parserc::Kind::Token(
-                    "STAR",
-                    ::parserc::ControlFlow::Recovable,
-                    input.to_span_at(1),
-                )
-                .into());
+                return ::core::result::Result::Err(
+                    ::parserc::Kind::Token(
+                        "STAR",
+                        ::parserc::ControlFlow::Recovable,
+                        input.to_span_at(1),
+                    )
+                    .into(),
+                );
             }
             let __taken = __from.len() - input.len();
             Ok(Self(__from.split_to(__taken)))
@@ -898,7 +1024,11 @@ where
 }
 #[allow(non_camel_case_types, non_snake_case)]
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
-pub struct UNDER<I>(pub I);
+pub struct UNDER<I>(
+    pub ::core::option::Option<WS<I>>,
+    pub I,
+    pub ::core::option::Option<WS<I>>,
+);
 impl<I> ::parserc::syntax::Syntax<I> for UNDER<I>
 where
     I: ::unsyn::runtime::GeneratedInput,
@@ -910,18 +1040,23 @@ where
             syntax::{Syntax, SyntaxInput},
         };
         {
+            let __leading = input.parse::<::core::option::Option<WS<I>>>()?;
             let mut __from = input.clone();
             ::parserc::next_if(|c: char| ::core::matches!(c, '_')).parse(input)?;
             if input.len() == __from.len() {
-                return Err(::parserc::Kind::Token(
-                    "UNDER",
-                    ::parserc::ControlFlow::Recovable,
-                    input.to_span_at(1),
-                )
-                .into());
+                return ::core::result::Result::Err(
+                    ::parserc::Kind::Token(
+                        "UNDER",
+                        ::parserc::ControlFlow::Recovable,
+                        input.to_span_at(1),
+                    )
+                    .into(),
+                );
             }
             let __taken = __from.len() - input.len();
-            Ok(Self(__from.split_to(__taken)))
+            let __own = __from.split_to(__taken);
+            let __trailing = input.parse::<::core::option::Option<WS<I>>>()?;
+            Ok(Self(__leading, __own, __trailing))
         }
     }
     fn to_span(&self) -> ::parserc::Span {
@@ -930,12 +1065,18 @@ where
             AsStr, Find, Input, Parser, StartWith,
             syntax::{Syntax, SyntaxInput},
         };
-        self.0.to_span()
+        ::parserc::Span::None
+            .union(&self.0.to_span())
+            .union(&self.1.to_span())
     }
 }
 #[allow(non_camel_case_types, non_snake_case)]
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
-pub struct Plus<I>(pub I);
+pub struct Plus<I>(
+    pub ::core::option::Option<WS<I>>,
+    pub I,
+    pub ::core::option::Option<WS<I>>,
+);
 impl<I> ::parserc::syntax::Syntax<I> for Plus<I>
 where
     I: ::unsyn::runtime::GeneratedInput,
@@ -947,18 +1088,23 @@ where
             syntax::{Syntax, SyntaxInput},
         };
         {
+            let __leading = input.parse::<::core::option::Option<WS<I>>>()?;
             let mut __from = input.clone();
             ::parserc::next_if(|c: char| ::core::matches!(c, '+')).parse(input)?;
             if input.len() == __from.len() {
-                return Err(::parserc::Kind::Token(
-                    "Plus",
-                    ::parserc::ControlFlow::Recovable,
-                    input.to_span_at(1),
-                )
-                .into());
+                return ::core::result::Result::Err(
+                    ::parserc::Kind::Token(
+                        "Plus",
+                        ::parserc::ControlFlow::Recovable,
+                        input.to_span_at(1),
+                    )
+                    .into(),
+                );
             }
             let __taken = __from.len() - input.len();
-            Ok(Self(__from.split_to(__taken)))
+            let __own = __from.split_to(__taken);
+            let __trailing = input.parse::<::core::option::Option<WS<I>>>()?;
+            Ok(Self(__leading, __own, __trailing))
         }
     }
     fn to_span(&self) -> ::parserc::Span {
@@ -967,12 +1113,18 @@ where
             AsStr, Find, Input, Parser, StartWith,
             syntax::{Syntax, SyntaxInput},
         };
-        self.0.to_span()
+        ::parserc::Span::None
+            .union(&self.0.to_span())
+            .union(&self.1.to_span())
     }
 }
 #[allow(non_camel_case_types, non_snake_case)]
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
-pub struct Minus<I>(pub I);
+pub struct Minus<I>(
+    pub ::core::option::Option<WS<I>>,
+    pub I,
+    pub ::core::option::Option<WS<I>>,
+);
 impl<I> ::parserc::syntax::Syntax<I> for Minus<I>
 where
     I: ::unsyn::runtime::GeneratedInput,
@@ -984,18 +1136,23 @@ where
             syntax::{Syntax, SyntaxInput},
         };
         {
+            let __leading = input.parse::<::core::option::Option<WS<I>>>()?;
             let mut __from = input.clone();
             ::parserc::next_if(|c: char| ::core::matches!(c, '-')).parse(input)?;
             if input.len() == __from.len() {
-                return Err(::parserc::Kind::Token(
-                    "Minus",
-                    ::parserc::ControlFlow::Recovable,
-                    input.to_span_at(1),
-                )
-                .into());
+                return ::core::result::Result::Err(
+                    ::parserc::Kind::Token(
+                        "Minus",
+                        ::parserc::ControlFlow::Recovable,
+                        input.to_span_at(1),
+                    )
+                    .into(),
+                );
             }
             let __taken = __from.len() - input.len();
-            Ok(Self(__from.split_to(__taken)))
+            let __own = __from.split_to(__taken);
+            let __trailing = input.parse::<::core::option::Option<WS<I>>>()?;
+            Ok(Self(__leading, __own, __trailing))
         }
     }
     fn to_span(&self) -> ::parserc::Span {
@@ -1004,12 +1161,18 @@ where
             AsStr, Find, Input, Parser, StartWith,
             syntax::{Syntax, SyntaxInput},
         };
-        self.0.to_span()
+        ::parserc::Span::None
+            .union(&self.0.to_span())
+            .union(&self.1.to_span())
     }
 }
 #[allow(non_camel_case_types, non_snake_case)]
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
-pub struct Underscore<I>(pub I);
+pub struct Underscore<I>(
+    pub ::core::option::Option<WS<I>>,
+    pub I,
+    pub ::core::option::Option<WS<I>>,
+);
 impl<I> ::parserc::syntax::Syntax<I> for Underscore<I>
 where
     I: ::unsyn::runtime::GeneratedInput,
@@ -1021,18 +1184,23 @@ where
             syntax::{Syntax, SyntaxInput},
         };
         {
+            let __leading = input.parse::<::core::option::Option<WS<I>>>()?;
             let mut __from = input.clone();
             ::parserc::next_if(|c: char| ::core::matches!(c, '_')).parse(input)?;
             if input.len() == __from.len() {
-                return Err(::parserc::Kind::Token(
-                    "Underscore",
-                    ::parserc::ControlFlow::Recovable,
-                    input.to_span_at(1),
-                )
-                .into());
+                return ::core::result::Result::Err(
+                    ::parserc::Kind::Token(
+                        "Underscore",
+                        ::parserc::ControlFlow::Recovable,
+                        input.to_span_at(1),
+                    )
+                    .into(),
+                );
             }
             let __taken = __from.len() - input.len();
-            Ok(Self(__from.split_to(__taken)))
+            let __own = __from.split_to(__taken);
+            let __trailing = input.parse::<::core::option::Option<WS<I>>>()?;
+            Ok(Self(__leading, __own, __trailing))
         }
     }
     fn to_span(&self) -> ::parserc::Span {
@@ -1041,7 +1209,9 @@ where
             AsStr, Find, Input, Parser, StartWith,
             syntax::{Syntax, SyntaxInput},
         };
-        self.0.to_span()
+        ::parserc::Span::None
+            .union(&self.0.to_span())
+            .union(&self.1.to_span())
     }
 }
 #[allow(non_camel_case_types, non_snake_case)]
@@ -1062,12 +1232,14 @@ where
             ::parserc::next_if(|c: char| !(::core::matches!(c, '\\') || ::core::matches!(c, '\'')))
                 .parse(input)?;
             if input.len() == __from.len() {
-                return Err(::parserc::Kind::Token(
-                    "TEXT11",
-                    ::parserc::ControlFlow::Recovable,
-                    input.to_span_at(1),
-                )
-                .into());
+                return ::core::result::Result::Err(
+                    ::parserc::Kind::Token(
+                        "TEXT11",
+                        ::parserc::ControlFlow::Recovable,
+                        input.to_span_at(1),
+                    )
+                    .into(),
+                );
             }
             let __taken = __from.len() - input.len();
             Ok(Self(__from.split_to(__taken)))
@@ -1084,7 +1256,11 @@ where
 }
 #[allow(non_camel_case_types, non_snake_case)]
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
-pub struct TEXT12<I>(pub I);
+pub struct TEXT12<I>(
+    pub ::core::option::Option<WS<I>>,
+    pub I,
+    pub ::core::option::Option<WS<I>>,
+);
 impl<I> ::parserc::syntax::Syntax<I> for TEXT12<I>
 where
     I: ::unsyn::runtime::GeneratedInput,
@@ -1096,19 +1272,24 @@ where
             syntax::{Syntax, SyntaxInput},
         };
         {
+            let __leading = input.parse::<::core::option::Option<WS<I>>>()?;
             let mut __from = input.clone();
             ::parserc::next_if(|c: char| (::core::matches!(c, 'n') || ::core::matches!(c, 't')))
                 .parse(input)?;
             if input.len() == __from.len() {
-                return Err(::parserc::Kind::Token(
-                    "TEXT12",
-                    ::parserc::ControlFlow::Recovable,
-                    input.to_span_at(1),
-                )
-                .into());
+                return ::core::result::Result::Err(
+                    ::parserc::Kind::Token(
+                        "TEXT12",
+                        ::parserc::ControlFlow::Recovable,
+                        input.to_span_at(1),
+                    )
+                    .into(),
+                );
             }
             let __taken = __from.len() - input.len();
-            Ok(Self(__from.split_to(__taken)))
+            let __own = __from.split_to(__taken);
+            let __trailing = input.parse::<::core::option::Option<WS<I>>>()?;
+            Ok(Self(__leading, __own, __trailing))
         }
     }
     fn to_span(&self) -> ::parserc::Span {
@@ -1117,7 +1298,9 @@ where
             AsStr, Find, Input, Parser, StartWith,
             syntax::{Syntax, SyntaxInput},
         };
-        self.0.to_span()
+        ::parserc::Span::None
+            .union(&self.0.to_span())
+            .union(&self.1.to_span())
     }
 }
 #[allow(non_camel_case_types, non_snake_case)]
@@ -1137,12 +1320,14 @@ where
             let mut __from = input.clone();
             ::parserc::next_if(|_: char| true).parse(input)?;
             if input.len() == __from.len() {
-                return Err(::parserc::Kind::Token(
-                    "Any",
-                    ::parserc::ControlFlow::Recovable,
-                    input.to_span_at(1),
-                )
-                .into());
+                return ::core::result::Result::Err(
+                    ::parserc::Kind::Token(
+                        "Any",
+                        ::parserc::ControlFlow::Recovable,
+                        input.to_span_at(1),
+                    )
+                    .into(),
+                );
             }
             let __taken = __from.len() - input.len();
             Ok(Self(__from.split_to(__taken)))
@@ -1174,12 +1359,14 @@ where
             let mut __from = input.clone();
             ::parserc::next_if(|c: char| !::core::matches!(c, '*')).parse(input)?;
             if input.len() == __from.len() {
-                return Err(::parserc::Kind::Token(
-                    "Commented11",
-                    ::parserc::ControlFlow::Recovable,
-                    input.to_span_at(1),
-                )
-                .into());
+                return ::core::result::Result::Err(
+                    ::parserc::Kind::Token(
+                        "Commented11",
+                        ::parserc::ControlFlow::Recovable,
+                        input.to_span_at(1),
+                    )
+                    .into(),
+                );
             }
             let __taken = __from.len() - input.len();
             Ok(Self(__from.split_to(__taken)))
@@ -1198,14 +1385,9 @@ where
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
 pub struct ITEM<I>(
     pub KEYWORDS<I>,
-    pub ::std::vec::Vec<WS<I>>,
+    pub ::core::option::Option<WS<I>>,
     pub IDENT<I>,
-    pub ::std::vec::Vec<WS<I>>,
-    pub ARROW<I>,
-    pub ::std::vec::Vec<WS<I>>,
-    pub EXPR<I>,
-    pub ::std::vec::Vec<WS<I>>,
-    pub SEMI<I>,
+    pub ::parserc::syntax::Delimiter<ARROW<I>, SEMI<I>, EXPR<I>>,
 );
 impl<I> ::parserc::syntax::Syntax<I> for ITEM<I>
 where
@@ -1219,14 +1401,9 @@ where
         };
         ::core::result::Result::Ok(Self(
             input.parse::<KEYWORDS<I>>()?,
-            input.parse::<::std::vec::Vec<WS<I>>>()?,
+            input.parse::<::core::option::Option<WS<I>>>()?,
             input.parse::<IDENT<I>>()?,
-            input.parse::<::std::vec::Vec<WS<I>>>()?,
-            input.parse::<ARROW<I>>()?,
-            input.parse::<::std::vec::Vec<WS<I>>>()?,
-            input.parse::<EXPR<I>>()?,
-            input.parse::<::std::vec::Vec<WS<I>>>()?,
-            input.parse::<SEMI<I>>()?,
+            input.parse::<::parserc::syntax::Delimiter<ARROW<I>, SEMI<I>, EXPR<I>>>()?,
         ))
     }
     fn to_span(&self) -> ::parserc::Span {
@@ -1240,18 +1417,19 @@ where
             .union(&self.1.to_span())
             .union(&self.2.to_span())
             .union(&self.3.to_span())
-            .union(&self.4.to_span())
-            .union(&self.5.to_span())
-            .union(&self.6.to_span())
-            .union(&self.7.to_span())
-            .union(&self.8.to_span())
     }
 }
 #[allow(non_camel_case_types, non_snake_case)]
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
 pub struct EXPR<I>(
     pub ::std::boxed::Box<PRIMARY<I>>,
-    pub ::std::vec::Vec<(::std::vec::Vec<WS<I>>, ::std::boxed::Box<EXPR1<I>>)>,
+    pub ::core::option::Option<WS<I>>,
+    pub  ::std::vec::Vec<(
+        ::core::option::Option<WS<I>>,
+        BINOP<I>,
+        ::core::option::Option<WS<I>>,
+        ::std::boxed::Box<PRIMARY<I>>,
+    )>,
 );
 impl<I> ::parserc::syntax::Syntax<I> for EXPR<I>
 where
@@ -1265,8 +1443,13 @@ where
         };
         ::core::result::Result::Ok(Self(
             input.parse::<::std::boxed::Box<PRIMARY<I>>>()?,
-            input.parse::<::std::vec::Vec<(::std::vec::Vec<WS<I>>, ::std::boxed::Box<EXPR1<I>>)>>(
-            )?,
+            input.parse::<::core::option::Option<WS<I>>>()?,
+            input.parse::<::std::vec::Vec<(
+                ::core::option::Option<WS<I>>,
+                BINOP<I>,
+                ::core::option::Option<WS<I>>,
+                ::std::boxed::Box<PRIMARY<I>>,
+            )>>()?,
         ))
     }
     fn to_span(&self) -> ::parserc::Span {
@@ -1278,6 +1461,7 @@ where
         ::parserc::Span::None
             .union(&self.0.to_span())
             .union(&self.1.to_span())
+            .union(&self.2.to_span())
     }
 }
 #[allow(non_camel_case_types, non_snake_case)]
@@ -1364,11 +1548,7 @@ where
 #[allow(non_camel_case_types, non_snake_case)]
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
 pub struct GROUP<I>(
-    pub OPEN<I>,
-    pub ::std::vec::Vec<WS<I>>,
-    pub ::std::boxed::Box<EXPR<I>>,
-    pub ::std::vec::Vec<WS<I>>,
-    pub CLOSE<I>,
+    pub ::parserc::syntax::Delimiter<OPEN<I>, CLOSE<I>, ::std::boxed::Box<EXPR<I>>>,
 );
 impl<I> ::parserc::syntax::Syntax<I> for GROUP<I>
 where
@@ -1380,13 +1560,11 @@ where
             AsStr, Find, Input, Parser, StartWith,
             syntax::{Syntax, SyntaxInput},
         };
-        ::core::result::Result::Ok(Self(
-            input.parse::<OPEN<I>>()?,
-            input.parse::<::std::vec::Vec<WS<I>>>()?,
-            input.parse::<::std::boxed::Box<EXPR<I>>>()?,
-            input.parse::<::std::vec::Vec<WS<I>>>()?,
-            input.parse::<CLOSE<I>>()?,
-        ))
+        ::core::result::Result::Ok(Self(input.parse::<::parserc::syntax::Delimiter<
+            OPEN<I>,
+            CLOSE<I>,
+            ::std::boxed::Box<EXPR<I>>,
+        >>()?))
     }
     fn to_span(&self) -> ::parserc::Span {
         #[allow(unused_imports)]
@@ -1394,21 +1572,12 @@ where
             AsStr, Find, Input, Parser, StartWith,
             syntax::{Syntax, SyntaxInput},
         };
-        ::parserc::Span::None
-            .union(&self.0.to_span())
-            .union(&self.1.to_span())
-            .union(&self.2.to_span())
-            .union(&self.3.to_span())
-            .union(&self.4.to_span())
+        ::parserc::Span::None.union(&self.0.to_span())
     }
 }
 #[allow(non_camel_case_types, non_snake_case)]
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
-pub struct NEGATED<I>(
-    pub TILDE<I>,
-    pub ::std::vec::Vec<WS<I>>,
-    pub ::std::boxed::Box<PRIMARY<I>>,
-);
+pub struct NEGATED<I>(pub TILDE<I>, pub ::std::boxed::Box<PRIMARY<I>>);
 impl<I> ::parserc::syntax::Syntax<I> for NEGATED<I>
 where
     I: ::unsyn::runtime::GeneratedInput,
@@ -1421,7 +1590,6 @@ where
         };
         ::core::result::Result::Ok(Self(
             input.parse::<TILDE<I>>()?,
-            input.parse::<::std::vec::Vec<WS<I>>>()?,
             input.parse::<::std::boxed::Box<PRIMARY<I>>>()?,
         ))
     }
@@ -1434,7 +1602,6 @@ where
         ::parserc::Span::None
             .union(&self.0.to_span())
             .union(&self.1.to_span())
-            .union(&self.2.to_span())
     }
 }
 #[allow(non_camel_case_types, non_snake_case)]
@@ -1562,7 +1729,8 @@ where
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
 pub struct NUMBER<I>(
     pub DIGIT<I>,
-    pub ::std::vec::Vec<(::std::vec::Vec<WS<I>>, NUMBER1<I>)>,
+    pub ::core::option::Option<WS<I>>,
+    pub ::std::vec::Vec<(::core::option::Option<WS<I>>, NUMBER1<I>)>,
 );
 impl<I> ::parserc::syntax::Syntax<I> for NUMBER<I>
 where
@@ -1576,7 +1744,8 @@ where
         };
         ::core::result::Result::Ok(Self(
             input.parse::<DIGIT<I>>()?,
-            input.parse::<::std::vec::Vec<(::std::vec::Vec<WS<I>>, NUMBER1<I>)>>()?,
+            input.parse::<::core::option::Option<WS<I>>>()?,
+            input.parse::<::std::vec::Vec<(::core::option::Option<WS<I>>, NUMBER1<I>)>>()?,
         ))
     }
     fn to_span(&self) -> ::parserc::Span {
@@ -1588,14 +1757,16 @@ where
         ::parserc::Span::None
             .union(&self.0.to_span())
             .union(&self.1.to_span())
+            .union(&self.2.to_span())
     }
 }
 #[allow(non_camel_case_types, non_snake_case)]
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
 pub struct TEXT<I>(
     pub QUOTE<I>,
-    pub ::std::vec::Vec<(::std::vec::Vec<WS<I>>, TEXT1<I>)>,
-    pub ::std::vec::Vec<WS<I>>,
+    pub ::core::option::Option<WS<I>>,
+    pub ::std::vec::Vec<(::core::option::Option<WS<I>>, TEXT1<I>)>,
+    pub ::core::option::Option<WS<I>>,
     pub QUOTE<I>,
 );
 impl<I> ::parserc::syntax::Syntax<I> for TEXT<I>
@@ -1610,8 +1781,9 @@ where
         };
         ::core::result::Result::Ok(Self(
             input.parse::<QUOTE<I>>()?,
-            input.parse::<::std::vec::Vec<(::std::vec::Vec<WS<I>>, TEXT1<I>)>>()?,
-            input.parse::<::std::vec::Vec<WS<I>>>()?,
+            input.parse::<::core::option::Option<WS<I>>>()?,
+            input.parse::<::std::vec::Vec<(::core::option::Option<WS<I>>, TEXT1<I>)>>()?,
+            input.parse::<::core::option::Option<WS<I>>>()?,
             input.parse::<QUOTE<I>>()?,
         ))
     }
@@ -1626,16 +1798,21 @@ where
             .union(&self.1.to_span())
             .union(&self.2.to_span())
             .union(&self.3.to_span())
+            .union(&self.4.to_span())
     }
 }
 #[allow(non_camel_case_types, non_snake_case)]
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
 pub struct PARAMS<I>(
-    pub OPEN<I>,
-    pub ::std::vec::Vec<WS<I>>,
-    pub ::core::option::Option<PARAMS1<I>>,
-    pub ::std::vec::Vec<WS<I>>,
-    pub CLOSE<I>,
+    pub  ::parserc::syntax::Delimiter<
+        OPEN<I>,
+        CLOSE<I>,
+        ::core::option::Option<(
+            IDENT<I>,
+            ::core::option::Option<WS<I>>,
+            ::std::vec::Vec<(COMMA<I>, IDENT<I>)>,
+        )>,
+    >,
 );
 impl<I> ::parserc::syntax::Syntax<I> for PARAMS<I>
 where
@@ -1647,12 +1824,104 @@ where
             AsStr, Find, Input, Parser, StartWith,
             syntax::{Syntax, SyntaxInput},
         };
+        ::core::result::Result::Ok(Self(input.parse::<::parserc::syntax::Delimiter<
+            OPEN<I>,
+            CLOSE<I>,
+            ::core::option::Option<(
+                IDENT<I>,
+                ::core::option::Option<WS<I>>,
+                ::std::vec::Vec<(COMMA<I>, IDENT<I>)>,
+            )>,
+        >>()?))
+    }
+    fn to_span(&self) -> ::parserc::Span {
+        #[allow(unused_imports)]
+        use ::parserc::{
+            AsStr, Find, Input, Parser, StartWith,
+            syntax::{Syntax, SyntaxInput},
+        };
+        ::parserc::Span::None.union(&self.0.to_span())
+    }
+}
+#[allow(non_camel_case_types, non_snake_case)]
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
+pub struct ARGS<I>(
+    pub  ::parserc::syntax::Delimiter<
+        OPEN<I>,
+        CLOSE<I>,
+        ::parserc::syntax::Punctuated<IDENT<I>, COMMA<I>>,
+    >,
+);
+impl<I> ::parserc::syntax::Syntax<I> for ARGS<I>
+where
+    I: ::unsyn::runtime::GeneratedInput,
+{
+    fn parse(input: &mut I) -> ::core::result::Result<Self, <I as ::parserc::Input>::Error> {
+        #[allow(unused_imports)]
+        use ::parserc::{
+            AsStr, Find, Input, Parser, StartWith,
+            syntax::{Syntax, SyntaxInput},
+        };
+        ::core::result::Result::Ok(Self(input.parse::<::parserc::syntax::Delimiter<
+            OPEN<I>,
+            CLOSE<I>,
+            ::parserc::syntax::Punctuated<IDENT<I>, COMMA<I>>,
+        >>()?))
+    }
+    fn to_span(&self) -> ::parserc::Span {
+        #[allow(unused_imports)]
+        use ::parserc::{
+            AsStr, Find, Input, Parser, StartWith,
+            syntax::{Syntax, SyntaxInput},
+        };
+        ::parserc::Span::None.union(&self.0.to_span())
+    }
+}
+#[allow(non_camel_case_types, non_snake_case)]
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
+pub struct PAIRED<I>(pub COMMA<I>, pub SEMI<I>);
+impl<I> ::parserc::syntax::Syntax<I> for PAIRED<I>
+where
+    I: ::unsyn::runtime::GeneratedInput,
+{
+    fn parse(input: &mut I) -> ::core::result::Result<Self, <I as ::parserc::Input>::Error> {
+        #[allow(unused_imports)]
+        use ::parserc::{
+            AsStr, Find, Input, Parser, StartWith,
+            syntax::{Syntax, SyntaxInput},
+        };
+        ::core::result::Result::Ok(Self(input.parse::<COMMA<I>>()?, input.parse::<SEMI<I>>()?))
+    }
+    fn to_span(&self) -> ::parserc::Span {
+        #[allow(unused_imports)]
+        use ::parserc::{
+            AsStr, Find, Input, Parser, StartWith,
+            syntax::{Syntax, SyntaxInput},
+        };
+        ::parserc::Span::None
+            .union(&self.0.to_span())
+            .union(&self.1.to_span())
+    }
+}
+#[allow(non_camel_case_types, non_snake_case)]
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
+pub struct RUNDED<I>(
+    pub TILDE<I>,
+    pub ::parserc::syntax::Delimiter<LEFT<I>, RIGHT<I>, IDENT<I>>,
+);
+impl<I> ::parserc::syntax::Syntax<I> for RUNDED<I>
+where
+    I: ::unsyn::runtime::GeneratedInput,
+{
+    fn parse(input: &mut I) -> ::core::result::Result<Self, <I as ::parserc::Input>::Error> {
+        #[allow(unused_imports)]
+        use ::parserc::{
+            AsStr, Find, Input, Parser, StartWith,
+            syntax::{Syntax, SyntaxInput},
+        };
         ::core::result::Result::Ok(Self(
-            input.parse::<OPEN<I>>()?,
-            input.parse::<::std::vec::Vec<WS<I>>>()?,
-            input.parse::<::core::option::Option<PARAMS1<I>>>()?,
-            input.parse::<::std::vec::Vec<WS<I>>>()?,
-            input.parse::<CLOSE<I>>()?,
+            input.parse::<TILDE<I>>()?,
+            input.parse::<::parserc::syntax::Delimiter<LEFT<I>, RIGHT<I>, IDENT<I>>>()?,
         ))
     }
     fn to_span(&self) -> ::parserc::Span {
@@ -1664,18 +1933,16 @@ where
         ::parserc::Span::None
             .union(&self.0.to_span())
             .union(&self.1.to_span())
-            .union(&self.2.to_span())
-            .union(&self.3.to_span())
-            .union(&self.4.to_span())
     }
 }
 #[allow(non_camel_case_types, non_snake_case)]
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
 pub struct LIST<I>(
-    pub OPEN<I>,
-    pub ::std::vec::Vec<(::std::vec::Vec<WS<I>>, IDENT<I>)>,
-    pub ::std::vec::Vec<WS<I>>,
-    pub CLOSE<I>,
+    pub  ::parserc::syntax::Delimiter<
+        OPEN<I>,
+        CLOSE<I>,
+        ::std::vec::Vec<(::core::option::Option<WS<I>>, IDENT<I>)>,
+    >,
 );
 impl<I> ::parserc::syntax::Syntax<I> for LIST<I>
 where
@@ -1687,12 +1954,11 @@ where
             AsStr, Find, Input, Parser, StartWith,
             syntax::{Syntax, SyntaxInput},
         };
-        ::core::result::Result::Ok(Self(
-            input.parse::<OPEN<I>>()?,
-            input.parse::<::std::vec::Vec<(::std::vec::Vec<WS<I>>, IDENT<I>)>>()?,
-            input.parse::<::std::vec::Vec<WS<I>>>()?,
-            input.parse::<CLOSE<I>>()?,
-        ))
+        ::core::result::Result::Ok(Self(input.parse::<::parserc::syntax::Delimiter<
+            OPEN<I>,
+            CLOSE<I>,
+            ::std::vec::Vec<(::core::option::Option<WS<I>>, IDENT<I>)>,
+        >>()?))
     }
     fn to_span(&self) -> ::parserc::Span {
         #[allow(unused_imports)]
@@ -1700,22 +1966,60 @@ where
             AsStr, Find, Input, Parser, StartWith,
             syntax::{Syntax, SyntaxInput},
         };
-        ::parserc::Span::None
-            .union(&self.0.to_span())
-            .union(&self.1.to_span())
-            .union(&self.2.to_span())
-            .union(&self.3.to_span())
+        ::parserc::Span::None.union(&self.0.to_span())
+    }
+}
+#[allow(non_camel_case_types, non_snake_case)]
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
+pub struct SPACED<I>(
+    pub  ::parserc::syntax::Delimiter<
+        OPEN<I>,
+        CLOSE<I>,
+        (
+            IDENT<I>,
+            ::std::vec::Vec<(::core::option::Option<WS<I>>, IDENT<I>)>,
+        ),
+    >,
+);
+impl<I> ::parserc::syntax::Syntax<I> for SPACED<I>
+where
+    I: ::unsyn::runtime::GeneratedInput,
+{
+    fn parse(input: &mut I) -> ::core::result::Result<Self, <I as ::parserc::Input>::Error> {
+        #[allow(unused_imports)]
+        use ::parserc::{
+            AsStr, Find, Input, Parser, StartWith,
+            syntax::{Syntax, SyntaxInput},
+        };
+        ::core::result::Result::Ok(Self(input.parse::<::parserc::syntax::Delimiter<
+            OPEN<I>,
+            CLOSE<I>,
+            (
+                IDENT<I>,
+                ::std::vec::Vec<(::core::option::Option<WS<I>>, IDENT<I>)>,
+            ),
+        >>()?))
+    }
+    fn to_span(&self) -> ::parserc::Span {
+        #[allow(unused_imports)]
+        use ::parserc::{
+            AsStr, Find, Input, Parser, StartWith,
+            syntax::{Syntax, SyntaxInput},
+        };
+        ::parserc::Span::None.union(&self.0.to_span())
     }
 }
 #[allow(non_camel_case_types, non_snake_case)]
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
 pub struct TUPLE<I>(
-    pub OPEN<I>,
-    pub ::std::vec::Vec<WS<I>>,
-    pub IDENT<I>,
-    pub ::std::vec::Vec<(::std::vec::Vec<WS<I>>, TUPLE1<I>)>,
-    pub ::std::vec::Vec<WS<I>>,
-    pub CLOSE<I>,
+    pub  ::parserc::syntax::Delimiter<
+        OPEN<I>,
+        CLOSE<I>,
+        (
+            IDENT<I>,
+            ((COMMA<I>, IDENT<I>), ::std::vec::Vec<(COMMA<I>, IDENT<I>)>),
+        ),
+    >,
 );
 impl<I> ::parserc::syntax::Syntax<I> for TUPLE<I>
 where
@@ -1727,28 +2031,14 @@ where
             AsStr, Find, Input, Parser, StartWith,
             syntax::{Syntax, SyntaxInput},
         };
-        ::core::result::Result::Ok(Self(
-            input.parse::<OPEN<I>>()?,
-            input.parse::<::std::vec::Vec<WS<I>>>()?,
-            input.parse::<IDENT<I>>()?,
-            {
-                let __run =
-                    input.parse::<::std::vec::Vec<(::std::vec::Vec<WS<I>>, TUPLE1<I>)>>()?;
-                if __run.is_empty() {
-                    return ::core::result::Result::Err(
-                        ::parserc::Kind::Syntax(
-                            "TUPLE",
-                            ::parserc::ControlFlow::Recovable,
-                            input.to_span_at(1),
-                        )
-                        .into(),
-                    );
-                }
-                __run
-            },
-            input.parse::<::std::vec::Vec<WS<I>>>()?,
-            input.parse::<CLOSE<I>>()?,
-        ))
+        ::core::result::Result::Ok(Self(input.parse::<::parserc::syntax::Delimiter<
+            OPEN<I>,
+            CLOSE<I>,
+            (
+                IDENT<I>,
+                ((COMMA<I>, IDENT<I>), ::std::vec::Vec<(COMMA<I>, IDENT<I>)>),
+            ),
+        >>()?))
     }
     fn to_span(&self) -> ::parserc::Span {
         #[allow(unused_imports)]
@@ -1756,13 +2046,7 @@ where
             AsStr, Find, Input, Parser, StartWith,
             syntax::{Syntax, SyntaxInput},
         };
-        ::parserc::Span::None
-            .union(&self.0.to_span())
-            .union(&self.1.to_span())
-            .union(&self.2.to_span())
-            .union(&self.3.to_span())
-            .union(&self.4.to_span())
-            .union(&self.5.to_span())
+        ::parserc::Span::None.union(&self.0.to_span())
     }
 }
 #[allow(non_camel_case_types, non_snake_case)]
@@ -1798,7 +2082,8 @@ where
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
 pub struct ANYONE<I>(
     pub ANYONE1<I>,
-    pub ::std::vec::Vec<(::std::vec::Vec<WS<I>>, ANYONE2<I>)>,
+    pub ::core::option::Option<WS<I>>,
+    pub ::std::vec::Vec<(::core::option::Option<WS<I>>, ANYONE2<I>)>,
 );
 impl<I> ::parserc::syntax::Syntax<I> for ANYONE<I>
 where
@@ -1812,41 +2097,8 @@ where
         };
         ::core::result::Result::Ok(Self(
             input.parse::<ANYONE1<I>>()?,
-            input.parse::<::std::vec::Vec<(::std::vec::Vec<WS<I>>, ANYONE2<I>)>>()?,
-        ))
-    }
-    fn to_span(&self) -> ::parserc::Span {
-        #[allow(unused_imports)]
-        use ::parserc::{
-            AsStr, Find, Input, Parser, StartWith,
-            syntax::{Syntax, SyntaxInput},
-        };
-        ::parserc::Span::None
-            .union(&self.0.to_span())
-            .union(&self.1.to_span())
-    }
-}
-#[allow(non_camel_case_types, non_snake_case)]
-#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
-pub struct Joined<I>(
-    pub (DIGIT<I>, UNDER<I>),
-    pub ::std::vec::Vec<WS<I>>,
-    pub DIGIT<I>,
-);
-impl<I> ::parserc::syntax::Syntax<I> for Joined<I>
-where
-    I: ::unsyn::runtime::GeneratedInput,
-{
-    fn parse(input: &mut I) -> ::core::result::Result<Self, <I as ::parserc::Input>::Error> {
-        #[allow(unused_imports)]
-        use ::parserc::{
-            AsStr, Find, Input, Parser, StartWith,
-            syntax::{Syntax, SyntaxInput},
-        };
-        ::core::result::Result::Ok(Self(
-            input.parse::<(DIGIT<I>, UNDER<I>)>()?,
-            input.parse::<::std::vec::Vec<WS<I>>>()?,
-            input.parse::<DIGIT<I>>()?,
+            input.parse::<::core::option::Option<WS<I>>>()?,
+            input.parse::<::std::vec::Vec<(::core::option::Option<WS<I>>, ANYONE2<I>)>>()?,
         ))
     }
     fn to_span(&self) -> ::parserc::Span {
@@ -1859,6 +2111,35 @@ where
             .union(&self.0.to_span())
             .union(&self.1.to_span())
             .union(&self.2.to_span())
+    }
+}
+#[allow(non_camel_case_types, non_snake_case)]
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
+pub struct Joined<I>(pub (DIGIT<I>, UNDER<I>), pub DIGIT<I>);
+impl<I> ::parserc::syntax::Syntax<I> for Joined<I>
+where
+    I: ::unsyn::runtime::GeneratedInput,
+{
+    fn parse(input: &mut I) -> ::core::result::Result<Self, <I as ::parserc::Input>::Error> {
+        #[allow(unused_imports)]
+        use ::parserc::{
+            AsStr, Find, Input, Parser, StartWith,
+            syntax::{Syntax, SyntaxInput},
+        };
+        ::core::result::Result::Ok(Self(
+            input.parse::<(DIGIT<I>, UNDER<I>)>()?,
+            input.parse::<DIGIT<I>>()?,
+        ))
+    }
+    fn to_span(&self) -> ::parserc::Span {
+        #[allow(unused_imports)]
+        use ::parserc::{
+            AsStr, Find, Input, Parser, StartWith,
+            syntax::{Syntax, SyntaxInput},
+        };
+        ::parserc::Span::None
+            .union(&self.0.to_span())
+            .union(&self.1.to_span())
     }
 }
 #[allow(non_camel_case_types, non_snake_case)]
@@ -1889,12 +2170,11 @@ where
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
 pub struct Commented<I>(
     pub SLASH<I>,
-    pub ::std::vec::Vec<WS<I>>,
     pub STAR<I>,
-    pub ::std::vec::Vec<(::std::vec::Vec<WS<I>>, Commented1<I>)>,
-    pub ::std::vec::Vec<WS<I>>,
+    pub ::core::option::Option<WS<I>>,
+    pub ::std::vec::Vec<(::core::option::Option<WS<I>>, Commented1<I>)>,
+    pub ::core::option::Option<WS<I>>,
     pub STAR<I>,
-    pub ::std::vec::Vec<WS<I>>,
     pub SLASH<I>,
 );
 impl<I> ::parserc::syntax::Syntax<I> for Commented<I>
@@ -1909,12 +2189,11 @@ where
         };
         ::core::result::Result::Ok(Self(
             input.parse::<SLASH<I>>()?,
-            input.parse::<::std::vec::Vec<WS<I>>>()?,
             input.parse::<STAR<I>>()?,
-            input.parse::<::std::vec::Vec<(::std::vec::Vec<WS<I>>, Commented1<I>)>>()?,
-            input.parse::<::std::vec::Vec<WS<I>>>()?,
+            input.parse::<::core::option::Option<WS<I>>>()?,
+            input.parse::<::std::vec::Vec<(::core::option::Option<WS<I>>, Commented1<I>)>>()?,
+            input.parse::<::core::option::Option<WS<I>>>()?,
             input.parse::<STAR<I>>()?,
-            input.parse::<::std::vec::Vec<WS<I>>>()?,
             input.parse::<SLASH<I>>()?,
         ))
     }
@@ -1932,18 +2211,11 @@ where
             .union(&self.4.to_span())
             .union(&self.5.to_span())
             .union(&self.6.to_span())
-            .union(&self.7.to_span())
     }
 }
 #[allow(non_camel_case_types, non_snake_case)]
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
-pub struct Either<I>(
-    pub Either1<I>,
-    pub ::std::vec::Vec<WS<I>>,
-    pub LEFT<I>,
-    pub ::std::vec::Vec<WS<I>>,
-    pub IDENT<I>,
-);
+pub struct Either<I>(pub Either1<I>, pub LEFT<I>, pub IDENT<I>);
 impl<I> ::parserc::syntax::Syntax<I> for Either<I>
 where
     I: ::unsyn::runtime::GeneratedInput,
@@ -1956,9 +2228,7 @@ where
         };
         ::core::result::Result::Ok(Self(
             input.parse::<Either1<I>>()?,
-            input.parse::<::std::vec::Vec<WS<I>>>()?,
             input.parse::<LEFT<I>>()?,
-            input.parse::<::std::vec::Vec<WS<I>>>()?,
             input.parse::<IDENT<I>>()?,
         ))
     }
@@ -1972,8 +2242,6 @@ where
             .union(&self.0.to_span())
             .union(&self.1.to_span())
             .union(&self.2.to_span())
-            .union(&self.3.to_span())
-            .union(&self.4.to_span())
     }
 }
 #[allow(non_camel_case_types, non_snake_case)]
@@ -1998,41 +2266,6 @@ where
             syntax::{Syntax, SyntaxInput},
         };
         ::parserc::Span::None.union(&self.0.to_span())
-    }
-}
-#[allow(non_camel_case_types, non_snake_case)]
-#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
-pub struct EXPR1<I>(
-    pub BINOP<I>,
-    pub ::std::vec::Vec<WS<I>>,
-    pub ::std::boxed::Box<PRIMARY<I>>,
-);
-impl<I> ::parserc::syntax::Syntax<I> for EXPR1<I>
-where
-    I: ::unsyn::runtime::GeneratedInput,
-{
-    fn parse(input: &mut I) -> ::core::result::Result<Self, <I as ::parserc::Input>::Error> {
-        #[allow(unused_imports)]
-        use ::parserc::{
-            AsStr, Find, Input, Parser, StartWith,
-            syntax::{Syntax, SyntaxInput},
-        };
-        ::core::result::Result::Ok(Self(
-            input.parse::<BINOP<I>>()?,
-            input.parse::<::std::vec::Vec<WS<I>>>()?,
-            input.parse::<::std::boxed::Box<PRIMARY<I>>>()?,
-        ))
-    }
-    fn to_span(&self) -> ::parserc::Span {
-        #[allow(unused_imports)]
-        use ::parserc::{
-            AsStr, Find, Input, Parser, StartWith,
-            syntax::{Syntax, SyntaxInput},
-        };
-        ::parserc::Span::None
-            .union(&self.0.to_span())
-            .union(&self.1.to_span())
-            .union(&self.2.to_span())
     }
 }
 #[allow(non_camel_case_types, non_snake_case)]
@@ -2094,7 +2327,7 @@ where
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
 pub enum TEXT1<I> {
     TEXT1Tilde(TEXT11<I>),
-    TEXT1BSLASH(BSLASH<I>, ::std::vec::Vec<WS<I>>, TEXT12<I>),
+    TEXT1BSLASH(BSLASH<I>, TEXT12<I>),
 }
 impl<I> ::parserc::syntax::Syntax<I> for TEXT1<I>
 where
@@ -2119,7 +2352,6 @@ where
             (|input: &mut I| -> ::core::result::Result<Self, <I as ::parserc::Input>::Error> {
                 ::core::result::Result::Ok(Self::TEXT1BSLASH(
                     input.parse::<BSLASH<I>>()?,
-                    input.parse::<::std::vec::Vec<WS<I>>>()?,
                     input.parse::<TEXT12<I>>()?,
                 ))
             })
@@ -2145,110 +2377,15 @@ where
         };
         match self {
             Self::TEXT1Tilde(__0) => ::parserc::Span::None.union(&__0.to_span()),
-            Self::TEXT1BSLASH(__0, __1, __2) => ::parserc::Span::None
+            Self::TEXT1BSLASH(__0, __1) => ::parserc::Span::None
                 .union(&__0.to_span())
-                .union(&__1.to_span())
-                .union(&__2.to_span()),
+                .union(&__1.to_span()),
         }
     }
 }
 #[allow(non_camel_case_types, non_snake_case)]
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
-pub struct PARAMS11<I>(pub COMMA<I>, pub ::std::vec::Vec<WS<I>>, pub IDENT<I>);
-impl<I> ::parserc::syntax::Syntax<I> for PARAMS11<I>
-where
-    I: ::unsyn::runtime::GeneratedInput,
-{
-    fn parse(input: &mut I) -> ::core::result::Result<Self, <I as ::parserc::Input>::Error> {
-        #[allow(unused_imports)]
-        use ::parserc::{
-            AsStr, Find, Input, Parser, StartWith,
-            syntax::{Syntax, SyntaxInput},
-        };
-        ::core::result::Result::Ok(Self(
-            input.parse::<COMMA<I>>()?,
-            input.parse::<::std::vec::Vec<WS<I>>>()?,
-            input.parse::<IDENT<I>>()?,
-        ))
-    }
-    fn to_span(&self) -> ::parserc::Span {
-        #[allow(unused_imports)]
-        use ::parserc::{
-            AsStr, Find, Input, Parser, StartWith,
-            syntax::{Syntax, SyntaxInput},
-        };
-        ::parserc::Span::None
-            .union(&self.0.to_span())
-            .union(&self.1.to_span())
-            .union(&self.2.to_span())
-    }
-}
-#[allow(non_camel_case_types, non_snake_case)]
-#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
-pub struct PARAMS1<I>(
-    pub IDENT<I>,
-    pub ::std::vec::Vec<(::std::vec::Vec<WS<I>>, PARAMS11<I>)>,
-);
-impl<I> ::parserc::syntax::Syntax<I> for PARAMS1<I>
-where
-    I: ::unsyn::runtime::GeneratedInput,
-{
-    fn parse(input: &mut I) -> ::core::result::Result<Self, <I as ::parserc::Input>::Error> {
-        #[allow(unused_imports)]
-        use ::parserc::{
-            AsStr, Find, Input, Parser, StartWith,
-            syntax::{Syntax, SyntaxInput},
-        };
-        ::core::result::Result::Ok(Self(
-            input.parse::<IDENT<I>>()?,
-            input.parse::<::std::vec::Vec<(::std::vec::Vec<WS<I>>, PARAMS11<I>)>>()?,
-        ))
-    }
-    fn to_span(&self) -> ::parserc::Span {
-        #[allow(unused_imports)]
-        use ::parserc::{
-            AsStr, Find, Input, Parser, StartWith,
-            syntax::{Syntax, SyntaxInput},
-        };
-        ::parserc::Span::None
-            .union(&self.0.to_span())
-            .union(&self.1.to_span())
-    }
-}
-#[allow(non_camel_case_types, non_snake_case)]
-#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
-pub struct TUPLE1<I>(pub COMMA<I>, pub ::std::vec::Vec<WS<I>>, pub IDENT<I>);
-impl<I> ::parserc::syntax::Syntax<I> for TUPLE1<I>
-where
-    I: ::unsyn::runtime::GeneratedInput,
-{
-    fn parse(input: &mut I) -> ::core::result::Result<Self, <I as ::parserc::Input>::Error> {
-        #[allow(unused_imports)]
-        use ::parserc::{
-            AsStr, Find, Input, Parser, StartWith,
-            syntax::{Syntax, SyntaxInput},
-        };
-        ::core::result::Result::Ok(Self(
-            input.parse::<COMMA<I>>()?,
-            input.parse::<::std::vec::Vec<WS<I>>>()?,
-            input.parse::<IDENT<I>>()?,
-        ))
-    }
-    fn to_span(&self) -> ::parserc::Span {
-        #[allow(unused_imports)]
-        use ::parserc::{
-            AsStr, Find, Input, Parser, StartWith,
-            syntax::{Syntax, SyntaxInput},
-        };
-        ::parserc::Span::None
-            .union(&self.0.to_span())
-            .union(&self.1.to_span())
-            .union(&self.2.to_span())
-    }
-}
-#[allow(non_camel_case_types, non_snake_case)]
-#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
-pub struct SHAPE1<I>(pub ::std::vec::Vec<(::std::vec::Vec<WS<I>>, DIGIT<I>)>);
+pub struct SHAPE1<I>(pub ::std::vec::Vec<(::core::option::Option<WS<I>>, DIGIT<I>)>);
 impl<I> ::parserc::syntax::Syntax<I> for SHAPE1<I>
 where
     I: ::unsyn::runtime::GeneratedInput,
@@ -2264,8 +2401,8 @@ where
             if __items.len() >= 4 {
                 break;
             }
-            let ::core::option::Option::Some(__next) =
-                input.parse::<::core::option::Option<(::std::vec::Vec<WS<I>>, DIGIT<I>)>>()?
+            let ::core::option::Option::Some(__next) = input
+                .parse::<::core::option::Option<(::core::option::Option<WS<I>>, DIGIT<I>)>>()?
             else {
                 break;
             };
@@ -2559,7 +2696,7 @@ where
 }
 #[allow(non_camel_case_types, non_snake_case)]
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
-pub struct Dotted1<I>(pub ::std::vec::Vec<(::std::vec::Vec<WS<I>>, IDENT<I>)>);
+pub struct Dotted1<I>(pub ::std::vec::Vec<(::core::option::Option<WS<I>>, IDENT<I>)>);
 impl<I> ::parserc::syntax::Syntax<I> for Dotted1<I>
 where
     I: ::unsyn::runtime::GeneratedInput,
@@ -2575,8 +2712,8 @@ where
             if __items.len() >= 3 {
                 break;
             }
-            let ::core::option::Option::Some(__next) =
-                input.parse::<::core::option::Option<(::std::vec::Vec<WS<I>>, IDENT<I>)>>()?
+            let ::core::option::Option::Some(__next) = input
+                .parse::<::core::option::Option<(::core::option::Option<WS<I>>, IDENT<I>)>>()?
             else {
                 break;
             };

@@ -18,7 +18,7 @@
 
 use parserc::{
     BeforeSpan, ControlFlow, Kind,
-    syntax::{Punctuated, Syntax},
+    syntax::{Delimiter, Punctuated, Syntax},
 };
 
 use crate::{
@@ -43,6 +43,11 @@ use crate::{
 ///   declares exactly one;
 /// * `lexer` for a token, matched against the source text;
 /// * `syntax` for a node of the tree, built from the tokens it refers to.
+///
+/// The `->` and the `;` are one field rather than three, because they are the two
+/// ends of the run the definition is written between: that is the shape
+/// `bootstrap.uns:167` gives this rule to the generator. The name stays a field of
+/// its own, since it keeps no trivia and the `->` reaches the run before it.
 #[derive(Debug, PartialEq, Eq, PartialOrd, Ord, Clone, Syntax)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub enum Stmt<I>
@@ -55,12 +60,8 @@ where
         keyword: Whitespace<I>,
         /// node name.
         ident: Ident<I>,
-        /// separator punct `->`
-        arrow_right: ArrowRight<I>,
-        /// node definition expression
-        expr: Expr<I>,
-        /// Termination punct `;`
-        semi: Semi<I>,
+        /// the `->` … `;` the definition is written between
+        definition: Delimiter<ArrowRight<I>, Semi<I>, Expr<I>>,
     },
     Lexer {
         /// keyword `lexer`
@@ -68,12 +69,8 @@ where
         keyword: Lexer<I>,
         /// node name.
         ident: Ident<I>,
-        /// separator punct `->`
-        arrow_right: ArrowRight<I>,
-        /// node definition expression
-        expr: Expr<I>,
-        /// Termination punct `;`
-        semi: Semi<I>,
+        /// the `->` … `;` the definition is written between
+        definition: Delimiter<ArrowRight<I>, Semi<I>, Expr<I>>,
     },
 
     Syntax {
@@ -82,12 +79,8 @@ where
         keyword: crate::lexical::keyword::Syntax<I>,
         /// node name.
         ident: Ident<I>,
-        /// separator punct `->`
-        arrow_right: ArrowRight<I>,
-        /// node definition expression
-        expr: Expr<I>,
-        /// Termination punct `;`
-        semi: Semi<I>,
+        /// the `->` … `;` the definition is written between
+        definition: Delimiter<ArrowRight<I>, Semi<I>, Expr<I>>,
     },
 }
 
@@ -612,42 +605,44 @@ mod tests {
                     Some(S(TokenStream::from((5, " "))))
                 ),
                 ident: Ident(TokenStream::from((6, "OCT_DIGIT"))),
-                arrow_right: ArrowRight(
-                    Some(S(TokenStream::from((15, " ")))),
-                    TokenStream::from((16, "->")),
-                    Some(S(TokenStream::from((18, " ")))),
-                ),
-                expr: Expr {
-                    first: ExprNoTopAlts {
-                        first: ExprNoTopAlt::WithoutSuffix(ExprWithoutSuffix::Set(Bracket {
-                            start: BracketStart(None, TokenStream::from((19, "[")), None),
-                            end: BracketEnd(None, TokenStream::from((27, "]")), None),
-                            body: Punctuated {
-                                pairs: vec![],
-                                tail: Some(Box::new(SetItem::Range(Range::Str(
-                                    LitStr {
-                                        delimiter_start: TokenStream::from((20, "\'")),
-                                        content: vec![StrSegment::CharWithException(
-                                            TokenStream::from((21, "0")),
-                                        )],
-                                        delimiter_end: TokenStream::from((22, "\'")),
-                                    },
-                                    Minus(None, TokenStream::from((23, "-")), None),
-                                    LitStr {
-                                        delimiter_start: TokenStream::from((24, "\'")),
-                                        content: vec![StrSegment::CharWithException(
-                                            TokenStream::from((25, "7")),
-                                        )],
-                                        delimiter_end: TokenStream::from((26, "\'")),
-                                    },
-                                )))),
-                            },
-                        })),
+                definition: Delimiter {
+                    start: ArrowRight(
+                        Some(S(TokenStream::from((15, " ")))),
+                        TokenStream::from((16, "->")),
+                        Some(S(TokenStream::from((18, " ")))),
+                    ),
+                    body: Expr {
+                        first: ExprNoTopAlts {
+                            first: ExprNoTopAlt::WithoutSuffix(ExprWithoutSuffix::Set(Bracket {
+                                start: BracketStart(None, TokenStream::from((19, "[")), None),
+                                end: BracketEnd(None, TokenStream::from((27, "]")), None),
+                                body: Punctuated {
+                                    pairs: vec![],
+                                    tail: Some(Box::new(SetItem::Range(Range::Str(
+                                        LitStr {
+                                            delimiter_start: TokenStream::from((20, "\'")),
+                                            content: vec![StrSegment::CharWithException(
+                                                TokenStream::from((21, "0")),
+                                            )],
+                                            delimiter_end: TokenStream::from((22, "\'")),
+                                        },
+                                        Minus(None, TokenStream::from((23, "-")), None),
+                                        LitStr {
+                                            delimiter_start: TokenStream::from((24, "\'")),
+                                            content: vec![StrSegment::CharWithException(
+                                                TokenStream::from((25, "7")),
+                                            )],
+                                            delimiter_end: TokenStream::from((26, "\'")),
+                                        },
+                                    )))),
+                                },
+                            })),
+                            rest: vec![],
+                        },
                         rest: vec![],
                     },
-                    rest: vec![],
+                    end: Semi(None, TokenStream::from((28, ";")), None),
                 },
-                semi: Semi(None, TokenStream::from((28, ";")), None),
             })
         );
     }
@@ -675,6 +670,26 @@ mod tests {
                 .parse::<Stmt<_>>()
                 .is_ok()
         );
+
+        // The `;` closes the run the definition is written in, so whatever else
+        // stands where it should be is reported there rather than ending the
+        // statement early and reading the rest as a second one.
+        for (source, where_) in [
+            ("lexer A -> 'a'", Span::Range(14..14)),
+            ("lexer A -> 'a' )", Span::Range(15..16)),
+            ("lexer A -> 'a' lexer", Span::Range(14..14)),
+            ("lexer A -> 'a' |", Span::Range(15..16)),
+        ] {
+            assert_eq!(
+                TokenStream::from(source).parse::<Stmt<_>>(),
+                Err(UnsynError::Punct(
+                    PunctKind::Semi,
+                    ControlFlow::Fatal,
+                    where_
+                )),
+                "{source}"
+            );
+        }
     }
 
     /// An expression that has no operand at all is reported as the node that is

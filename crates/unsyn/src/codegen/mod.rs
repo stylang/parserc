@@ -128,7 +128,7 @@ use crate::syntax::SetItem;
 use name::is_type_name;
 use pattern::{PatternBuilder, RuleNames, TokenPattern};
 use render::Renderer;
-use types::{TypeBuilder, TypeDef};
+use types::{Trivia, TypeBuilder, TypeDef};
 
 /// A set of characters written inside a rule of nodes.
 pub(crate) type SetOf<I> = Bracket<I, Punctuated<SetItem<I>, Comma<I>>>;
@@ -224,9 +224,10 @@ impl Default for Codegen {
 /// about the grammar is settled here, and nothing about how the Rust file is
 /// written is.
 pub(crate) struct Plan {
-    /// The name of the whitespace rule's type, which is what every separator
-    /// names, or nothing when the file declares no trivia.
-    whitespace: Option<String>,
+    /// Where the runs of trivia of the file's language are kept, which is the
+    /// answer to the four tests [`ownership`] gives once every pattern and every
+    /// type has been read.
+    trivia: Trivia,
     /// The types that read text: the file's own rules, then the token types the
     /// node rules needed.
     token_patterns: Vec<TokenPattern>,
@@ -424,8 +425,17 @@ impl Codegen {
         token_patterns.extend(built);
         type_defs.extend(more);
 
+        // Both halves of the file have now been read, so the four tests that
+        // decide where each run of trivia is kept can be made, and the shapes
+        // that keep them folded into the types.
+        let classes = scan::classes(&token_patterns);
+        let owning = ownership(&token_patterns, whitespace.as_deref(), &classes);
+        let trivia = Trivia::new(whitespace, owning);
+
+        trivia.settle(&mut type_defs);
+
         Ok(Plan {
-            whitespace,
+            trivia,
             token_patterns,
             type_defs,
         })
@@ -440,7 +450,7 @@ impl Codegen {
             &self.externals,
             &self.visibility,
             &self.derives,
-            plan.whitespace.as_deref(),
+            &plan.trivia,
         );
         let edges = plan.edges();
         let mut items = Vec::new();
@@ -504,6 +514,74 @@ impl Plan {
             .cloned()
             .collect()
     }
+}
+
+/// The terminals that keep the trivia on either side of themselves, with the
+/// fixed strings each of them matches.
+///
+/// Four tests decide it, all of them read off the shape of a pattern and off who
+/// reaches it, never off what the characters of the described language happen to
+/// be:
+///
+/// - the pattern denotes finitely many fixed strings ([`Step::fixed_strings`]),
+///   so that the terminal is a word of the language and nothing else;
+/// - it is not the trivia node itself, whose own run would then be reached into
+///   by the run before it;
+/// - no rule that reads text reaches it by name ([`Step::refers`]), since what a
+///   name is inlined into the text of the rule that reaches it, and trivia kept
+///   there would end up inside that token's own text;
+/// - none of the characters it could match is a character the trivia matches,
+///   since the run before such a terminal would eat what the terminal is there to
+///   take.
+///
+/// A spec that uses a space as a token of its own is decided by the last test:
+/// its spaces are then kept in the gaps, which is the only reading that accepts
+/// the text the spec describes. Where the trivia itself is not a question about
+/// single characters nothing can be said about what it overlaps, and then nobody
+/// owns anything, which leaves every run to the gaps.
+fn ownership(
+    patterns: &[TokenPattern],
+    whitespace: Option<&str>,
+    classes: &HashMap<String, pattern::CharClass>,
+) -> HashMap<String, Vec<String>> {
+    let mut owning = HashMap::new();
+
+    let Some(trivia) = whitespace
+        .and_then(|name| patterns.iter().find(|pattern| pattern.name == name))
+        .and_then(|pattern| pattern.step.char_class(classes))
+        .and_then(|class| class.fixed_chars())
+    else {
+        return owning;
+    };
+
+    let mut referred: HashSet<String> = HashSet::new();
+
+    for pattern in patterns {
+        pattern.step.refers(&mut referred);
+    }
+
+    for pattern in patterns {
+        let Some(strings) = pattern.step.fixed_strings() else {
+            continue;
+        };
+
+        let keeps_its_own_run = whitespace.is_some_and(|name| pattern.name == name);
+        let overlaps_trivia = strings
+            .iter()
+            .any(|word| word.chars().any(|c| trivia.contains(&c)));
+
+        if strings.is_empty()
+            || keeps_its_own_run
+            || overlaps_trivia
+            || referred.contains(&pattern.name)
+        {
+            continue;
+        }
+
+        owning.insert(pattern.name.clone(), strings);
+    }
+
+    owning
 }
 
 /// Returns `true` when following the edges out of `from` arrives at `target`,

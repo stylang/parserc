@@ -17,35 +17,60 @@
 //! - anything a rule reaches through more than sixteen operands, since the
 //!   shortcut of [`FieldType::Concat`] is a tuple and a tuple stops at sixteen.
 //!
-//! # Whitespace
+//! # Trivia
 //!
 //! The language a file describes is read with runs of trivia between its tokens,
-//! and a generated token type keeps only the text it matched: none of them takes
-//! the trivia around itself. Every element of a sequence after the first is
-//! therefore reached over a [`Field::separator`], which is the whitespace type
-//! the file declares, and a repetition takes one between each two of its runs.
-//! A separator is a run rather than one piece of trivia, so that it takes as
-//! much of it as the text offers and none at all where two tokens are written
-//! together.
+//! and one structural rule decides where each of those runs is kept: it belongs
+//! to the operand next to it, or to the sequence around that operand.
+//!
+//! A terminal **owns** the trivia around itself when its pattern denotes finitely
+//! many fixed strings and none of them could be a piece of trivia, when it is not
+//! the file's own trivia node, and when no rule that reads text reaches it by
+//! name. Such a type keeps `Option<WS>` on each side of the text it matched, as
+//! the punctuation of a hand-written parser does: `'<'`, `';'`, `'->'` and
+//! `'lexer'` all separate what stands around them from themselves. The test is
+//! made over the *shape* of a pattern ([`Step::fixed_strings`]) and over who
+//! reaches it ([`Step::refers`]), never over what its characters happen to be: a
+//! rule reached by name is inlined into the text of the rule that reaches it, so
+//! trivia taken there would end up inside another token's own text, and a
+//! terminal that could match a whitespace character would have its own match
+//! eaten by the run before it.
+//!
+//! Every other terminal — a class of characters, an external call, a repetition,
+//! a complement — keeps only the text it matched. The run next to it is then
+//! nobody's to keep, so it becomes a [`FieldType::Gap`] of the sequence it lies
+//! in: a field holding `Option<WS>` between two operands neither of which took
+//! it. The trivia node itself keeps a whole maximal run as one token, which is
+//! what makes holding `Option` of it say either "a run" or "nothing".
+//!
+//! The rule changes where a run of trivia is kept, never what the grammar
+//! accepts: a run is taken by the first operand that reaches it, and taken whole
+//! when it is taken at all, so the operands are read at the same positions
+//! however the runs are filed away.
 //!
 //! `concat` is the exception the DSL makes, and the only place the rule does not
 //! hold: it asks for both operands as one token, with nothing between, which is
-//! why it is [`FieldType::Concat`] and not a field and a separator.
+//! why it is [`FieldType::Concat`] and never a field, a gap and a field. A group
+//! written in brackets is the other case: `(A B)` is a sequence like any other,
+//! so a gap stands between its operands where they need one, which is what lets
+//! it be one [`FieldType::Group`] rather than a type of its own.
 //!
 //! A file that declares no `whitespace` rule has no trivia to take, so it has no
-//! separators at all.
+//! gaps at all and no terminal owns any.
 //!
-//! A rule may still write its separator out, as `syntax Pair -> A WS B;` does
-//! when `WS` is the trivia node. Such a bare mention of the trivia asks for
-//! nothing the run between the operands around it does not already take, so it
-//! is folded away and earns no field: the type is the one
-//! `syntax Pair -> A B;` makes, and the [analysis](crate::semantics) notes the
-//! mention. At either end of a sequence the mention is folded for the same
-//! reason: the trivia before the first operand of a rule belongs to the
-//! separator of the rule around it, which reaches this one just as greedily.
-//! A mention with a suffix on it (`WS?`, `WS*`) is not folded, since it asks
-//! for a repetition a separator only happens to be; a sequence of nothing but
-//! mentions is a rule *about* the trivia, and keeps them all.
+//! A rule may still write its trivia out, as `syntax Pair -> A WS B;` does when
+//! `WS` is the trivia node. Such a bare mention of the trivia asks for nothing
+//! the gap around it does not already take, so it is folded away and earns no
+//! field: the type is the one `syntax Pair -> A B;` makes, and the
+//! [analysis](crate::semantics) notes the mention. A mention with a suffix on it
+//! (`WS?`, `WS*`) is not folded, since it asks for a repetition a gap only
+//! happens to be; a sequence of nothing but mentions is a rule *about* the
+//! trivia, and keeps them all.
+//!
+//! Where the runs end up is settled by [`Trivia`], once the whole file has been
+//! read: an anonymous type is written as the rule that needed it asks, and
+//! whether a terminal owns its trivia turns on rules written after it, so no one
+//! rule can decide the question while it is being read.
 
 use std::collections::{HashMap, HashSet};
 
@@ -62,6 +87,12 @@ use super::pattern::{CharClass, PatternBuilder, RuleNames, Step, TokenPattern};
 /// The most operands a sequence may be folded into, which is how many elements
 /// a tuple of the backend has.
 const MAX_TUPLE: usize = 16;
+
+/// The most operands a group may hold and still be inlined into a tuple.
+///
+/// Half of [`MAX_TUPLE`], since a gap may have to stand between each two of
+/// them, and the worst case is one gap for every operand but the first.
+const MAX_GROUP: usize = MAX_TUPLE / 2;
 
 /// One type codegen writes for a node rule, or for a construct inside one.
 pub(crate) struct TypeDef {
@@ -93,8 +124,6 @@ pub(crate) enum TypeDefKind {
         min: usize,
         /// The most, or nothing when the text decides.
         max: Option<usize>,
-        /// Whether the runs of trivia between the repetitions are part of it.
-        separated: bool,
     },
     /// One operand with a question asked about the text around it.
     Asserted {
@@ -126,9 +155,6 @@ pub(crate) enum Assert {
 pub(crate) struct Field {
     /// What the field holds.
     pub(crate) ty: FieldType,
-    /// Whether a run of trivia is taken before it, which is needed when neither
-    /// the element before it nor this one carries the whitespace itself.
-    pub(crate) separator: bool,
 }
 
 /// What a field holds, written so that taking it is one call of
@@ -144,15 +170,6 @@ pub(crate) enum FieldType {
     Many {
         /// What each takes.
         item: Box<FieldType>,
-        /// Whether the trivia between two of them is part of the run.
-        separated: bool,
-    },
-    /// `T+`, which is one and then as many more as there are.
-    OneOrMore {
-        /// What each takes.
-        item: Box<FieldType>,
-        /// Whether the trivia between two of them is part of the run.
-        separated: bool,
     },
     /// `A concat B`, which is both taken back to back with nothing between.
     Concat {
@@ -160,6 +177,30 @@ pub(crate) enum FieldType {
         first: Box<FieldType>,
         /// What comes next.
         second: Box<FieldType>,
+    },
+    /// A group the operands of a sequence, folded into one field because no
+    /// type of its own was needed to hold them.
+    Group(Vec<FieldType>),
+    /// A run of trivia that neither of the operands around it owns, which is a
+    /// field of the sequence it lies in rather than part of either of them.
+    Gap,
+    /// `(T P)* T?`, which is what the backend calls a punctuated list: the runs
+    /// of trivia belong to the separators, so no gaps stand between the items.
+    Punctuated {
+        /// What each element of the list is.
+        item: Box<FieldType>,
+        /// What stands between two of them.
+        sep: Box<FieldType>,
+    },
+    /// Two terminals that own their trivia holding whatever lies between them,
+    /// which is what the backend calls a delimiter.
+    Delimited {
+        /// The terminal the run is opened by.
+        open: Box<FieldType>,
+        /// What lies between the two terminals, gaps included.
+        body: Vec<FieldType>,
+        /// The terminal the run is closed by.
+        close: Box<FieldType>,
     },
 }
 
@@ -200,11 +241,15 @@ impl FieldType {
     pub(crate) fn takes_nothing(&self, empty: &HashSet<String>) -> bool {
         match self {
             FieldType::Named(name) => empty.contains(name),
-            FieldType::Opt(..) | FieldType::Many { .. } => true,
-            FieldType::OneOrMore { item, .. } => item.takes_nothing(empty),
+            FieldType::Opt(_) | FieldType::Many { .. } | FieldType::Gap => true,
+            FieldType::Punctuated { .. } => true,
             FieldType::Concat { first, second, .. } => {
                 first.takes_nothing(empty) && second.takes_nothing(empty)
             }
+            FieldType::Group(tys) => tys.iter().all(|ty| ty.takes_nothing(empty)),
+            // The terminals that hold a delimited run take what they match: a
+            // fixed string is never nothing.
+            FieldType::Delimited { .. } => false,
         }
     }
 
@@ -213,12 +258,31 @@ impl FieldType {
         match self {
             FieldType::Named(name) => name.clone(),
             FieldType::Opt(item) => format!("{}?", item.describe()),
-            FieldType::Many { item, .. } => format!("{}*", item.describe()),
-            FieldType::OneOrMore { item, .. } => format!("{}+", item.describe()),
+            FieldType::Many { item } => format!("{}*", item.describe()),
             FieldType::Concat { first, second } => {
                 format!("{} concat {}", first.describe(), second.describe())
             }
+            FieldType::Group(tys) => format!("({})", Self::described(tys)),
+            FieldType::Gap => "a run of trivia".to_owned(),
+            FieldType::Punctuated { item, sep } => {
+                format!("{} separated by {}", item.describe(), sep.describe())
+            }
+            FieldType::Delimited { open, body, close } => format!(
+                "{} held between {} and {}",
+                Self::described(body),
+                open.describe(),
+                close.describe()
+            ),
         }
+    }
+
+    /// What a sequence of operands is called in a report, read as the sequence
+    /// it is.
+    fn described(tys: &[FieldType]) -> String {
+        tys.iter()
+            .map(FieldType::describe)
+            .collect::<Vec<_>>()
+            .join(" ")
     }
 
     /// The names of the types this one is built out of, which is what decides
@@ -226,14 +290,29 @@ impl FieldType {
     pub(crate) fn names(&self, out: &mut Vec<String>) {
         match self {
             FieldType::Named(name) => out.push(name.clone()),
-            FieldType::Opt(item)
-            | FieldType::Many { item, .. }
-            | FieldType::OneOrMore { item, .. } => {
-                item.names(out);
-            }
+            FieldType::Opt(item) | FieldType::Many { item } => item.names(out),
             FieldType::Concat { first, second, .. } => {
                 first.names(out);
                 second.names(out);
+            }
+            FieldType::Group(tys) => {
+                for ty in tys {
+                    ty.names(out);
+                }
+            }
+            FieldType::Gap => {}
+            FieldType::Punctuated { item, sep } => {
+                item.names(out);
+                sep.names(out);
+            }
+            FieldType::Delimited { open, body, close } => {
+                open.names(out);
+
+                for ty in body {
+                    ty.names(out);
+                }
+
+                close.names(out);
             }
         }
     }
@@ -269,9 +348,6 @@ pub(crate) struct TypeBuilder {
     /// The variant names already given for one owner, which are the names only
     /// the alternatives of one rule have to keep apart from each other.
     variants: HashMap<String, std::collections::HashSet<String>>,
-    /// The anonymous types of a rule that are separated runs, which carry the
-    /// trivia before their own elements.
-    runs: HashSet<String>,
     /// The patterns of the token types the types needed, which are written out
     /// beside the rules of the file.
     anon_tokens: Vec<TokenPattern>,
@@ -302,7 +378,6 @@ impl TypeBuilder {
             shared: HashMap::new(),
             literals: HashMap::new(),
             code_points: HashMap::new(),
-            runs: HashSet::new(),
             variants: HashMap::new(),
             anon_tokens: Vec::new(),
             pending: Vec::new(),
@@ -340,10 +415,14 @@ impl TypeBuilder {
         self.enum_of(owner, expr)
     }
 
-    /// The fields of one sequence of operands, each after the first reached over
-    /// a run of trivia.
+    /// The fields of one sequence of operands.
     ///
-    /// A bare mention of the trivia node of the file is that run rather than an
+    /// Where the runs of trivia between them are kept is not decided here: a
+    /// terminal takes the trivia around itself only when the whole file says it
+    /// can, which is a question the [settling](Trivia) answers once every rule
+    /// has been read.
+    ///
+    /// A bare mention of the trivia node of the file is a separator rather than an
     /// operand of its own, so it is folded away before the fields are counted
     /// (see [`ExprNoTopAlts::fold_separators`]); the analysis notes the mention
     /// from the same reading.
@@ -360,31 +439,7 @@ impl TypeBuilder {
             fields.push(self.field(owner, expr)?);
         }
 
-        // The first field of a type is reached at the position its caller left
-        // it at, so it never takes a run of trivia of its own. A field that is
-        // a separated run does not need one either: the run carries the trivia
-        // before each of its elements, and where the run takes nothing the
-        // trivia belongs to the field after it rather than being eaten here.
-        for (index, field) in fields.iter_mut().enumerate() {
-            field.separator =
-                index > 0 && self.whitespace.is_some() && !self.opens_with_a_separator(&field.ty);
-        }
-
         Ok(fields)
-    }
-
-    /// Returns `true` when a field is a run that takes the trivia before each
-    /// of its elements itself, which is what makes a separator in front of it
-    /// both needless and wrong: it would be taken even when the run takes
-    /// nothing at all.
-    fn opens_with_a_separator(&self, ty: &FieldType) -> bool {
-        match ty {
-            FieldType::Many { separated, .. } | FieldType::OneOrMore { separated, .. } => {
-                *separated
-            }
-            FieldType::Named(name) => self.runs.contains(name),
-            _ => false,
-        }
     }
 
     /// The field one operand of a sequence makes.
@@ -395,7 +450,6 @@ impl TypeBuilder {
     ) -> Result<Field, CodegenError> {
         Ok(Field {
             ty: self.ty(owner, expr)?,
-            separator: false,
         })
     }
 
@@ -482,19 +536,20 @@ impl TypeBuilder {
             });
         }
 
-        let separated = self.whitespace.is_some();
-
         match (min, max) {
             (0, None) => Ok(FieldType::Many {
                 item: Box::new(item),
-                separated,
             }),
-            (1, None) => Ok(FieldType::OneOrMore {
-                item: Box::new(item),
-                separated,
+            // `X+` is one and then as many more as the text offers, which is a
+            // sequence of two rather than a run with a count checked after it.
+            (1, None) => Ok(FieldType::Concat {
+                first: Box::new(item.clone()),
+                second: Box::new(FieldType::Many {
+                    item: Box::new(item),
+                }),
             }),
             _ => {
-                let name = self.counted_type(item, min, max, separated, owner);
+                let name = self.counted_type(item, min, max, owner);
 
                 Ok(FieldType::Named(name))
             }
@@ -520,11 +575,7 @@ impl TypeBuilder {
             });
         }
 
-        let separated = self.whitespace.is_some();
-
-        Ok(FieldType::Named(
-            self.counted_type(item, min, max, separated, owner),
-        ))
+        Ok(FieldType::Named(self.counted_type(item, min, max, owner)))
     }
 
     /// Writes the type of a counted run and returns the name it was given.
@@ -533,24 +584,9 @@ impl TypeBuilder {
         item: FieldType,
         min: usize,
         max: Option<usize>,
-        separated: bool,
         owner: &str,
     ) -> String {
-        let name = self.anonymous(
-            owner,
-            TypeDefKind::Bounds {
-                item,
-                min,
-                max,
-                separated,
-            },
-        );
-
-        if separated {
-            self.runs.insert(name.clone());
-        }
-
-        name
+        self.anonymous(owner, TypeDefKind::Bounds { item, min, max })
     }
 
     /// The type of an operand with no suffix on it.
@@ -692,25 +728,37 @@ impl TypeBuilder {
         owner: &str,
         expr: &Expr<I>,
     ) -> Result<FieldType, CodegenError> {
-        // A group of one alternative, of no more operands than a tuple holds and
-        // with nothing to keep between them, is the tuple they make: the trivia
-        // before the group is the enclosing field's separator, and the group
-        // needs no type and no separator of its own.
-        if expr.rest.is_empty() && self.whitespace.is_none() {
+        // A group of one alternative and no more operands than a tuple holds is
+        // the sequence they make: it needs no type of its own, and the trivia
+        // between its operands is settled as the trivia of any other sequence
+        // is, which is what lets `(A B)` and `A B` be read as one shape.
+        if expr.rest.is_empty() {
             let fields = self.fields_of_sequence(owner, &expr.first)?;
 
-            if fields.len() <= MAX_TUPLE {
-                let mut types = fields.into_iter().map(|field| field.ty);
-
-                let first = types.next().ok_or_else(|| {
-                    CodegenError::unsupported("a group with nothing in it", expr.to_span())
-                })?;
-
-                return Ok(types.fold(first, |first, second| FieldType::Concat {
-                    first: Box::new(first),
-                    second: Box::new(second),
-                }));
+            if fields.is_empty() {
+                return Err(CodegenError::unsupported(
+                    "a group with nothing in it",
+                    expr.to_span(),
+                ));
             }
+
+            if fields.len() <= MAX_GROUP {
+                let mut tys: Vec<FieldType> = fields.into_iter().map(|field| field.ty).collect();
+
+                if tys.len() == 1 {
+                    return Ok(tys.pop().expect("one operand"));
+                }
+
+                return Ok(FieldType::Group(tys));
+            }
+
+            // More operands than a tuple holds: the group needs a type of its
+            // own, and is named for the rule it was written in.
+            let name = self.next(owner);
+
+            return Ok(FieldType::Named(
+                self.anonymous_as(name, TypeDefKind::Struct { fields }),
+            ));
         }
 
         // The group needs a type of its own. It is named first, for the rule it
@@ -918,6 +966,352 @@ impl TypeBuilder {
     }
 }
 
+/// Where the runs of trivia of a file's language are kept.
+///
+/// The table is built once the whole file has been read, since two of the four
+/// tests that decide ownership turn on what the rest of the file says: which
+/// types are anonymous is known only when every rule has been shaped, and
+/// whether a type is reached by name is known only when every pattern has been
+/// compiled. [`Trivia::settle`] then reads the types that table produced and
+/// moves the trivia where it belongs, which is also where the shapes of the
+/// backend — a punctuated list and a delimited run — are recognized out of the
+/// operands a sequence was built from.
+#[derive(Debug)]
+pub(crate) struct Trivia {
+    /// The type of the file's trivia, where it declares any.
+    whitespace: Option<String>,
+    /// Each terminal that owns the trivia around itself, keyed by its type name
+    /// and mapped to the fixed strings its pattern matches, which is what tells
+    /// one terminal's text from another's.
+    owning: HashMap<String, Vec<String>>,
+}
+
+impl Trivia {
+    /// Prepares the table over the file's `whitespace` type and the `owning`
+    /// terminals with the strings each of them matches.
+    pub(crate) fn new(whitespace: Option<String>, owning: HashMap<String, Vec<String>>) -> Self {
+        Self { whitespace, owning }
+    }
+
+    /// The type of the file's trivia, where it declares any.
+    pub(crate) fn whitespace(&self) -> Option<&str> {
+        self.whitespace.as_deref()
+    }
+
+    /// Returns `true` when `name` is the terminal that holds a run of trivia, and
+    /// when nothing else was settled from it: such a run is nobody's to keep
+    /// beside another, and the terminal never owns its own neighbours.
+    pub(crate) fn is_trivia(&self, name: &str) -> bool {
+        self.whitespace.as_deref() == Some(name)
+    }
+
+    /// Returns `true` when the terminal keeps the trivia on each side of the text
+    /// it matched.
+    pub(crate) fn owns(&self, name: &str) -> bool {
+        self.whitespace.is_some() && self.owning.contains_key(name)
+    }
+
+    /// The strings an operand matches, where it is a terminal that owns its
+    /// trivia.
+    ///
+    /// Only such an operand can open or close a delimited run, since telling two
+    /// brackets apart is a question about the text they match, and a terminal
+    /// that owns nothing has no text of its own to tell.
+    fn texts(&self, ty: &FieldType) -> Option<&[String]> {
+        match ty {
+            FieldType::Named(name) if self.owns(name) => self.owning.get(name).map(Vec::as_slice),
+            _ => None,
+        }
+    }
+
+    /// Returns `true` when taking this operand reaches the trivia that stands
+    /// before it.
+    fn eats_leading(&self, ty: &FieldType) -> bool {
+        match ty {
+            FieldType::Named(name) => self.owns(name),
+            // A run may take nothing, which is when its own first operand never
+            // sees the trivia before it, so the sequence around has to keep it.
+            FieldType::Opt(_) | FieldType::Many { .. } | FieldType::Punctuated { .. } => false,
+            FieldType::Gap => false,
+            FieldType::Concat { first, .. } => self.eats_leading(first),
+            FieldType::Group(tys) => tys.first().is_some_and(|ty| self.eats_leading(ty)),
+            FieldType::Delimited { open, .. } => self.eats_leading(open),
+        }
+    }
+
+    /// Returns `true` when taking this operand reaches the trivia that stands
+    /// after it.
+    fn eats_trailing(&self, ty: &FieldType) -> bool {
+        match ty {
+            FieldType::Named(name) => self.owns(name),
+            FieldType::Opt(_) | FieldType::Many { .. } | FieldType::Punctuated { .. } => false,
+            FieldType::Gap => false,
+            FieldType::Concat { second, .. } => self.eats_trailing(second),
+            FieldType::Group(tys) => tys.last().is_some_and(|ty| self.eats_trailing(ty)),
+            FieldType::Delimited { close, .. } => self.eats_trailing(close),
+        }
+    }
+
+    /// Returns `true` when a gap has to stand between two neighbours because
+    /// neither of them reaches the run between them.
+    fn needs_gap(&self, before: &FieldType, next: &FieldType) -> bool {
+        self.whitespace.is_some() && !self.eats_trailing(before) && !self.eats_leading(next)
+    }
+
+    /// Settles where the trivia of each field of every type goes.
+    ///
+    /// A type settles from what it holds, not from what is held inside a type of
+    /// its own: those are separate definitions, each settled for itself, so one
+    /// pass over the list covers the file.
+    pub(crate) fn settle(&self, defs: &mut [TypeDef]) {
+        for def in defs {
+            match &mut def.kind {
+                TypeDefKind::Struct { fields } => *fields = self.fields(fields),
+                TypeDefKind::Enum { variants } => {
+                    for variant in variants {
+                        variant.fields = self.fields(&variant.fields);
+                    }
+                }
+                TypeDefKind::Bounds { item, .. } => *item = self.run(item),
+                TypeDefKind::Asserted { item, assert } => {
+                    let settled = self.ty(item);
+                    *item = settled;
+
+                    match assert {
+                        Assert::Except(removed) => {
+                            let settled = self.ty(removed);
+                            *removed = settled;
+                        }
+                        Assert::Followed(next) => {
+                            let settled = self.ty(next);
+                            *next = settled;
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    /// The settled fields of one alternative, which is a sequence of operands.
+    fn fields(&self, fields: &[Field]) -> Vec<Field> {
+        let tys: Vec<FieldType> = fields.iter().map(|field| field.ty.clone()).collect();
+
+        self.between(&tys)
+            .into_iter()
+            .map(|ty| Field { ty })
+            .collect()
+    }
+
+    /// The settled form of a sequence of operands: each of them as a type, then
+    /// the shapes folded out of the sequence they make.
+    fn between(&self, tys: &[FieldType]) -> Vec<FieldType> {
+        let mut settled: Vec<FieldType> = tys.iter().map(|ty| self.ty(ty)).collect();
+
+        self.folded(&mut settled);
+
+        settled
+    }
+
+    /// Folds the shapes of the backend out of a sequence, then puts the gaps
+    /// where they belong.
+    ///
+    /// The gaps come last because a fold is a question about the operands as they
+    /// were written: a gap standing between an item and its separator is the very
+    /// reason the two cannot be one punctuated list, and folding away the pair
+    /// first means the gap is not there to answer with.
+    fn folded(&self, tys: &mut Vec<FieldType>) {
+        self.punctuates(tys);
+        self.closes(tys);
+        self.gaps(tys);
+    }
+
+    /// Settles one operand of a sequence, which is where a group becomes one of
+    /// its own and where the operands inside a type start again.
+    fn ty(&self, ty: &FieldType) -> FieldType {
+        match ty {
+            FieldType::Named(name) => FieldType::Named(name.clone()),
+            FieldType::Gap => FieldType::Gap,
+            FieldType::Opt(item) => FieldType::Opt(Box::new(self.ty(item))),
+            FieldType::Many { item } => FieldType::Many {
+                item: Box::new(self.run(item)),
+            },
+            // `concat` asks for both operands as one token, so no gap stands
+            // between them and neither is settled as a sequence of its own.
+            FieldType::Concat { first, second } => FieldType::Concat {
+                first: Box::new(self.ty(first)),
+                second: Box::new(self.ty(second)),
+            },
+            FieldType::Group(tys) => FieldType::Group(self.between(tys)),
+            FieldType::Punctuated { item, sep } => FieldType::Punctuated {
+                item: Box::new(self.ty(item)),
+                sep: Box::new(self.ty(sep)),
+            },
+            FieldType::Delimited { open, body, close } => FieldType::Delimited {
+                open: Box::new(self.ty(open)),
+                body: self.between(body),
+                close: Box::new(self.ty(close)),
+            },
+        }
+    }
+
+    /// Settles one operand of a run, which is where the trivia between two of its
+    /// repetitions is kept.
+    ///
+    /// A run has no neighbour of its own to lean on between its repetitions: the
+    /// sequence around it keeps only the trivia before the first, so what stands
+    /// between one repetition and the next belongs to the repetition itself. It
+    /// is a gap at the front of what each takes, except where a repetition already
+    /// reaches the trivia on one of its own ends.
+    fn run(&self, item: &FieldType) -> FieldType {
+        let settled = self.ty(item);
+
+        if self.whitespace.is_none() || self.eats_leading(&settled) || self.eats_trailing(&settled)
+        {
+            return settled;
+        }
+
+        match settled {
+            FieldType::Group(mut tys) => {
+                tys.insert(0, FieldType::Gap);
+
+                FieldType::Group(tys)
+            }
+            settled => FieldType::Group(vec![FieldType::Gap, settled]),
+        }
+    }
+
+    /// Folds each `(T P)* T?` a sequence holds into one punctuated list, which is
+    /// the shape the backend keeps the runs of trivia in for it.
+    ///
+    /// The pair has to be written as a group of exactly two operands, since the
+    /// trivia between them would have made it three, and the tail has to be the
+    /// very same type as the items, since anything else is a sequence that only
+    /// looks like a list.
+    fn punctuates(&self, tys: &mut Vec<FieldType>) {
+        let mut index = 0;
+
+        while index + 1 < tys.len() {
+            let pair = match &tys[index] {
+                FieldType::Many { item } => match item.as_ref() {
+                    FieldType::Group(tys) if tys.len() == 2 => {
+                        Some((tys[0].clone(), tys[1].clone()))
+                    }
+                    _ => None,
+                },
+                _ => None,
+            };
+
+            let Some((item, sep)) = pair else {
+                index += 1;
+
+                continue;
+            };
+
+            let tail = match &tys[index + 1] {
+                FieldType::Opt(tail) => **tail == item,
+                _ => false,
+            };
+
+            if !tail || self.needs_gap(&sep, &item) {
+                index += 1;
+
+                continue;
+            }
+
+            tys[index] = FieldType::Punctuated {
+                item: Box::new(item),
+                sep: Box::new(sep),
+            };
+            tys.remove(index + 1);
+            index += 1;
+        }
+    }
+
+    /// Folds each run two terminals hold into one delimited run, which is the
+    /// shape the backend keeps the trivia of both ends in for it.
+    ///
+    /// The run folded is the **narrowest** one in the sequence rather than the
+    /// first one the leftmost opener can reach, because reaching is exactly what
+    /// spoils a nesting: `'~' '[' … ']'` offers `]` both to the `~` and to the `[`,
+    /// and taking it for the `~` would file `~` and `]` as the two ends of one run,
+    /// which is a pairing nothing in the production says. The narrowest window is
+    /// the `[ … ]` the production does say, and the `~` is left standing outside it.
+    /// Two runs written beside each other are likewise folded as two, and a run
+    /// never holds a terminal of the closing end's own text.
+    fn closes(&self, tys: &mut Vec<FieldType>) {
+        let Some((open, close)) = self.narrowest(tys) else {
+            return;
+        };
+
+        let ends = tys.remove(close);
+        let mut body: Vec<FieldType> = tys.drain((open + 1)..close).collect();
+        let starts = tys.remove(open);
+
+        // The operands of the body are settled already, so the run folds from
+        // what they are: settling them again would ask a gap to stand where
+        // one of them already keeps the trivia.
+        self.folded(&mut body);
+
+        tys.insert(
+            open,
+            FieldType::Delimited {
+                open: Box::new(starts),
+                body,
+                close: Box::new(ends),
+            },
+        );
+
+        // What is left of the sequence may hold runs of its own, and a run that
+        // held the one just folded is narrower now that the fold is one field.
+        self.closes(tys);
+    }
+
+    /// The ends of the narrowest run of the sequence, the leftmost when two are
+    /// equally narrow.
+    fn narrowest(&self, tys: &[FieldType]) -> Option<(usize, usize)> {
+        (0..tys.len())
+            .filter_map(|open| self.closed_at(tys, open).map(|close| (open, close)))
+            .min_by_key(|&(open, close)| (close - open, open))
+    }
+
+    /// The end of the shortest run that opens at `open`, if it has one.
+    fn closed_at(&self, tys: &[FieldType], open: usize) -> Option<usize> {
+        let starts = self.texts(&tys[open])?;
+
+        (open + 2..tys.len()).find(|&close| {
+            self.texts(&tys[close]).is_some_and(|ends| {
+                !overlaps(starts, ends)
+                    && !tys[open + 1..close]
+                        .iter()
+                        .any(|inner| self.texts(inner).is_some_and(|held| overlaps(held, ends)))
+            })
+        })
+    }
+
+    /// Puts a gap where neither of two neighbours keeps the run between them.
+    fn gaps(&self, tys: &mut Vec<FieldType>) {
+        let written = std::mem::take(tys);
+        let mut previous: Option<&FieldType> = None;
+
+        for ty in &written {
+            if let Some(before) = previous
+                && self.needs_gap(before, ty)
+            {
+                tys.push(FieldType::Gap);
+            }
+
+            previous = Some(ty);
+            tys.push(ty.clone());
+        }
+    }
+}
+
+/// Returns `true` when two terminals could both match one of the strings the
+/// other matches, which is when neither can open a run the other closes.
+fn overlaps(a: &[String], b: &[String]) -> bool {
+    a.iter().any(|text| b.iter().any(|other| other == text))
+}
+
 #[cfg(test)]
 mod tests {
     use parserc::Span;
@@ -939,21 +1333,15 @@ mod tests {
     #[test]
     fn a_counted_run_is_a_type_of_its_own() {
         let mut builder = builder(&[], &[], &[]);
-        let name =
-            builder.counted_type(FieldType::Named("X".to_owned()), 2, Some(4), true, "Owner");
+        let name = builder.counted_type(FieldType::Named("X".to_owned()), 2, Some(4), "Owner");
 
         assert_eq!(name, "Owner1");
         assert_eq!(builder.pending.len(), 1);
 
         match &builder.pending[0].kind {
-            TypeDefKind::Bounds {
-                item,
-                min,
-                max,
-                separated,
-            } => {
+            TypeDefKind::Bounds { item, min, max } => {
                 assert_eq!(item, &FieldType::Named("X".to_owned()));
-                assert_eq!((*min, *max, *separated), (2, Some(4), true));
+                assert_eq!((*min, *max), (2, Some(4)));
             }
             other => panic!("expected bounds, got {:?}", std::mem::discriminant(other)),
         }
@@ -979,7 +1367,6 @@ mod tests {
             item: FieldType::Named("X".to_owned()),
             min: 1,
             max: None,
-            separated: false,
         }
     }
 
@@ -988,28 +1375,50 @@ mod tests {
         let empty: HashSet<String> = ["Space".to_owned()].into_iter().collect();
         let stuck = FieldType::Many {
             item: Box::new(FieldType::Named("Space".to_owned())),
-            separated: false,
         };
 
         assert!(stuck.takes_nothing(&empty));
         assert_eq!(stuck.describe(), "Space*");
 
-        // A run of one or more of something that cannot be taken at all is the
-        // other way a repetition sticks, and `concat` sticks only when both of
-        // its operands do.
+        // The shapes the settling folds out of a sequence can hold nothing
+        // between them as well: a list may be empty, a gap may be nothing, and
+        // `concat` sticks only when both of its operands do.
         assert!(
-            FieldType::OneOrMore {
+            FieldType::Punctuated {
                 item: Box::new(FieldType::Named("Space".to_owned())),
-                separated: false,
+                sep: Box::new(FieldType::Named("Comma".to_owned())),
             }
             .takes_nothing(&empty)
         );
+        assert!(FieldType::Gap.takes_nothing(&empty));
         assert!(
             !FieldType::Concat {
                 first: Box::new(FieldType::Named("Space".to_owned())),
                 second: Box::new(FieldType::Named("X".to_owned())),
             }
             .takes_nothing(&empty)
+        );
+    }
+
+    #[test]
+    fn a_fold_reports_the_shape_it_recognized() {
+        assert_eq!(
+            FieldType::Punctuated {
+                item: Box::new(FieldType::Named("Item".to_owned())),
+                sep: Box::new(FieldType::Named("Comma".to_owned())),
+            }
+            .describe(),
+            "Item separated by Comma"
+        );
+
+        assert_eq!(
+            FieldType::Delimited {
+                open: Box::new(FieldType::Named("Open".to_owned())),
+                body: vec![FieldType::Named("Item".to_owned())],
+                close: Box::new(FieldType::Named("Close".to_owned())),
+            }
+            .describe(),
+            "Item held between Open and Close"
         );
     }
 
@@ -1033,5 +1442,325 @@ mod tests {
         let error = CodegenError::unresolved("Nope", Span::Range(3..7));
 
         assert_eq!(error.to_string(), "unresolved name `Nope`, at Range(3..7)");
+    }
+
+    /// A table over a file that declares `WHITESPACE` and lets each of `owning`
+    /// keep the trivia on each side of the text it matches.
+    fn trivia(owning: &[(&str, &[&str])]) -> Trivia {
+        let owning = owning
+            .iter()
+            .map(|(name, texts)| {
+                (
+                    (*name).to_owned(),
+                    texts.iter().map(|text| (*text).to_owned()).collect(),
+                )
+            })
+            .collect();
+
+        Trivia::new(Some("WHITESPACE".to_owned()), owning)
+    }
+
+    /// The fields a rule of the operands `tys` is given once the runs of trivia
+    /// of `trivia` are settled onto it.
+    fn settled(trivia: &Trivia, tys: Vec<FieldType>) -> Vec<FieldType> {
+        let mut defs = vec![TypeDef {
+            name: "Rule".to_owned(),
+            kind: TypeDefKind::Struct {
+                fields: tys.into_iter().map(|ty| Field { ty }).collect(),
+            },
+        }];
+
+        trivia.settle(&mut defs);
+
+        let TypeDefKind::Struct { fields } = &defs[0].kind else {
+            unreachable!("a rule of one alternative is a struct");
+        };
+
+        fields.iter().map(|field| field.ty.clone()).collect()
+    }
+
+    /// The type of a named operand.
+    fn named(name: &str) -> FieldType {
+        FieldType::Named(name.to_owned())
+    }
+
+    /// A run of what a test names.
+    fn many(item: FieldType) -> FieldType {
+        FieldType::Many {
+            item: Box::new(item),
+        }
+    }
+
+    #[test]
+    fn a_repeated_pair_with_a_tail_is_one_list() {
+        // `(Item Comma)* Item?` is what a list of items is, and the separator
+        // reaching the trivia on each side of itself is what lets the runs be
+        // kept in the list rather than between its fields.
+        let tys = settled(
+            &trivia(&[("Comma", &[","])]),
+            vec![
+                many(FieldType::Group(vec![named("Item"), named("Comma")])),
+                FieldType::Opt(Box::new(named("Item"))),
+            ],
+        );
+
+        assert_eq!(
+            tys,
+            vec![FieldType::Punctuated {
+                item: Box::new(named("Item")),
+                sep: Box::new(named("Comma")),
+            }]
+        );
+    }
+
+    #[test]
+    fn a_pair_with_a_run_between_its_two_operands_is_not_a_list() {
+        // Neither operand keeps the trivia, so the pair is a sequence of three
+        // fields once the gap between them stands, and a list is not what three
+        // fields are.
+        let tys = settled(
+            &trivia(&[]),
+            vec![
+                many(FieldType::Group(vec![named("A"), named("B")])),
+                FieldType::Opt(Box::new(named("A"))),
+            ],
+        );
+
+        assert_eq!(
+            tys,
+            vec![
+                many(FieldType::Group(vec![
+                    FieldType::Gap,
+                    named("A"),
+                    FieldType::Gap,
+                    named("B"),
+                ])),
+                FieldType::Gap,
+                FieldType::Opt(Box::new(named("A"))),
+            ]
+        );
+    }
+
+    #[test]
+    fn a_pair_with_a_different_tail_is_not_a_list() {
+        let tys = settled(
+            &trivia(&[("Comma", &[","])]),
+            vec![
+                many(FieldType::Group(vec![named("Item"), named("Comma")])),
+                FieldType::Opt(Box::new(named("Other"))),
+            ],
+        );
+
+        assert_eq!(tys.len(), 3, "a gap stands where the list broke apart");
+    }
+
+    #[test]
+    fn two_terminals_hold_the_run_between_them() {
+        let tys = settled(
+            &trivia(&[("Open", &["["]), ("Close", &["]"])]),
+            vec![named("Open"), named("A"), named("Close")],
+        );
+
+        assert_eq!(
+            tys,
+            vec![FieldType::Delimited {
+                open: Box::new(named("Open")),
+                body: vec![named("A")],
+                close: Box::new(named("Close")),
+            }]
+        );
+    }
+
+    #[test]
+    fn two_runs_beside_each_other_are_folded_as_two() {
+        let tys = settled(
+            &trivia(&[("Open", &["("]), ("Close", &[")"])]),
+            vec![
+                named("Open"),
+                named("A"),
+                named("Close"),
+                named("Open"),
+                named("B"),
+                named("Close"),
+            ],
+        );
+
+        assert_eq!(tys.len(), 2, "the shortest run is the one that folds");
+
+        assert_eq!(
+            tys[0],
+            FieldType::Delimited {
+                open: Box::new(named("Open")),
+                body: vec![named("A")],
+                close: Box::new(named("Close")),
+            }
+        );
+    }
+
+    #[test]
+    fn a_run_is_not_folded_over_a_terminal_of_its_closing_text() {
+        // The middle `Close` closes nothing the outer run could hold, so the
+        // window that would have had to hold it is not a run at all.
+        let tys = settled(
+            &trivia(&[("Open", &["["]), ("Close", &["]"])]),
+            vec![named("Open"), named("Close"), named("A"), named("Close")],
+        );
+
+        assert_eq!(tys.len(), 4, "nothing was folded");
+    }
+
+    #[test]
+    fn one_terminal_cannot_hold_a_run_it_closes_itself() {
+        // `QUOTE … QUOTE` is two terminals with the same text, not a pair of
+        // brackets, and telling them apart is the whole question.
+        let tys = settled(
+            &trivia(&[("Quote", &["\""])]),
+            vec![named("Quote"), named("Chars"), named("Quote")],
+        );
+
+        assert_eq!(tys, vec![named("Quote"), named("Chars"), named("Quote")]);
+    }
+
+    #[test]
+    fn a_list_held_by_two_terminals_is_folded_within_the_run() {
+        let tys = settled(
+            &trivia(&[("Open", &["["]), ("Close", &["]"]), ("Comma", &[","])]),
+            vec![
+                named("Open"),
+                many(FieldType::Group(vec![named("Item"), named("Comma")])),
+                FieldType::Opt(Box::new(named("Item"))),
+                named("Close"),
+            ],
+        );
+
+        assert_eq!(
+            tys,
+            vec![FieldType::Delimited {
+                open: Box::new(named("Open")),
+                body: vec![FieldType::Punctuated {
+                    item: Box::new(named("Item")),
+                    sep: Box::new(named("Comma")),
+                }],
+                close: Box::new(named("Close")),
+            }]
+        );
+    }
+
+    #[test]
+    fn a_gap_stands_only_where_neither_neighbour_reaches() {
+        let kept = settled(
+            &trivia(&[("Dot", &["."])]),
+            vec![named("Dot"), named("A"), named("Dot")],
+        );
+
+        assert_eq!(kept, vec![named("Dot"), named("A"), named("Dot")]);
+
+        let lost = settled(&trivia(&[]), vec![named("A"), named("B"), named("C")]);
+
+        assert_eq!(
+            lost,
+            vec![
+                named("A"),
+                FieldType::Gap,
+                named("B"),
+                FieldType::Gap,
+                named("C")
+            ]
+        );
+    }
+
+    #[test]
+    fn a_run_of_one_owns_its_trivia_from_the_front() {
+        // The first item is reached over the sequence's own gap, which a
+        // repetition cannot keep on its own, while each item after the first is
+        // only reached over the run the repetition keeps for it.
+        let tys = settled(
+            &trivia(&[]),
+            vec![FieldType::Concat {
+                first: Box::new(named("X")),
+                second: Box::new(many(named("X"))),
+            }],
+        );
+
+        assert_eq!(
+            tys,
+            vec![FieldType::Concat {
+                first: Box::new(named("X")),
+                second: Box::new(many(FieldType::Group(vec![FieldType::Gap, named("X")]))),
+            }]
+        );
+    }
+
+    #[test]
+    fn a_counted_run_is_settled_as_a_run_is() {
+        let mut defs = vec![TypeDef {
+            name: "Rule1".to_owned(),
+            kind: TypeDefKind::Bounds {
+                item: named("X"),
+                min: 2,
+                max: None,
+            },
+        }];
+
+        trivia(&[]).settle(&mut defs);
+
+        let TypeDefKind::Bounds { item, .. } = &defs[0].kind else {
+            unreachable!("a counted run is bounds");
+        };
+
+        assert_eq!(item, &FieldType::Group(vec![FieldType::Gap, named("X")]));
+    }
+
+    #[test]
+    fn a_file_with_no_trivia_keeps_the_operands_as_written() {
+        let empty = Trivia::new(None, HashMap::new());
+        let tys = settled(
+            &empty,
+            vec![
+                named("A"),
+                many(FieldType::Group(vec![named("A"), named("B")])),
+                FieldType::Opt(Box::new(named("A"))),
+            ],
+        );
+
+        // Nothing is anybody's to keep where there is no trivia at all, so the
+        // pair that looks like a list is one whatever the operands hold.
+        assert_eq!(
+            tys,
+            vec![
+                named("A"),
+                FieldType::Punctuated {
+                    item: Box::new(named("A")),
+                    sep: Box::new(named("B")),
+                }
+            ]
+        );
+        assert!(!empty.owns("A"));
+        assert!(!empty.is_trivia("A"));
+    }
+
+    #[test]
+    fn the_shapes_a_fold_makes_answer_for_the_trivia_beside_them() {
+        let table = trivia(&[("Open", &["["]), ("Close", &["]"]), ("Comma", &[","])]);
+
+        let list = FieldType::Punctuated {
+            item: Box::new(named("Item")),
+            sep: Box::new(named("Comma")),
+        };
+        let run = FieldType::Delimited {
+            open: Box::new(named("Open")),
+            body: vec![named("A")],
+            close: Box::new(named("Close")),
+        };
+
+        assert!(!table.eats_leading(&list));
+        assert!(!table.eats_trailing(&list));
+        assert!(table.eats_leading(&run));
+        assert!(table.eats_trailing(&run));
+
+        let mut names = Vec::new();
+        run.names(&mut names);
+
+        assert_eq!(names, ["Open", "A", "Close"]);
     }
 }

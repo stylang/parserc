@@ -112,9 +112,9 @@ where
 #[inline]
 pub(crate) fn stmt_expr<I: UnsynInput>(stmt: &Stmt<I>) -> &Expr<I> {
     match stmt {
-        Stmt::Whitespace { expr, .. } | Stmt::Lexer { expr, .. } | Stmt::Syntax { expr, .. } => {
-            expr
-        }
+        Stmt::Whitespace { definition, .. }
+        | Stmt::Lexer { definition, .. }
+        | Stmt::Syntax { definition, .. } => &definition.body,
     }
 }
 

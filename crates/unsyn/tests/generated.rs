@@ -3,7 +3,7 @@
 //! `data/mini.rs` is what [`Codegen`] emits for the spec below, which `tests/dump.rs`
 //! prints. It is kept as a file and compiled here because that is the only way
 //! to say the emitted types are not merely valid Rust but *working* Rust: the
-//! separators are fields of the tree they belong to, a rule that names itself is
+//! trivia is kept where it was settled to be kept, a rule that names itself is
 //! held behind a pointer, and the shortcuts [`scan`] takes agree with the loops
 //! they stand for.
 //!
@@ -214,20 +214,20 @@ fn a_name_is_a_word_that_is_not_a_keyword() {
 #[test]
 fn operands_joined_by_concat_are_one_field_with_nothing_between() {
     // `DIGIT concat UNDER DIGIT` asks the backend to read the first two as one
-    // token, so they are one field of a tuple type and no separator is taken
-    // between them; the third operand is reached over the trivia, which is
-    // where the rule ends: `1_2` is the whole of it.
+    // token, so they are one field of a tuple type and no gap stands between
+    // them; the third operand is a field of its own, which is where the rule
+    // ends: `1_2` is the whole of it.
     let joined = taken::<mini::Joined<_>>("1_2");
 
     let (head, tail) = (&joined.0.0, &joined.0.1);
 
     assert_eq!(head.0.as_str(), "1");
-    assert_eq!(tail.0.as_str(), "_");
-    assert_eq!(joined.2.0.as_str(), "2");
-
-    // The pair is taken back to back, so a run of trivia between its two
-    // operands is nothing the rule can read.
-    assert!(mini::Joined::parse(&mut TokenStream::from("1 _2")).is_err());
+    // `UNDER` is a terminal that owns the runs on either side of its own text,
+    // which is the only trivia a `concat` can be seen to hold: it is part of
+    // what the operand takes, not a gap the rule reaches over.
+    assert_eq!(tail.1.as_str(), "_");
+    assert_eq!(joined.1.0.as_str(), "2");
+    assert_eq!(range_of(&joined), (0, 3));
 }
 
 #[test]
@@ -252,14 +252,14 @@ fn the_wildcard_stands_for_any_one_character() {
     // being described, not the trivia between two tokens.
     let any = taken::<mini::ANYONE<_>>("a-b");
 
-    assert_eq!(any.1.len(), 2, "{any:?}");
+    assert_eq!(any.2.len(), 2, "{any:?}");
 
     // The run is of a group of two alternatives, so each of its elements says
     // which of them it was read as: a character the external takes, or any one
     // character at all.
     assert!(
         matches!(
-            any.1[0].1,
+            any.2[0].1,
             mini::ANYONE2::ANYONE2MATCHER(_) | mini::ANYONE2::ANYONE2Any(_)
         ),
         "{any:?}"
@@ -287,8 +287,10 @@ fn a_group_at_the_head_of_a_rule_is_a_field_of_its_own() {
     // group is a sum, so the rule is three fields and the first is the group.
     let either = taken::<mini::Either<_>>("a[b");
 
-    assert_eq!(either.2.0.as_str(), "[");
-    assert_eq!(either.4.0.as_str(), "b");
+    // The bracket owns the runs on either side of itself, so its own text is
+    // the middle of it, and no gap is needed before the name that follows.
+    assert_eq!(either.1.1.as_str(), "[");
+    assert_eq!(either.2.0.as_str(), "b");
     assert!(
         matches!(
             either.0,
@@ -314,43 +316,137 @@ fn a_counted_run_of_nodes_is_a_type_of_its_own() {
 }
 
 #[test]
-fn the_trivia_rule_takes_one_character_of_what_it_lists() {
+fn the_trivia_rule_takes_one_maximal_run_of_what_it_lists() {
     let mut input = TokenStream::from(" \t\n x");
 
-    let taken = input
-        .parse::<mini::WS<_>>()
-        .expect("one character of trivia");
+    let taken = input.parse::<mini::WS<_>>().expect("a run of trivia");
 
-    // The `whitespace` rule names one character of trivia, as any other token
-    // does; a run of them is what a separator holds, and this is the one place
-    // a single character of it is taken on its own.
-    assert_eq!(taken.0.as_str(), " ");
-    assert_eq!(input.as_str(), "\t\n x");
+    // The `whitespace` rule names one run of the characters it lists, taken as
+    // greedily as the text offers, which is what lets every place that holds
+    // trivia hold `Option` of it rather than a list of them.
+    assert_eq!(taken.0.as_str(), " \t\n ");
+    assert_eq!(input.as_str(), "x");
 
     // Where there is no trivia at all the rule says so rather than taking
-    // nothing, which is what makes a separator a run that may be empty.
+    // nothing, which is what makes the option of a run nothing at all.
     assert!(mini::WS::parse(&mut TokenStream::from("x")).is_err());
 }
 
 #[test]
 fn the_trivia_between_two_tokens_is_a_field_of_its_own() {
-    // The separators are held, which is what makes the tree concrete: what was
-    // between two tokens is part of the tree and not something thrown away.
+    // The gap between two terminals that own nothing of their own is a field of
+    // the sequence, which is what makes the tree concrete: what was between two
+    // tokens is part of the tree and not something thrown away.
     let tight = taken::<mini::ITEM<_>>("fn f -> a;");
 
-    assert_eq!(tight.1.len(), 1, "one run between the keyword and the name");
-    assert_eq!(tight.3[0].0.as_str(), " ");
+    assert_eq!(tight.1.as_ref().expect("one run").0.as_str(), " ");
 
     let wide = taken::<mini::ITEM<_>>("fn    f   -> a ;");
 
-    // A separator is a run of the trivia rule, so the four spaces before the
-    // name are four characters of it and one token of the run.
-    assert_eq!(wide.1.len(), 4, "{wide:?}");
-    assert_eq!(wide.7[0].0.as_str(), " ");
+    // A gap is one run of the trivia rule, so the four spaces before the name
+    // are four characters of it and one field of the rule.
+    assert_eq!(wide.1.as_ref().expect("four spaces").0.as_str(), "    ");
 
-    // The last separator before the semicolon is held too, and the node ends
-    // where the semicolon does.
+    // The keyword and the name own nothing, so the run between them is the
+    // rule's own; the arrow and the semicolon own what stands beside them, so
+    // the expression between them needs no gap of its own and the whole of
+    // `-> a ;` is one field: a run the two terminals hold.
+    let statement = &wide.3;
+
+    assert_eq!(statement.start.1.as_str(), "->", "{wide:?}");
+    assert_eq!(statement.end.1.as_str(), ";", "{wide:?}");
+
+    // Nothing is lost between them: the node ends where the semicolon does,
+    // which is the last character of the text.
     assert_eq!(range_of(&wide), (0, 16));
+}
+
+#[test]
+fn a_terminal_holds_the_trivia_it_owns_wherever_it_stands() {
+    // The same statement written with the trivia in every place it may be:
+    // the runs are held by the terminals they belong to rather than asked for
+    // by the rule, so both are read, and both hold the same expression.
+    let tight = taken::<mini::ITEM<_>>("fn f->a;");
+    let loose = taken::<mini::ITEM<_>>("fn  f  ->  a  ;");
+
+    // The two trees differ only in where each token stands in the text, which
+    // is a thing a span says and not a thing the shape of the tree does.
+    assert_eq!(tight.2.0.as_str(), loose.2.0.as_str(), "{tight:?}");
+    let mini::PRIMARY::PRIMARYIDENT(tight_name) = &*tight.3.body.0 else {
+        panic!("the statement is not about a name: {tight:?}");
+    };
+    let mini::PRIMARY::PRIMARYIDENT(loose_name) = &*loose.3.body.0 else {
+        panic!("the statement is not about a name: {loose:?}");
+    };
+    assert_eq!(tight_name.0.as_str(), loose_name.0.as_str());
+
+    // The one difference the two trees keep is which token holds each run: the
+    // loose statement has two spaces before the arrow, and they belong to the
+    // arrow, while the tight one has nothing there to keep.
+    assert_eq!(
+        loose.3.start.0.as_ref().expect("two spaces").0.as_str(),
+        "  "
+    );
+    assert!(tight.3.start.0.is_none(), "{tight:?}");
+    // The run between the expression and the semicolon is held twice over by
+    // the two operands that reach it, so the one that takes it first keeps it
+    // and the other has nothing left to hold: the `a` of the loose statement
+    // owns the spaces after it, and the semicolon does not.
+    assert_eq!(
+        loose.3.body.1.as_ref().expect("two spaces").0.as_str(),
+        "  "
+    );
+    assert!(loose.3.end.0.is_none(), "{loose:?}");
+}
+
+#[test]
+fn a_run_stops_at_the_nearest_end_that_closes_it() {
+    // `TILDE LEFT IDENT RIGHT` writes `]` within reach of both the `~` and the
+    // `[`, and it closes the `[`: the tilde stands outside the run rather than
+    // being paired with a bracket it has nothing to do with.
+    let tight = taken::<mini::RUNDED<_>>("~[a]");
+    let loose = taken::<mini::RUNDED<_>>("~  [  a  ]");
+
+    assert_eq!(
+        tight.1.body.0.as_str(),
+        loose.1.body.0.as_str(),
+        "{loose:?}"
+    );
+
+    // The run the `~` leaves behind it is its own to keep, which is why the `[`
+    // needs no field of its own for the space in front of it.
+    assert_eq!(
+        loose
+            .0
+            .2
+            .as_ref()
+            .expect("the run after the tilde")
+            .0
+            .as_str(),
+        "  ",
+        "{loose:?}"
+    );
+    assert!(loose.1.start.0.is_none(), "the `~` took it: {loose:?}");
+
+    // The run the `[` keeps is the body's, and the closing bracket keeps what
+    // stands before itself.
+    assert_eq!(
+        loose
+            .1
+            .start
+            .2
+            .as_ref()
+            .expect("the run after the bracket")
+            .0
+            .as_str(),
+        "  ",
+        "{loose:?}"
+    );
+
+    // An opened run that is never closed fails where it stands, which is what
+    // the backend's `Delimiter` says and what the hand-written `Bracket` of
+    // `lexical/delimiter.rs` already reports as `ControlFlow::Fatal`.
+    assert!(mini::RUNDED::parse(&mut TokenStream::from("~[a")).is_err());
 }
 
 #[test]
@@ -383,48 +479,58 @@ fn a_rule_that_names_itself_is_taken_from_the_inside_out() {
 
     // The rest of an expression is a run of the operator and the operand it
     // takes, and the operand is a node of the rule being read.
-    assert_eq!(nested.1.len(), 1, "{nested:?}");
+    assert_eq!(nested.2.len(), 1, "{nested:?}");
 
-    let binop = &nested.1[0].1;
+    let binop = &nested.2[0].1;
 
-    assert!(matches!(&binop.0, mini::BINOP::BINOPPlus(_)));
+    assert!(matches!(binop, mini::BINOP::BINOPPlus(_)));
 
     // The operand of the second run is a group, and the group holds the
     // expression the parentheses are around.
-    let mini::PRIMARY::PRIMARYGROUP(group) = &*binop.2 else {
+    let mini::PRIMARY::PRIMARYGROUP(group) = &*nested.2[0].3 else {
         panic!("the operand of `+` is not a group");
     };
 
-    let first = &group.2;
+    let first = &group.0.body;
 
     assert!(matches!(&*first.0, mini::PRIMARY::PRIMARYIDENT(_)));
 
     // The group reaches the same rule through the parentheses that hold it,
     // and so on in: `a + (b - (c))` is a group two deep.
-    let innermost = &group.2.1[0].1.2;
+    let innermost = &group.0.body.2[0].3;
 
     let mini::PRIMARY::PRIMARYGROUP(inner) = &**innermost else {
         panic!("the innermost operand is not a group: {innermost:?}");
     };
 
-    assert_eq!(inner.0.0.as_str(), "(");
-    assert_eq!(inner.4.0.as_str(), ")");
+    assert_eq!(inner.0.start.1.as_str(), "(");
+    assert_eq!(inner.0.end.1.as_str(), ")");
 }
 
 #[test]
 fn an_optional_run_of_operands_may_be_taken_whole_or_not_at_all() {
     let none = taken::<mini::PARAMS<_>>("()");
 
-    assert!(none.2.is_none(), "{none:?}");
+    assert!(none.0.body.is_none(), "{none:?}");
 
     let three = taken::<mini::PARAMS<_>>("(a, b, c)");
 
-    let run = three.2.as_ref().expect("the names between the parentheses");
+    let run = three
+        .0
+        .body
+        .as_ref()
+        .expect("the names between the parentheses");
 
     assert_eq!(run.0.0.as_str(), "a");
-    assert_eq!(run.1.len(), 2, "{run:?}");
-    assert_eq!(run.1[0].1.2.0.as_str(), "b");
-    assert_eq!(run.1[1].1.2.0.as_str(), "c");
+    // The comma owns the runs on either side of itself, so each repetition of
+    // `(COMMA IDENT)` is a pair of terminals with no gap of its own between
+    // them, and the only gap in the rule is the one before the run.
+    assert_eq!(run.2.len(), 2, "{run:?}");
+    assert!(run.1.is_none(), "{run:?}");
+    assert_eq!(run.2[0].1.0.as_str(), "b");
+    assert_eq!(run.2[1].1.0.as_str(), "c");
+    assert_eq!(run.2[0].0.2.as_ref().expect("one space").0.as_str(), " ");
+    assert!(run.2[0].0.0.is_none(), "{run:?}");
 }
 
 #[test]
@@ -435,15 +541,35 @@ fn a_run_of_one_or_more_takes_at_least_one() {
 
     let one = taken::<mini::TUPLE<_>>("(a, b)");
 
-    assert_eq!(one.3.len(), 1, "{one:?}");
+    // `(COMMA IDENT)+` is the repetition and one more of it after that, which
+    // is what `+` asks the backend for: one field of a pair, then a run.
+    assert_eq!(one.0.body.1.1.len(), 0, "{one:?}");
 
     let three = taken::<mini::TUPLE<_>>("(a, b, c)");
 
-    assert_eq!(three.3.len(), 2, "{three:?}");
+    assert_eq!(three.0.body.1.1.len(), 1, "{three:?}");
 
     // And `(a,)` is nothing either: the run sticks at the comma it took, since
     // there is no name after it for the operand of the run to be.
     assert!(mini::TUPLE::parse(&mut TokenStream::from("(a,)")).is_err());
+
+    // `IDENT+` is the same repetition with nothing written between its operands
+    // but the trivia, which neither side owns, so it is one name and then a run
+    // of a gap and a name.
+    let spaced = taken::<mini::SPACED<_>>("( a  b  c )");
+
+    assert_eq!(spaced.0.body.1.len(), 2, "{spaced:?}");
+    assert_eq!(
+        spaced.0.body.1[0].0.as_ref().expect("a run").0.as_str(),
+        "  ",
+        "{spaced:?}"
+    );
+
+    // One name is enough here, where a tuple needs a comma to say so, and the
+    // run before that name belongs to the `(` that owns it.
+    let alone = taken::<mini::SPACED<_>>("( a )");
+
+    assert!(alone.0.body.1.is_empty(), "{alone:?}");
 }
 
 #[test]
@@ -451,6 +577,9 @@ fn a_counted_run_is_checked_after_it_was_taken() {
     let def = taken::<mini::SHAPE<_>>("#1234");
 
     assert_eq!(def.1.0.len(), 4, "{def:?}");
+    // The `#` owns the run before the first digit of the count, so the gap
+    // inside the run is nothing at all for its first repetition.
+    assert!(def.1.0[0].0.is_none(), "{def:?}");
 
     // One character short of the count the rule stated is not a shape, and the
     // failure is one a caller may recover from.
@@ -462,26 +591,30 @@ fn a_counted_run_is_checked_after_it_was_taken() {
     let spread = taken::<mini::SHAPE<_>>("# 1 2 3 4");
 
     assert_eq!(spread.1.0.len(), 4, "{spread:?}");
-    assert_eq!(spread.1.0[1].0[0].0.as_str(), " ", "{spread:?}");
+    assert_eq!(
+        spread.1.0[1].0.as_ref().expect("one space").0.as_str(),
+        " ",
+        "{spread:?}"
+    );
 }
 
 #[test]
 fn a_group_inside_a_rule_is_a_type_named_for_the_rule_around_it() {
     let long = taken::<mini::NUMBER<_>>("1_234");
 
-    assert_eq!(long.1.len(), 4, "{long:?}");
+    assert_eq!(long.2.len(), 4, "{long:?}");
 
     // The group `(DIGIT | '_')` is an alternative of its own, so each run of
     // the repetition says which of its two members was taken.
-    let mini::NUMBER1::NUMBER1Underscore(under) = &long.1[0].1 else {
+    let mini::NUMBER1::NUMBER1Underscore(under) = &long.2[0].1 else {
         panic!(
             "the first run of the group is not an underscore: {:?}",
-            long.1[0].1
+            long.2[0].1
         );
     };
 
-    assert_eq!(under.0.as_str(), "_");
-    assert!(matches!(long.1[1].1, mini::NUMBER1::NUMBER1DIGIT(_)));
+    assert_eq!(under.1.as_str(), "_");
+    assert!(matches!(long.2[1].1, mini::NUMBER1::NUMBER1DIGIT(_)));
 }
 
 #[test]
@@ -490,32 +623,36 @@ fn a_set_and_a_complement_written_in_a_rule_of_nodes_are_scanners_of_their_own()
     // `['n', 't']` is one of two: both are token types, written for the rule.
     let escaped = taken::<mini::TEXT<_>>("'a\\nb'");
 
-    assert_eq!(escaped.1.len(), 3, "{escaped:?}");
+    assert_eq!(escaped.2.len(), 3, "{escaped:?}");
     assert_eq!(range_of(&escaped), (0, 6));
 
-    let mini::TEXT1::TEXT1BSLASH(bslash, _, letter) = &escaped.1[1].1 else {
+    let mini::TEXT1::TEXT1BSLASH(bslash, letter) = &escaped.2[1].1 else {
         panic!("the second run is not the escape");
     };
 
     assert_eq!(bslash.0.as_str(), "\\");
-    assert_eq!(letter.0.as_str(), "n");
+    // The set `['n', 't']` is a terminal that owns the runs beside it, so the
+    // character it matched is the field between them.
+    assert_eq!(letter.1.as_str(), "n");
 
     // A quote ends the text where the run stops, since `~[BSLASH, QUOTE]` is
     // asked about the character here and does not fit for a quote.
     let (plain, rest) = part::<mini::TEXT<_>>("'a,b' rest");
 
     assert_eq!(rest, " rest");
-    assert_eq!(plain.1.len(), 3, "{plain:?}");
-    assert_eq!(plain.3.0.as_str(), "'");
+    assert_eq!(plain.2.len(), 3, "{plain:?}");
+    assert_eq!(plain.4.0.as_str(), "'");
 }
 
 #[test]
 fn a_negated_operand_takes_the_one_character_it_asked_about() {
     let negated = taken::<mini::NEGATED<_>>("~x");
 
-    assert_eq!(negated.0.0.as_str(), "~");
+    // The tilde owns the runs on either side of its own text, so its own
+    // character is the field between them.
+    assert_eq!(negated.0.1.as_str(), "~");
 
-    let mini::PRIMARY::PRIMARYIDENT(name) = &*negated.2 else {
+    let mini::PRIMARY::PRIMARYIDENT(name) = &*negated.1 else {
         panic!("the negation is not of a name");
     };
 
@@ -542,10 +679,10 @@ fn a_node_reaches_over_the_trivia_it_holds() {
 
     // The expression the group holds is itself a node of `EXPR`, which names
     // the rule that reaches back into it: the tree is a tree, not a token.
-    let mini::PRIMARY::PRIMARYIDENT(name) = &*group.2.0 else {
+    let mini::PRIMARY::PRIMARYIDENT(name) = &*group.0.body.0 else {
         panic!(
             "the expression inside the group is not a name: {:?}",
-            group.2
+            group.0.body
         );
     };
 
@@ -556,16 +693,70 @@ fn a_node_reaches_over_the_trivia_it_holds() {
 fn a_run_of_nodes_holds_the_trivia_before_each_of_them() {
     let list = taken::<mini::LIST<_>>("(a b c)");
 
-    assert_eq!(list.1.len(), 3, "{list:?}");
+    // The parentheses own the runs beside themselves, so what they hold is one
+    // delimited run and not four fields of the rule.
+    assert_eq!(list.0.body.len(), 3, "{list:?}");
 
-    // The trivia before the first name of the run is empty, since the name
-    // follows the parenthesis with nothing between them, and every name after
-    // it is reached over the run that went before it.
-    assert!(list.1[0].0.is_empty(), "{list:?}");
-    assert_eq!(list.1[1].0[0].0.as_str(), " ");
-    assert_eq!(list.1[1].1.0.as_str(), "b");
+    // The trivia before the first name of the run is nothing at all, since the
+    // parenthesis already took the run between them, and every name after it is
+    // reached over a gap of its own.
+    assert!(list.0.body[0].0.is_none(), "{list:?}");
+    assert_eq!(
+        list.0.body[1].0.as_ref().expect("one space").0.as_str(),
+        " "
+    );
+    assert_eq!(list.0.body[1].1.0.as_str(), "b");
 
     let empty = taken::<mini::LIST<_>>("()");
 
-    assert!(empty.1.is_empty(), "{empty:?}");
+    assert!(empty.0.body.is_empty(), "{empty:?}");
+}
+
+#[test]
+fn an_item_and_its_separator_is_one_list_of_the_backends_own() {
+    // `(IDENT COMMA)* IDENT?` between two terminals that own their trivia is
+    // the shape the backend calls a punctuated list, so the whole of the rule
+    // is one delimited run of one field.
+    let args = taken::<mini::ARGS<_>>("(a, b, c)");
+
+    assert_eq!(args.0.body.pairs.len(), 2, "{args:?}");
+    assert_eq!(args.0.body.pairs[0].0.0.as_str(), "a");
+    assert_eq!(args.0.body.pairs[0].1.1.as_str(), ",");
+    assert_eq!(
+        args.0.body.tail.as_ref().expect("the last name").0.as_str(),
+        "c"
+    );
+
+    // A trailing separator is not an item, and the list stops where the last
+    // name did: the rule asks for a name after every comma it took.
+    let one = taken::<mini::ARGS<_>>("(a)");
+
+    assert!(one.0.body.pairs.is_empty(), "{one:?}");
+    assert!(one.0.body.tail.is_some(), "{one:?}");
+
+    // The same list written with no trivia at all is the same tree of names,
+    // which is what it means for the separators to belong to the commas: the
+    // runs they hold are `None`, and nothing else moved.
+    let tight = taken::<mini::ARGS<_>>("(a,b,c)");
+
+    assert_eq!(
+        tight.0.body.pairs[0].0.0.as_str(),
+        args.0.body.pairs[0].0.0.as_str()
+    );
+    assert_eq!(
+        tight.0.body.tail.as_ref().expect("a name").0.as_str(),
+        args.0.body.tail.as_ref().expect("a name").0.as_str()
+    );
+}
+
+#[test]
+fn two_terminals_written_beside_each_other_need_no_gap_between_them() {
+    // `, ;` is two tokens with nothing to hold between them, since each owns
+    // the run on either side of its own text.
+    let paired = taken::<mini::PAIRED<_>>(", ;");
+
+    assert_eq!(paired.0.1.as_str(), ",");
+    assert_eq!(paired.1.1.as_str(), ";");
+    assert_eq!(paired.0.2.as_ref().expect("one space").0.as_str(), " ");
+    assert_eq!(range_of(&paired), (0, 3));
 }
