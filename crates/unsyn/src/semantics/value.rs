@@ -10,7 +10,7 @@ use parserc::syntax::Syntax;
 use crate::{
     errors::{SemanticsKind, UnsynError},
     input::UnsynInput,
-    lexical::lit::{ASCIIEscape, LitDec, LitStr, LitUnicode, StrSegment, UnicodeEscape},
+    lexical::lit::{AsciiEscape, LitDec, LitStr, LitUnicode, StrSegment, UnicodeEscape},
 };
 
 /// Decodes the character content of a string literal.
@@ -24,7 +24,7 @@ pub fn str_value<I: UnsynInput>(lit: &LitStr<I>) -> (String, Option<UnsynError>)
     for segment in &lit.content {
         match segment {
             StrSegment::QuoteEscape(_) => value.push('\''),
-            StrSegment::ASCIIEscape(escape) => value.push(ascii_escape_value(escape)),
+            StrSegment::AsciiEscape(escape) => value.push(ascii_escape_value(escape)),
             StrSegment::UnicodeEscape(escape) => match unicode_escape_value(escape) {
                 Some(c) => value.push(c),
                 None => {
@@ -81,14 +81,14 @@ pub fn dec_value<I: UnsynInput>(lit: &LitDec<I>) -> Result<usize, UnsynError> {
 }
 
 /// Returns the character denoted by an ASCII escape.
-fn ascii_escape_value<I: UnsynInput>(escape: &ASCIIEscape<I>) -> char {
+fn ascii_escape_value<I: UnsynInput>(escape: &AsciiEscape<I>) -> char {
     match escape {
-        ASCIIEscape::LF(_) => '\n',
-        ASCIIEscape::CR(_) => '\r',
-        ASCIIEscape::Tab(_) => '\t',
-        ASCIIEscape::BlackSlash(_) => '\\',
-        ASCIIEscape::Null(_) => '\0',
-        ASCIIEscape::Char(code) => {
+        AsciiEscape::LF(_) => '\n',
+        AsciiEscape::CR(_) => '\r',
+        AsciiEscape::Tab(_) => '\t',
+        AsciiEscape::BlackSlash(_) => '\\',
+        AsciiEscape::Null(_) => '\0',
+        AsciiEscape::Char(code) => {
             // The lexical pass guarantees the `\xNN` shape and its `0x00..=0x7F`
             // range, so a decoding failure here can only come from a handcrafted
             // tree; fall back to the replacement character.

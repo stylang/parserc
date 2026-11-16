@@ -3,7 +3,7 @@
 //! that bounds a repetition.
 //!
 //! An escape is written the way Rust writes it, and each form is a token of its
-//! own here: [`ASCIIEscape`], [`UnicodeEscape`] and [`QuoteEscape`] are the three
+//! own here: [`AsciiEscape`], [`UnicodeEscape`] and [`QuoteEscape`] are the three
 //! that can appear inside a [`LitStr`], where they are what lets a `'` or a `\`
 //! be part of the text rather than the end of it.
 
@@ -21,7 +21,7 @@ use crate::{
 /// [`The Rust Reference`]: https://doc.rust-lang.org/reference/tokens.html#railroad-ASCII_ESCAPE
 #[derive(Debug, PartialEq, Eq, PartialOrd, Ord, Clone, Syntax)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
-pub enum ASCIIEscape<I>
+pub enum AsciiEscape<I>
 where
     I: UnsynInput,
 {
@@ -48,7 +48,7 @@ where
 
     keyword("\\x")
         .parse(input)
-        .map_err(SyntaxKind::ASCIIEscape.map())?;
+        .map_err(SyntaxKind::AsciiEscape.map())?;
 
     let buf = input.as_bytes();
 
@@ -139,7 +139,7 @@ where
     I: UnsynInput,
 {
     QuoteEscape(QuoteEscape<I>),
-    ASCIIEscape(ASCIIEscape<I>),
+    AsciiEscape(AsciiEscape<I>),
     UnicodeEscape(UnicodeEscape<I>),
     CharWithException(#[parserc(parser = parse_str_item_with_exception)] I),
 }
@@ -343,7 +343,7 @@ mod tests {
             Ok(LitStr {
                 delimiter_start: TokenStream::from((0, "'")),
                 content: vec![
-                    StrSegment::ASCIIEscape(ASCIIEscape::BlackSlash(TokenStream::from((
+                    StrSegment::AsciiEscape(AsciiEscape::BlackSlash(TokenStream::from((
                         1, "\\\\"
                     )))),
                     StrSegment::QuoteEscape(QuoteEscape(TokenStream::from((3, "\\'")))),
@@ -403,20 +403,20 @@ mod tests {
     #[test]
     fn every_ascii_escape_form_is_recognised() {
         let escapes = [
-            ("\\n", ASCIIEscape::LF(TokenStream::from((0, "\\n")))),
-            ("\\r", ASCIIEscape::CR(TokenStream::from((0, "\\r")))),
-            ("\\t", ASCIIEscape::Tab(TokenStream::from((0, "\\t")))),
+            ("\\n", AsciiEscape::LF(TokenStream::from((0, "\\n")))),
+            ("\\r", AsciiEscape::CR(TokenStream::from((0, "\\r")))),
+            ("\\t", AsciiEscape::Tab(TokenStream::from((0, "\\t")))),
             (
                 "\\\\",
-                ASCIIEscape::BlackSlash(TokenStream::from((0, "\\\\"))),
+                AsciiEscape::BlackSlash(TokenStream::from((0, "\\\\"))),
             ),
-            ("\\0", ASCIIEscape::Null(TokenStream::from((0, "\\0")))),
-            ("\\x7F", ASCIIEscape::Char(TokenStream::from((0, "\\x7F")))),
+            ("\\0", AsciiEscape::Null(TokenStream::from((0, "\\0")))),
+            ("\\x7F", AsciiEscape::Char(TokenStream::from((0, "\\x7F")))),
         ];
 
         for (input, expect) in escapes {
             assert_eq!(
-                TokenStream::from(input).parse::<ASCIIEscape<_>>(),
+                TokenStream::from(input).parse::<AsciiEscape<_>>(),
                 Ok(expect),
                 "{input}"
             );
@@ -427,13 +427,13 @@ mod tests {
     #[test]
     fn a_seven_bit_escape_is_two_hex_digits() {
         assert_eq!(
-            TokenStream::from("\\x7f").parse::<ASCIIEscape<_>>(),
-            Ok(ASCIIEscape::Char(TokenStream::from((0, "\\x7f"))))
+            TokenStream::from("\\x7f").parse::<AsciiEscape<_>>(),
+            Ok(AsciiEscape::Char(TokenStream::from((0, "\\x7f"))))
         );
 
         // The first digit is out of range for a 7-bit character.
         assert_eq!(
-            TokenStream::from("\\x8F").parse::<ASCIIEscape<_>>(),
+            TokenStream::from("\\x8F").parse::<AsciiEscape<_>>(),
             Err(UnsynError::Semantics(
                 SemanticsKind::Char7BitEscapeOutOfRange,
                 Span::Range(2..3)
@@ -442,7 +442,7 @@ mod tests {
 
         // Neither digit is a hex digit at all.
         assert_eq!(
-            TokenStream::from("\\xZF").parse::<ASCIIEscape<_>>(),
+            TokenStream::from("\\xZF").parse::<AsciiEscape<_>>(),
             Err(UnsynError::Semantics(
                 SemanticsKind::HexDigit,
                 Span::Range(2..3)
@@ -451,7 +451,7 @@ mod tests {
 
         // The second digit is missing.
         assert_eq!(
-            TokenStream::from("\\x7").parse::<ASCIIEscape<_>>(),
+            TokenStream::from("\\x7").parse::<AsciiEscape<_>>(),
             Err(UnsynError::Semantics(
                 SemanticsKind::Char7BitEscapeTooShort,
                 Span::Range(2..3)

@@ -664,7 +664,7 @@ fn bootstrap_uns_is_generated_whole() {
     assert!(written.contains("my_backend::xid_continue"), "{written}");
 
     // The trivia of the language is its own type, and the gaps name it.
-    assert!(written.contains("structWHITESPACE"), "{written}");
+    assert!(written.contains("structS<I>"), "{written}");
 }
 
 // The two folds the generator knows about are the whole reason a rule of the
@@ -688,7 +688,7 @@ fn a_bootstrap_spec_is_read_as_the_shapes_it_writes() {
     assert!(written.contains("Punctuated<"), "{written}");
     assert!(written.contains("Delimiter<"), "{written}");
 
-    // `stmt: IDENTIFIER '->' Expr ';'`
+    // `Stmt -> LeadingKeywords Ident '->' Expr ';'`
     //
     // The name is what the statement is written with, the arrow and the
     // semicolon close a delimiter around the expression they hold, and the
@@ -696,8 +696,8 @@ fn a_bootstrap_spec_is_read_as_the_shapes_it_writes() {
     // not own trivia.
     assert!(
         written.contains(
-            "structStmt<I>(pubLEADING_KEYWORDS<I>,pub::core::option::Option<WHITESPACE<I>>,\
-             pubIDENTIFIER<I>,pub::parserc::syntax::Delimiter<ArrowRight<I>,Semi<I>,Expr<I>>);"
+            "structStmt<I>(pubLeadingKeywords<I>,pub::core::option::Option<S<I>>,\
+             pubIdent<I>,pub::parserc::syntax::Delimiter<ArrowRight<I>,Semi<I>,Expr<I>>);"
         ),
         "`Stmt` is not the four fields the rule has: {written}"
     );
@@ -719,7 +719,7 @@ fn a_bootstrap_spec_is_read_as_the_shapes_it_writes() {
         "ExprWithoutSuffixTilde(Tilde<I>,\
          ::parserc::syntax::Delimiter<BracketStart<I>,BracketEnd<I>,\
          ::parserc::syntax::Punctuated<SetItem<I>,Comma<I>>>)",
-        "ExprWithoutSuffixLt(::parserc::syntax::Delimiter<Lt<I>,Gt<I>,IDENTIFIER<I>>)",
+        "ExprWithoutSuffixLt(::parserc::syntax::Delimiter<Lt<I>,Gt<I>,Ident<I>>)",
         "ExprWithoutSuffixParenStart(::parserc::syntax::Delimiter<ParenStart<I>,ParenEnd<I>,\
          ::std::boxed::Box<Expr<I>>>)",
         "ExprWithoutSuffixBracketStart(::parserc::syntax::Delimiter<BracketStart<I>,\
@@ -765,8 +765,8 @@ fn a_bootstrap_spec_is_read_as_the_shapes_it_writes() {
         "`a b*` was not folded into one list: {written}"
     );
 
-    // `bootstrap.uns:145-153` is `'{' ( ',' DEC_LITERAL | DEC_LITERAL ','
-    // DEC_LITERAL? | DEC_LITERAL ) '}'`, so the node named `Repeat` is the whole
+    // `bootstrap.uns:145-153` is `'{' ( ',' LitDec | LitDec ','
+    // LitDec? | LitDec ) '}'`, so the node named `Repeat` is the whole
     // braced run and not what sits between the braces. The hand-written side now
     // has that same boundary: `syntax/expr.rs` declares `Repeat<I>` as
     // `Brace<I, RepeatGroup<I>>`, and `lexical/delimiter.rs`'s

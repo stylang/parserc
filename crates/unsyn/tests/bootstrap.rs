@@ -1,6 +1,6 @@
 use std::{fs, path::PathBuf};
 
-use parserc::syntax::Syntax;
+use parserc::{AsStr, syntax::Syntax};
 use unsyn::{
     input::TokenStream,
     semantics::{NodeKind, analyze},
@@ -72,10 +72,7 @@ fn bootstrap_semantics() {
     assert_eq!(module.symbols().len(), statements);
 
     // The trivia of the language is declared by one `whitespace` node.
-    assert_eq!(
-        module.definition("WHITESPACE").unwrap().kind(),
-        NodeKind::Whitespace
-    );
+    assert_eq!(module.definition("S").unwrap().kind(), NodeKind::Whitespace);
 
     // A node of the tree is not a terminal pattern.
     assert_eq!(module.definition("Expr").unwrap().kind(), NodeKind::Syntax);
@@ -124,4 +121,83 @@ fn a_spec_written_with_crlf_line_endings_is_the_same_spec() {
         statements(&parse_bootstrap()),
         "a CRLF spec declares something else"
     );
+}
+
+/// The names a spec gives its nodes are the names of the Rust types the
+/// generator emits, so the spec of `unsyn` writes them the way Rust writes its
+/// own types: an uppercase first letter, and no word in capitals.
+///
+/// Two names keep their capitals on purpose. `LF` and `CR` are how the two
+/// control characters are spelled everywhere, `lexical::AsciiEscape` among them,
+/// and they name nothing a tree can hold: each appears only as a member of a
+/// character set. The externals `XID_Start` and `XID_Continue` are keyed by the
+/// spelling UAX #31 gives the two properties, which is the spelling the caller's
+/// table must use too.
+#[test]
+fn the_nodes_are_named_as_rust_names_its_types() {
+    for item in parse_bootstrap().items.iter() {
+        let Item::Stmt(stmt) = item else {
+            continue;
+        };
+
+        let name = stmt.ident.0.as_str();
+
+        assert!(
+            name.starts_with(|c: char| c.is_ascii_uppercase())
+                && name.chars().all(|c| c.is_ascii_alphanumeric() || c == '_'),
+            "{name} is not written like a Rust type"
+        );
+        assert!(
+            name.len() <= 2 || name.chars().any(|c| c.is_ascii_lowercase()),
+            "{name} shouts"
+        );
+    }
+}
+
+/// Every type of [`unsyn::lexical`] and [`unsyn::syntax`] that a node of the
+/// hand-written tree is made of has a production of the very same name.
+///
+/// This is the pin that keeps the two spellings from drifting apart: a parser
+/// generated from this spec is only a drop-in for the hand-written one while the
+/// names agree, and a rename on either side has to be a rename on the other.
+///
+/// [`unsyn::lexical`]: unsyn::lexical
+/// [`unsyn::syntax`]: unsyn::syntax
+#[test]
+fn the_spec_names_the_types_the_crate_already_has() {
+    let c = parse_bootstrap();
+
+    let module = analyze(&c).expect("the spec should be well-formed");
+
+    for name in [
+        // The trivia and the tokens a node holds.
+        "S",
+        "Ident",
+        "LitStr",
+        "LitUnicode",
+        "LitDec",
+        "AsciiEscape",
+        "QuoteEscape",
+        "UnicodeEscape",
+        "LineComment",
+        "BlockComment",
+        "InnerLineDoc",
+        "InnerBlockDoc",
+        "OuterLineDoc",
+        "OuterBlockDoc",
+        // The nodes of the tree itself.
+        "Stmt",
+        "Expr",
+        "ExprNoTopAlt",
+        "ExprWithoutSuffix",
+        "ExprWithSuffix",
+        "Repeat",
+        "Range",
+        "SetItem",
+    ] {
+        assert!(
+            module.definition(name).is_some(),
+            "the spec no longer declares {name}, which the crate has a type of"
+        );
+    }
 }

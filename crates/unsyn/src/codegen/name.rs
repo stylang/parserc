@@ -1,7 +1,7 @@
 //! The names of the types the generator emits.
 //!
 //! A `.uns` file already names every node it defines, and those names are the
-//! names of the Rust types: `lexer IDENTIFIER` becomes `IDENTIFIER<I>`. What
+//! names of the Rust types: `lexer Ident` becomes `Ident<I>`. What
 //! needs a name that the file does not give is everything the pattern only
 //! *implies* — the token for a punctuation mark, the node for a parenthesized
 //! alternation, the scanner for a set used inside a rule — and those are named
@@ -275,7 +275,7 @@ mod tests {
 
     #[test]
     fn a_name_is_a_type_name_only_when_rust_agrees() {
-        assert!(is_type_name("IDENTIFIER"));
+        assert!(is_type_name("Ident"));
         assert!(is_type_name("_Private"));
         assert!(!is_type_name("1NCORRECT"));
         assert!(!is_type_name("a-b"));

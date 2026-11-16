@@ -368,7 +368,7 @@ impl Step {
             Step::Except { item, removed } => {
                 // Removing is a complement of one character only when what is
                 // removed is one character too: `'a'-'c' except 'b'` is a class,
-                // while `IDENTIFIER except KEYWORDS` turns on the text that
+                // while `Ident except Keywords` turns on the text that
                 // follows the character being decided on.
                 let item = item.char_class(classes)?;
                 let removed = removed.char_class(classes)?;

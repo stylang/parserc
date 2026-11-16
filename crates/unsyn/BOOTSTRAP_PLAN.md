@@ -60,13 +60,13 @@
 
 具体偏差（可直接对照生成文本）：
 
-- `WHITESPACE<I>(pub I)` 一次只吃**一个**字符，靠 `Vec<WHITESPACE<I>>` 拼成一串；
+- `S<I>(pub I)` 一次只吃**一个**字符，靠 `Vec<S<I>>` 拼成一串；
   不是参考实现里的"非空极大串"。
-- `Stmt` 为 5 个产生式元素生成了 **9 个字段**（4 个 `::std::vec::Vec<WHITESPACE<I>>`）。
+- `Stmt` 为 5 个产生式元素生成了 **9 个字段**（4 个 `::std::vec::Vec<S<I>>`）。
 - `ExprWithoutSuffix::ExprWithoutSuffixBracketStart` 把 `'[' ( SetItem ',' )* SetItem? ']'`
   展平成一串字段（`BracketStart, Vec<(Vec<WS>, ExprWithoutSuffix1)>, Vec<WS>,
   Option<SetItem>, Vec<WS>, BracketEnd`），其中 `ExprWithoutSuffix1<I>` =
-  `(SetItem<I>, Vec<WHITESPACE<I>>, Comma<I>)` —— 这就是 `Punctuated<SetItem, Comma>`。
+  `(SetItem<I>, Vec<S<I>>, Comma<I>)` —— 这就是 `Punctuated<SetItem, Comma>`。
 - `Repeat` = `(BraceStart, Vec<WS>, Repeat1, Vec<WS>, BraceEnd)`，而手写侧的边界
   现在就是 `Repeat<I>` = `Brace<I, RepeatGroup<I>>`（花括号在节点里，内部三选一
   是匿名的 `Choice`）。剩下两处差异：生成侧把 `Repeat` 包成 newtype struct 而不是
@@ -75,9 +75,10 @@
   被**就地重复内联**（`Expr.0` 与 `Expr1.1` 各一份）。注意：规范里本来就没有
   `ExprNoTopAlts` 规则，它是手写树为复用而引入的；生成物内联成元组即可，
   **不需要**造这个名字（见 P3 决定）。
-- `enum Repeat1` 出现 `Repeat1DEC_LITERALVariant3` 这种"同名加序号"的变体名。
+- `enum Repeat1` 出现 `Repeat1DEC_LITERALVariant3` 这种"同名加序号"的变体名（旧命名下的
+  实测；产生式改名后它是 `Repeat1LitDecVariant3`，见 P5 的命名条目）。
   **这一条不是可读性问题**（我原先这么记，是错的）：`Repeat1` 根本不是产生式的左侧，
-  它是 `Repeat` 右侧那个匿名括号组 `( ',' DEC_LITERAL | … )` 被生成器提成了一个具名
+  它是 `Repeat` 右侧那个匿名括号组 `( ',' LitDec | … )` 被生成器提成了一个具名
   enum —— 按「只为产生式左侧生成 CST 节点」，它本来不该存在，见 P5。相比之下
   `ExprWithSuffixExprWithoutSuffixVariant2/3/4` 不同：`ExprWithSuffix` 是左侧的具名规
   则，它的变体名冲突才是真的命名问题。
@@ -92,17 +93,17 @@
 1. `:3-14` whitespace 集与 `char::is_whitespace()` 不一致。实测：`U+200E`、`U+200F`
    的 `is_whitespace()` 为 **false**（规范却列了它们）；而 `U+00A0`、`U+1680`、
    `U+2000`、`U+200A`、`U+202F`、`U+205F`、`U+3000` 都是 **true**（规范漏了）。
-2. `:19` `( XID_Start | _ )` 与 `:76` `( DEC_DIGIT | _ )*` 里的 `_` 想表达**下划线
+2. `:19` `( XID_Start | _ )` 与 `:76` `( DecDigit | _ )*` 里的 `_` 想表达**下划线
    字符**，但 DSL 把裸 `_` 定义为**通配符**（`WILDCARD = "_"`，"匹配任意一个字符"，
    `semantics/graph.rs:26-31`）。后果已在生成物中测得：
-   `IDENTIFIER_OR_KEYWORD` = `XID_Start.or(next_if(|_| true))`（第一个分支变成死代码，
-   任意字符都能开头）；`DEC_LITERAL` = 一个数字后接 `take_while(|_| true)`（一路吃到
+   `IdentOrKeyword` = `XID_Start.or(next_if(|_| true))`（第一个分支变成死代码，
+   任意字符都能开头）；`LitDec` = 一个数字后接 `take_while(|_| true)`（一路吃到
    EOF，`{1,2}` 这种写法会被吞掉）。参考实现是 `'_'`：`lexical/ident.rs:28`
    `c == '_' || is_xid_start(c)`，`lexical/lit.rs:282` `is_ascii_digit() || c == '_'`，
    `semantics/value.rs:75` `replace('_', "")`。
 3. `except` 在多字符操作数上的语义。现实现（`codegen/pattern.rs:311` 的字符类分支
    是正确的减法；`codegen/render.rs:319` 的多字符分支）是"**在目标起始处探测**被减去
-   的语言"。于是 `IDENTIFIER_OR_KEYWORD except KEYWORDS` 会把 `lexerX` 也拒绝掉，
+   的语言"。于是 `IdentOrKeyword except Keywords` 会把 `lexerX` 也拒绝掉，
    而参考实现只拒绝**整个词恰好是关键字**的情形（`lexical/ident.rs:33-41` 比较
    `content.as_str()`）。把 `except` 定义为**"目标实际吃掉的那段文本不属于被减语言"**
    （整串差集，而不是前缀探测）即可复现参考行为，同时**取消**了"关键字边界需要写进
@@ -114,18 +115,18 @@
 
 - [x] **whitespace 集**：`bootstrap.uns:3-17` 改成与 Unicode `White_Space` 一致，用 range
       压缩成集合写法：
-      `whitespace WHITESPACE -> [ U+0009-U+000D , U+0020 , U+0085 , U+00A0 , U+1680 , U+2000-U+200A , U+2028 , U+2029 , U+202F , U+205F , U+3000 ];`
+      `whitespace S -> [ U+0009-U+000D , U+0020 , U+0085 , U+00A0 , U+1680 , U+2000-U+200A , U+2028 , U+2029 , U+202F , U+205F , U+3000 ];`
       决定：**生成器仍不得引用 `char::is_whitespace`**，它只把规范列出的字符编译成字符类。
       注意 range 只能作为 `SetItem` 出现（`Range` 不在 `ExprWithoutSuffix` 里），所以顶层
       交替写法 `U+0009-U+000D | …` 是不合语法的，必须用集合。
-      改后生成物实测：`WHITESPACE` 的字符类 = `'\t'..'\r' | ' ' | \u{85} | \u{a0} | \u{1680} |
+      改后生成物实测：`S` 的字符类 = `'\t'..'\r' | ' ' | \u{85} | \u{a0} | \u{1680} |
       '\u{2000}'..'\u{200a}' | \u{2028} | \u{2029} | \u{202f} | \u{205f} | \u{3000}`，
       与手写 `lexical/s.rs` 的 `is_whitespace()` 恰好相同（25 个码点）。
-- [x] **`_` → `'_'`**：修改 `bootstrap.uns` 的 `IDENTIFIER_OR_KEYWORD` 与 `DEC_LITERAL`。
+- [x] **`_` → `'_'`**：修改 `bootstrap.uns` 的 `IdentOrKeyword` 与 `LitDec`。
       裸 `_` 保持"任意一个字符"的含义（`tests/data/spec.rs` 同时用了 `_` 和 `UNDER -> '_'`，
       证明 DSL 本来就区分这两者）。
-      改后生成物实测：`IDENTIFIER_OR_KEYWORD` = `XID_Start.or(next_if(c == '_'))` 再接
-      `XID_Continue*`；`DEC_LITERAL` = `DEC_DIGIT` 再接
+      改后生成物实测：`IdentOrKeyword` = `XID_Start.or(next_if(c == '_'))` 再接
+      `XID_Continue*`；`LitDec` = `DecDigit` 再接
       `take_while(|c| ('0'..='9').contains || c == '_')` —— 与 `lexical/ident.rs:28`、
       `lexical/lit.rs:282` 一致。
 - [x] **`except` = 整串差集**：**决定**记录在此；文档注释与实现一起放到 P4 改，避免文档
@@ -135,7 +136,8 @@
 - [x] 决定：`whitespace` 节点**不是一等产生式**，它的 body 只被读成一个字符类，生成的
       类型按 P0 的归属规则是 trivia 本身，因此它自己不拥有 trivia（否则无限递归）。
 - [x] 决定：自举的验收标准是**行为等价**（同一批 `.uns` 上手写 parser 与生成 parser 的
-      CST 与错误位置一致），不要求类型名/别名/字段数相同。因此 `Bracket`/`Angle` 这些
+      CST 与错误位置一致），不要求类型名/别名/字段数相同（类型名后来已逐一对齐，见 P5 的
+      命名条目；别名与字段数仍不作要求）。因此 `Bracket`/`Angle` 这些
       `Delimiter` 别名不生成，`ExprNoTopAlts` 这个名字也不造（内联成元组即可）。
 - [x] **trivia 归属规则**写进 DSL 文档（`codegen/types.rs` 的 `# Whitespace` 小节 +
       `lib.rs`）：**→ 已归入 P2**，与实现同一批改，否则文档会描述一个还不存在的行为。
@@ -178,8 +180,8 @@
   2. 它不是文件声明的 `whitespace` 节点（否则自己吃自己的串，无限递归）。
   3. 它没有被任何**词法模式**直接 `Step::Ref`：`Ref` 编译成 `input.parse::<T>()?`，
      被引用的类型若拥有 trivia，会把两侧的串吃进父 token 自己的文本里 ——
-     `QUOTE_ESCAPE -> '\\\''` 若拥有 trivia，`'a\ ''` 就成了合法字符串；
-     `LEADING_KEYWORDS` 被 `KEYWORDS` 引用，因此也不拥有。
+     `QuoteEscape -> '\\\''` 若拥有 trivia，`'a\ ''` 就成了合法字符串；
+     `LeadingKeywords` 被 `Keywords` 引用，因此也不拥有。
   4. 它能匹配的字符与 `whitespace` 的字符集**不相交**。反例：把 `' '` 声明成内容 token
      的规则，拥有前导串就会让"极大串先吃光"抢掉它自己要匹配的字符。
 - [x] 拥有 trivia 的终结符渲染成 `struct X<I>(pub Option<WS<I>>, pub I, pub Option<WS<I>>)`，
@@ -251,7 +253,7 @@
       必须解析成同一棵树。
 - [x] 验收：**每条产生式折出的形状，与手写 parser 里同一条产生式用的形状一致**。
       这一条原先写的是"`Stmt` 字段数下降、重复匿名类型减少"，那是我自己加的指标，不是
-      要求：P0 定的验收标准是行为等价，且明写"不要求类型名/别名/字段数相同"（`:131`）。
+      要求：P0 定的验收标准是行为等价，且明写"不要求类型名/别名/字段数相同"（`:138`）。
       拿字段数当指标还有更坏的一层：它给上面 `Delimiter` 那个真错打了高分 —— 窗口取得越
       贪就越"省字段"，所以这个指标只会把错误方向奖励成成绩，把 `~` 和 `]` 配成一对这种
       形状错误完全看不见。现在核对的四条（`bootstrap.uns:123-126` 对
@@ -259,9 +261,9 @@
       - `'~' '[' … ']'` → `Tilde(Tilde, Delimiter<BracketStart, BracketEnd, Punctuated>)`
         同形于手写的 `Tilde(Tilde<I>, Bracket<I, Punctuated<SetItem<I>, Comma<I>>>)`；
       - `'[' … ']'` → 同形于手写的 `Set(Bracket<I, Punctuated<SetItem<I>, Comma<I>>>)`；
-      - `'<' IDENTIFIER '>'` → 同形于手写的 `Call(Angle<I, Ident<I>>)`；
+      - `'<' Ident '>'` → 同形于手写的 `Call(Angle<I, Ident<I>>)`；
       - `'(' Expr ')'` → 同形于手写的 `Paren(Paren<I, Box<Expr<I>>>)`；
-      - `stmt: LEADING_KEYWORDS IDENTIFIER '->' Expr ';'`（`:167`）→ 生成的是
+      - `Stmt -> LeadingKeywords Ident '->' Expr ';'`（`:167`）→ 生成的是
         `Delimiter<ArrowRight, Semi, Expr>`，手写原先是 `arrow_right, expr, semi` 三个
         平铺字段 —— **已改手写的一侧**：`syntax/expr.rs` 的 `Stmt` 三个变体现在都是
         `definition: Delimiter<ArrowRight<I>, Semi<I>, Expr<I>>`，`Definition::expr`
@@ -294,7 +296,7 @@
       并补 `"let x"`/`"fn x"` 仍被拒绝、`"xlet"` 被接受的用例。
 - [ ] 复核 `~[X]*`：现在生成 `take_while(|c| !class(c))`，与 `take_till(class)` 等价；
       统一选一个并在文档里写明理由（倾向 `take_while`，因为它能带 `1..` 上界形式）。
-- [ ] 关键字边界：确认取消规范侧的额外规则后，`NON_KEYWORD_IDENTIFIER` 的生成物
+- [ ] 关键字边界：确认取消规范侧的额外规则后，`NonKeywordIdent` 的生成物
       对 `lexer`、`lexerX`、`xlexer` 三个输入的行为与 `lexical/ident.rs` 一致，
       并加测试。
 - [ ] 保留 `{n,m}` 报 `Kind::Syntax(具名)` 而不是 `Kind::Limits*`（后者不带名字）；
@@ -310,22 +312,22 @@
 `Vec<…>`、`Delimiter<…>`、`Punctuated<…>`，以及下面要补的 `Or<…>` —— 不替它们造名字。
 
 **"内联"不适用于对已声明产生式的引用**（用户 2026-11-16 的质疑成立，措辞在此钉死）：
-产生式右侧写成 `IDENTIFIER`、`Repeat`、`DEC_LITERAL` 这类**左侧名字的引用**，当然要
+产生式右侧写成 `Ident`、`Repeat`、`LitDec` 这类**左侧名字的引用**，当然要
 生成 CST 节点，而且现在就已经是节点，本条不改这个行为。实测证据（全量 codegen
 `bootstrap.uns`，以及 fixture）：
 
-- `SetItem` 四个变体持 `Range<I>` / `STRING_LITERAL<I>` / `UNICODE_LITERAL<I>` /
-  `IDENTIFIER<I>`；
+- `SetItem` 四个变体持 `Range<I>` / `LitStr<I>` / `LitUnicode<I>` /
+  `Ident<I>`；
 - `ExprNoTopAlt` 两个变体持 `Box<ExprWithSuffix<I>>` / `Box<ExprWithoutSuffix<I>>`；
 - `Repeat` 持 `Delimiter<BraceStart<I>, BraceEnd<I>, …>`；
 - `tests/data/mini.rs:1386` 的 `ITEM` 持 `Delimiter<ARROW<I>, SEMI<I>, EXPR<I>>`，
   `EXPR:1424` 持 `Box<PRIMARY<I>>`，`PRIMARY:1469` 各变体持 `IDENT<I>` / `LITERAL<I>` /
   `Box<GROUP<I>>`。
 
-要去掉名字的只有 `'<' IDENTIFIER '>'`、`( '*' | '?' | '+' | Repeat )` 这种**匿名括号组
+要去掉名字的只有 `'<' Ident '>'`、`( '*' | '?' | '+' | Repeat )` 这种**匿名括号组
 自身**——它们是联结结构而不是引用。手写侧就是这么写的：`bootstrap.uns:145` 的
 `Repeat` 是左侧（也是引用点），所以 `syntax/expr.rs:420` 有 `enum Repeat`；而
-`bootstrap.uns:124` 的 `'<' IDENTIFIER '>'` 这个组在手写侧是内联的
+`bootstrap.uns:124` 的 `'<' Ident '>'` 这个组在手写侧是内联的
 `Angle<I, Ident<I>>`，没有 `ExprWithoutSuffix1` 这种名字。
 
 实测的偏离（一个临时探针，跑 `bootstrap.uns` 全量 codegen 后统计，已删）：36 条
@@ -347,6 +349,30 @@ fixture `tests/data/spec.rs` 上同一违规有六个：`NUMBER1`（`DIGIT ( DIG
 `TEXT12`/`Commented11` 是 `~[…]`/`[…]` 这类字符级模式的 token 类型，`SHAPE1`/
 `Dotted1` 是 `{n,m}` 的载体，`Guarded1` 是 `followed` 的 `Asserted`。
 
+- [x] **规范里的名字改成 Rust 类型写法，并与手写侧的类型逐一同名**（用户 2026-11-16：
+      “如果需要自举 CST 的名称要和 Rust 侧一样，按照 rust 的命名规范修改”）。
+      依据是 `codegen/name.rs` 开头写死的规则：产生式的名字**就是**生成出来的 Rust 类型名。
+      只要两侧名字逐一相等，自举出来的 parser 才是手写 parser 的直接替换，否则“名字一样”
+      这条要求就只是修辞。36 条产生式重写了 24 条，四条原则：
+
+      | 情况 | 处理 |
+      | --- | --- |
+      | 手写侧已有同职类型 | 采用手写的名字：`S`、`Ident`、`LitStr`、`LitUnicode`、`LitDec`、`QuoteEscape`、`AsciiEscape`、`UnicodeEscape`、`LineComment`、`BlockComment`、`InnerLineDoc`、`InnerBlockDoc`、`OuterLineDoc`、`OuterBlockDoc`，加上原本就一致的 `Stmt`、`Expr`、`ExprNoTopAlt`、`ExprWithoutSuffix`、`ExprWithSuffix`、`Repeat`、`Range`、`SetItem` |
+      | 手写侧折进 `match` 臂或 `is_xxx`，没有对应类型 | 按同一风格取名：`IdentOrKeyword`、`NonKeywordIdent`、`RawIdent`、`Keywords`、`LeadingKeywords`、`FollowingKeywords`、`OctDigit`、`DecDigit`、`HexDigit`、`BlockCommentOrDoc` |
+      | `<…>` 外部链接 | 不动：`XID_Start`、`XID_Continue` 用 UAX #31 给两个属性的原名，那是调用方表里的键，不是 unsyn 的类型 |
+      | 两个控制字符 | 不动：`LF`、`CR` 是它们的通用写法，手写侧 `AsciiEscape::LF/CR` 也这么拼；两者只当集合成员出现，不成为树上的节点 |
+
+      手写侧跟着改的只有一处：`ASCIIEscape` → `AsciiEscape`（连同 `StrSegment` 与
+      `SyntaxKind` 里的同名变体）——它是唯一违反 Rust 类型命名法的名字，其余全部本来就一致。
+      一个容易混的点：`whitespace` 声明取的名字是 `S`，即 `lexical::S` 那个非空极大 trivia 串；
+      `lexical::keyword::Whitespace` 是 `'whitespace'` 这个**关键字 token**，两者不同职，
+      生成物里也分处不同模块，所以不冲突。
+      两条测试把这件事钉住：`tests/bootstrap.rs::the_nodes_are_named_as_rust_names_its_types`
+      要求每个产生式名都是合法的 Rust 类型名且不是一片大写（两个字母的 `LF`/`CR` 例外）；
+      `the_spec_names_the_types_the_crate_already_has` 逐个断言手写树用到的 22 个类型名在规范
+      里都有同名产生式，任何一侧单独改名都会红。
+      `tests/data/spec.rs` 那套示例语言的 SCREAMING 写法**没动**：它是 fixture 的输入，改了要
+      连带重生 `tests/data/mini.rs`，归下面那条重生 fixture 一起做。
 - [ ] `FieldType` 缺一个"多选一"分支：它有 `Group`（元组）、`Concat`、`Opt`、`Many`、
       `Punctuated`、`Delimited`，都是内联的类型表达式，唯独没有 alternative，所以
       多选只能落到 `enum_of` + `anonymous_as` 造一个具名 enum。补一个内联分支（
@@ -437,26 +463,26 @@ fixture `tests/data/spec.rs` 上同一违规有六个：`NUMBER1`（`DIGIT ( DIG
 - [ ] **先补规范的洞**：`bootstrap.uns` 里**没有文件级规则**。手写的 `Crate{items: Vec<Item>}`
       与 `Item = S | Stmt | InnerDoc | OuterDoc` 没有被自描述，因此生成的 parser 无从复现它。
       建议加：
-      `syntax Item -> WHITESPACE | INNER_LINE_DOC | OUTER_LINE_DOC | INNER_BLOCK_DOC | OUTER_BLOCK_DOC | Stmt;`
+      `syntax Item -> S | InnerLineDoc | OuterLineDoc | InnerBlockDoc | OuterBlockDoc | Stmt;`
       `syntax Crate -> Item*;`
-      注意 `Item -> WHITESPACE | …` 里对 trivia 节点的**裸引用**会被 `fold_separators` 保留
+      注意 `Item -> S | …` 里对 trivia 节点的**裸引用**会被 `fold_separators` 保留
       （整条序列只有它自己），所以这一条能工作；生成的 `Crate` 会是 `Vec<Item>` 的 newtype
       而不是命名字段 struct —— 按 P0 的「行为等价」决定，可以接受。
 - [x] **第二个规范洞（本轮新发现）：`Stmt` 的关键字** —— 已定：**改手写的一侧**。
       `bootstrap.uns:167` 把三种声明写成**一条**规则
-      `syntax Stmt -> LEADING_KEYWORDS IDENTIFIER '->' Expr ';'`，生成的是四元素扁平
+      `syntax Stmt -> LeadingKeywords Ident '->' Expr ';'`，生成的是四元素扁平
       struct；手写的 `Stmt` 原先是按关键字分三变体的 enum，`semantics` 从变体名取
       `NodeKind`。现在的形状：`Stmt<I>` 是 struct，字段
       `keyword: LeadingKey<I>` / `ident` / `definition`，其中
       `LeadingKey`（`syntax/expr.rs:50`）是 `Whitespace | Lexer | Syntax` 三个关键字 token
-      的和类型。kind 不从 `LEADING_KEYWORDS` 的**文本**读，而从 `LeadingKey` 的**变体**读
+      的和类型。kind 不从 `LeadingKeywords` 的**文本**读，而从 `LeadingKey` 的**变体**读
       （`symbol.rs::stmt_kind`），所以「是哪三种声明」仍在结构里而没掉进文本里；这一步
       同时把原来重复了四次的三路 `match` 收成这一个函数。
       为什么 `LeadingKey` 不放 `lexical/keyword.rs`：那个模块全用 `define_keyword!` 配手写
       `Syntax` impl，且写 `impl<I> parserc::syntax::Syntax<I>`，`use parserc::syntax::Syntax`
       会和局部那个名为 `Syntax` 的关键字 struct 撞掉；`syntax/expr.rs` 已经在给同类
       「若干个 token 节点的和类型」derive `Syntax`，放这里才一致。
-      与生成侧的剩余差别：生成的是一个统一的 `LEADING_KEYWORDS<I>` token 字段，手写的
+      与生成侧的剩余差别：生成的是一个统一的 `LeadingKeywords<I>` token 字段，手写的
       `LeadingKey` 是三选一 —— 这是 P6 等价性测试要处理的一项，和关键字 trivia 的归属
       差别（手写关键字只带后置 trivia，见 `lexical/keyword.rs:9-11`）同一类，本轮不动。
 - [ ] 搭一个 build 阶段：用 `codegen` 从 `bootstrap.uns` 生成 parser，编译进测试
@@ -485,6 +511,14 @@ fixture `tests/data/spec.rs` 上同一违规有六个：`NUMBER1`（`DIGIT ( DIG
 > 24 generated / 3 doctests），2 十五行全 `ok`；3 为 runtime-only（2 + 0）；5 在
 > `crates/unsyn` 里 0 条（`parserc` 4 条、`sourcespan` 1 条是既有的，不属本任务）；
 > 6 四组 feature 组合各 0 警告；7 干净。
+>
+> 命名对齐那一轮（见 P5）后重跑全表：1 全绿（179 lib / **5** bootstrap / 19 codegen /
+> 1 dump / 25 generated / 3 doctests —— bootstrap 从 3 涨到 5 是新增的两条命名测试），
+> 2 十五行全 `ok`；3 runtime-only 2 绿，codegen-only（`--no-default-features`）177 lib
+> 全绿；4 与 1 同数；5 三组均在 `crates/unsyn` 里 0 条；6 四组均 0 警告；7 干净。
+> 生成物里的类型名随规范一起改了（`structWHITESPACE` → `structS<I>` 等，
+> `tests/codegen.rs` 的断言跟着改），但 fixture 是从 `tests/data/spec.rs` 生成的，
+> 不受影响（drift 测试绿）。
 
 ## P7 — 收尾
 

@@ -121,7 +121,7 @@ pub enum SyntaxKind {
     #[error("single quote")]
     QuoteEscape,
     #[error("ascii escape")]
-    ASCIIEscape,
+    AsciiEscape,
     #[error("string content")]
     StrContent,
     #[error("ident")]

@@ -42,7 +42,7 @@ use crate::{
 /// * `syntax` for a node of the tree, built from the tokens it refers to.
 ///
 /// The three are one lexer in the grammar — `bootstrap.uns:37` writes
-/// `LEADING_KEYWORDS -> 'lexer' | 'syntax' | 'whitespace'` — but they cannot be one
+/// `LeadingKeywords -> 'lexer' | 'syntax' | 'whitespace'` — but they cannot be one
 /// token here, because which of them stood at the front is the only thing that
 /// tells the [statement](Stmt) apart from the others of its shape.
 #[derive(Debug, PartialEq, Eq, PartialOrd, Ord, Clone, Syntax)]
@@ -418,7 +418,7 @@ where
 /// group is a type expression and no type of its own.
 pub type Repeat<I> = Brace<I, RepeatGroup<I>>;
 
-/// The group `(',' DEC_LITERAL | DEC_LITERAL ',' DEC_LITERAL? | DEC_LITERAL)` of
+/// The group `(',' LitDec | LitDec ',' LitDec? | LitDec)` of
 /// `bootstrap.uns:147-151`, in the shape the production writes it.
 ///
 /// The comma form is read before the bare count, which is what lets `{2, 3}` be
@@ -665,41 +665,41 @@ mod tests {
     #[test]
     fn a_statement_is_a_name_an_expression_and_a_semicolon() {
         assert_eq!(
-            TokenStream::from("lexer OCT_DIGIT -> [\'0\'-\'7\'];").parse::<Stmt<_>>(),
+            TokenStream::from("lexer OctDigit -> [\'0\'-\'7\'];").parse::<Stmt<_>>(),
             Ok(Stmt {
                 keyword: LeadingKey::Lexer(Lexer(
                     TokenStream::from((0, "lexer")),
                     Some(S(TokenStream::from((5, " "))))
                 )),
-                ident: Ident(TokenStream::from((6, "OCT_DIGIT"))),
+                ident: Ident(TokenStream::from((6, "OctDigit"))),
                 definition: Delimiter {
                     start: ArrowRight(
-                        Some(S(TokenStream::from((15, " ")))),
-                        TokenStream::from((16, "->")),
-                        Some(S(TokenStream::from((18, " ")))),
+                        Some(S(TokenStream::from((14, " ")))),
+                        TokenStream::from((15, "->")),
+                        Some(S(TokenStream::from((17, " ")))),
                     ),
                     body: Expr {
                         first: ExprNoTopAlts {
                             first: ExprNoTopAlt::WithoutSuffix(ExprWithoutSuffix::Set(Bracket {
-                                start: BracketStart(None, TokenStream::from((19, "[")), None),
-                                end: BracketEnd(None, TokenStream::from((27, "]")), None),
+                                start: BracketStart(None, TokenStream::from((18, "[")), None),
+                                end: BracketEnd(None, TokenStream::from((26, "]")), None),
                                 body: Punctuated {
                                     pairs: vec![],
                                     tail: Some(Box::new(SetItem::Range(Range::Str(
                                         LitStr {
-                                            delimiter_start: TokenStream::from((20, "\'")),
+                                            delimiter_start: TokenStream::from((19, "\'")),
                                             content: vec![StrSegment::CharWithException(
-                                                TokenStream::from((21, "0")),
+                                                TokenStream::from((20, "0")),
                                             )],
-                                            delimiter_end: TokenStream::from((22, "\'")),
+                                            delimiter_end: TokenStream::from((21, "\'")),
                                         },
-                                        Minus(None, TokenStream::from((23, "-")), None),
+                                        Minus(None, TokenStream::from((22, "-")), None),
                                         LitStr {
-                                            delimiter_start: TokenStream::from((24, "\'")),
+                                            delimiter_start: TokenStream::from((23, "\'")),
                                             content: vec![StrSegment::CharWithException(
-                                                TokenStream::from((25, "7")),
+                                                TokenStream::from((24, "7")),
                                             )],
-                                            delimiter_end: TokenStream::from((26, "\'")),
+                                            delimiter_end: TokenStream::from((25, "\'")),
                                         },
                                     )))),
                                 },
@@ -708,7 +708,7 @@ mod tests {
                         },
                         rest: vec![],
                     },
-                    end: Semi(None, TokenStream::from((28, ";")), None),
+                    end: Semi(None, TokenStream::from((27, ";")), None),
                 },
             })
         );
