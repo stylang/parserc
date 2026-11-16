@@ -9,9 +9,10 @@
 //!
 //! The spec is the one `bootstrap.uns` is written against in everything but
 //! scale: sets, ranges, the wildcard, complements, `concat`, `except`,
-//! `followed`, counted runs, groups that need a type of their own, and rules
-//! that reach themselves. A spec that cannot be generated is reported, with the
-//! span of what the generator could not write, rather than half-written.
+//! `followed`, counted runs, groups of several alternatives held as one field,
+//! and rules that reach themselves. A spec that cannot be generated is
+//! reported, with the span of what the generator could not write, rather than
+//! half-written.
 
 use std::{fs, path::PathBuf};
 

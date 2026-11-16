@@ -6,16 +6,24 @@
 //! the repetitions and the assertions the rule asks for written into the type of
 //! the field rather than into the code that reads it ([`FieldType`]).
 //!
-//! Four things make part of a rule need a type of its own rather than a field:
+//! Three things make part of a rule need a type of its own rather than a field:
 //!
 //! - a repetition counted out (`X{n}`, `X{n}..{m}`), whose bound the code that
 //!   reads it has to check, which is [`TypeDefKind::Bounds`];
 //! - an operand with a question asked about the text it read or the text after
 //!   it (`except`, `followed`), which is [`TypeDefKind::Asserted`];
-//! - a group with more than one alternative, which is a
-//!   [`TypeDefKind::Enum`] of its own, named after the rule it was written in;
-//! - anything a rule reaches through more than sixteen operands, since the
-//!   shortcut of [`FieldType::Concat`] is a tuple and a tuple stops at sixteen.
+//! - an operand matched over characters rather than over nodes inside a rule of
+//!   nodes, which needs a parser of its own and so earns the token type
+//!   [`TypeBuilder::token`] writes.
+//!
+//! A name is what the *left* side of a production earns, and a
+//! [`TypeDefKind::Enum`] is what one of several alternatives is worth. The right
+//! side of a `->` names nothing: a group of several alternatives is one field
+//! held as [`FieldType::Alts`], which the backend reads as its ordered choice,
+//! and a sequence longer than the tuple the backend derives ([`MAX_TUPLE`]) is
+//! nested rather than named. [`FieldType::Concat`] is no shortcut over long
+//! sequences either: it is the one field of the two operands the DSL joins with
+//! `concat`.
 //!
 //! # Trivia
 //!
@@ -87,14 +95,10 @@ use super::name::{Names, keyword_name, literal_name, punct_name};
 use super::pattern::{CharClass, PatternBuilder, RuleNames, Step, TokenPattern};
 
 /// The most operands a sequence may be folded into, which is how many elements
-/// a tuple of the backend has.
-const MAX_TUPLE: usize = 16;
-
-/// The most operands a group may hold and still be inlined into a tuple.
-///
-/// Half of [`MAX_TUPLE`], since a gap may have to stand between each two of
-/// them, and the worst case is one gap for every operand but the first.
-const MAX_GROUP: usize = MAX_TUPLE / 2;
+/// a tuple of the backend has: `parserc` derives a syntax for a tuple of each
+/// length up to this, and a longer one is [nested](super::render::Renderer::tuple)
+/// rather than named.
+pub(crate) const MAX_TUPLE: usize = 16;
 
 /// One type codegen writes for a node rule, or for a construct inside one.
 pub(crate) struct TypeDef {
@@ -138,8 +142,9 @@ pub(crate) enum TypeDefKind {
 
 /// One alternative of a rule that has several.
 pub(crate) struct Variant {
-    /// The name of the variant, which comes from what the alternative is built
-    /// on: the node or literal it starts with, where there is one to read.
+    /// The name of the variant, which is the first operand of the alternative
+    /// that no sibling of it has at the same place: what divides it from the rest
+    /// of the alternatives is what it is, rather than where it was written.
     pub(crate) name: String,
     /// The elements of the alternative's sequence.
     pub(crate) fields: Vec<Field>,
@@ -180,9 +185,14 @@ pub(crate) enum FieldType {
         /// What comes next.
         second: Box<FieldType>,
     },
-    /// A group the operands of a sequence, folded into one field because no
-    /// type of its own was needed to hold them.
+    /// A group of operands that needed no type of its own, folded into one
+    /// field because nothing divides them.
     Group(Vec<FieldType>),
+    /// The alternatives of a group, held as the ordered choice of the backend
+    /// rather than as a type of their own: only the left side of a production
+    /// earns a name, and what a rule writes on its right side is one of the
+    /// shapes below however many ways it may be read.
+    Alts(Vec<FieldType>),
     /// A run of trivia that neither of the operands around it owns, which is a
     /// field of the sequence it lies in rather than part of either of them.
     Gap,
@@ -249,6 +259,8 @@ impl FieldType {
                 first.takes_nothing(empty) && second.takes_nothing(empty)
             }
             FieldType::Group(tys) => tys.iter().all(|ty| ty.takes_nothing(empty)),
+            // The choice is nothing as soon as one of its ways is.
+            FieldType::Alts(tys) => tys.iter().any(|ty| ty.takes_nothing(empty)),
             // The terminals that hold a delimited run take what they match: a
             // fixed string is never nothing.
             FieldType::Delimited { .. } => false,
@@ -265,6 +277,11 @@ impl FieldType {
                 format!("{} concat {}", first.describe(), second.describe())
             }
             FieldType::Group(tys) => format!("({})", Self::described(tys)),
+            FieldType::Alts(tys) => tys
+                .iter()
+                .map(FieldType::describe)
+                .collect::<Vec<_>>()
+                .join(" or "),
             FieldType::Gap => "a run of trivia".to_owned(),
             FieldType::Punctuated { item, sep } => {
                 format!("{} separated by {}", item.describe(), sep.describe())
@@ -298,6 +315,11 @@ impl FieldType {
                 second.names(out);
             }
             FieldType::Group(tys) => {
+                for ty in tys {
+                    ty.names(out);
+                }
+            }
+            FieldType::Alts(tys) => {
                 for ty in tys {
                     ty.names(out);
                 }
@@ -347,9 +369,6 @@ pub(crate) struct TypeBuilder {
     literals: HashMap<String, String>,
     /// The same for the code points, keyed by the one character they are.
     code_points: HashMap<char, String>,
-    /// The variant names already given for one owner, which are the names only
-    /// the alternatives of one rule have to keep apart from each other.
-    variants: HashMap<String, std::collections::HashSet<String>>,
     /// The patterns of the token types the types needed, which are written out
     /// beside the rules of the file.
     anon_tokens: Vec<TokenPattern>,
@@ -380,7 +399,6 @@ impl TypeBuilder {
             shared: HashMap::new(),
             literals: HashMap::new(),
             code_points: HashMap::new(),
-            variants: HashMap::new(),
             anon_tokens: Vec::new(),
             pending: Vec::new(),
         }
@@ -725,65 +743,62 @@ impl TypeBuilder {
     }
 
     /// The type of a parenthesised group.
+    ///
+    /// A group is written on the right side of a `->`, where nothing is being
+    /// named: one way of being read is the sequence it is, and several ways are
+    /// the ordered choice the backend already holds. Neither is a reason to
+    /// invent a type, since a name is what the left side of a production earns.
     fn group<I: UnsynInput>(
         &mut self,
         owner: &str,
         expr: &Expr<I>,
     ) -> Result<FieldType, CodegenError> {
-        // A group of one alternative and no more operands than a tuple holds is
-        // the sequence they make: it needs no type of its own, and the trivia
-        // between its operands is settled as the trivia of any other sequence
-        // is, which is what lets `(A B)` and `A B` be read as one shape.
         if expr.rest.is_empty() {
-            let fields = self.fields_of_sequence(owner, &expr.first)?;
+            return self.alternative(owner, &expr.first);
+        }
 
-            if fields.is_empty() {
-                return Err(CodegenError::unsupported(
-                    "a group with nothing in it",
-                    expr.to_span(),
-                ));
-            }
+        // Several ways of being read, each settled as the sequence it offers. The
+        // trivia inside one way belongs to that way alone, which is what the
+        // settling of [`FieldType::Alts`] goes back over them for.
+        let mut alts = vec![self.alternative(owner, &expr.first)?];
 
-            if fields.len() <= MAX_GROUP {
-                let mut tys: Vec<FieldType> = fields.into_iter().map(|field| field.ty).collect();
+        for (_, seq) in &expr.rest {
+            alts.push(self.alternative(owner, seq)?);
+        }
 
-                if tys.len() == 1 {
-                    return Ok(tys.pop().expect("one operand"));
-                }
+        Ok(FieldType::Alts(alts))
+    }
 
-                return Ok(FieldType::Group(tys));
-            }
+    /// The type one alternative of a group is held as: its operands folded into
+    /// a tuple when there is more than one to hold, and the operand it already
+    /// is where it stands alone.
+    ///
+    /// A tuple longer than the backend derives a syntax for is [nested by the
+    /// renderer](super::render::Renderer::tuple) rather than named, so the length
+    /// of a sequence is no reason to invent a type nobody wrote either.
+    fn alternative<I: UnsynInput>(
+        &mut self,
+        owner: &str,
+        seq: &ExprNoTopAlts<I>,
+    ) -> Result<FieldType, CodegenError> {
+        let mut tys: Vec<FieldType> = self
+            .fields_of_sequence(owner, seq)?
+            .into_iter()
+            .map(|field| field.ty)
+            .collect();
 
-            // More operands than a tuple holds: the group needs a type of its
-            // own, and is named for the rule it was written in.
-            let name = self.next(owner);
-
-            return Ok(FieldType::Named(
-                self.anonymous_as(name, TypeDefKind::Struct { fields }),
+        if tys.is_empty() {
+            return Err(CodegenError::unsupported(
+                "a group with nothing in it",
+                seq.to_span(),
             ));
         }
 
-        // The group needs a type of its own. It is named first, for the rule it
-        // was written in, and then shaped under that name: the alternatives of
-        // the group are named for the group, not for the rule around it, which
-        // is what keeps two groups of one rule from naming the same variant.
-        let name = self.next(owner);
-        let kind = self.kind(&name, expr)?;
+        if tys.len() == 1 {
+            return Ok(tys.pop().expect("one operand, counted just now"));
+        }
 
-        Ok(FieldType::Named(self.anonymous_as(name, kind)))
-    }
-
-    /// Writes a type of its own for a construct of a rule under a name that has
-    /// already been worked out for it.
-    fn anonymous_as(&mut self, base: String, kind: TypeDefKind) -> String {
-        let name = self.name(&base);
-
-        self.pending.push(TypeDef {
-            name: name.clone(),
-            kind,
-        });
-
-        name
+        Ok(FieldType::Group(tys))
     }
 
     /// Writes a type of its own for a construct of a rule and names it.
@@ -815,97 +830,49 @@ impl TypeBuilder {
         self.names.register_anonymous(base)
     }
 
-    /// The sum type of a rule or group of several alternatives.
+    /// The sum type of a rule of several alternatives.
+    ///
+    /// A group written on the right side of a `->` is not read this way: only the
+    /// left side of a production earns a type, and the alternatives of a group are
+    /// the [`FieldType::Alts`] of the same sequences.
     fn enum_of<I: UnsynInput>(
         &mut self,
         owner: &str,
         expr: &Expr<I>,
     ) -> Result<TypeDefKind, CodegenError> {
+        // The alternatives as they were written, because one of them cannot be
+        // named before all of them have been read: what a variant is called is
+        // whichever operand none of its siblings has at the same place.
+        let mut alts = vec![&expr.first];
+
+        alts.extend(expr.rest.iter().map(|(_, alts)| alts));
+
+        let shapes: Vec<Vec<String>> = alts
+            .iter()
+            .map(|seq| operand_names(seq))
+            .collect::<Vec<_>>();
+
         let mut variants = Vec::new();
+        let mut names: Vec<String> = Vec::new();
 
-        variants.push(Variant {
-            name: self.named_variant(owner, &expr.first, 0)?,
-            fields: self.fields_of_sequence(owner, &expr.first)?,
-        });
+        for (index, seq) in alts.into_iter().enumerate() {
+            let mut name = variant_name(&shapes, index);
 
-        for (index, (_, alts)) in expr.rest.iter().enumerate() {
+            // Two alternatives written the same say nothing about which is the
+            // other, so the place one of them holds is all that is left to tell.
+            if names.contains(&name) {
+                name = format!("{name}Variant{}", index + 1);
+            }
+
+            names.push(name.clone());
+
             variants.push(Variant {
-                name: self.named_variant(owner, alts, index + 1)?,
-                fields: self.fields_of_sequence(owner, alts)?,
+                name: format!("{owner}{name}"),
+                fields: self.fields_of_sequence(owner, seq)?,
             });
         }
 
         Ok(TypeDefKind::Enum { variants })
-    }
-
-    /// The name one alternative is given among its siblings, which is read from
-    /// what it is built on and falls back to the place it holds.
-    fn named_variant<I: UnsynInput>(
-        &mut self,
-        owner: &str,
-        seq: &ExprNoTopAlts<I>,
-        index: usize,
-    ) -> Result<String, CodegenError> {
-        let base = match &seq.first {
-            // The word or the token an alternative opens with is what it is, so
-            // long as there is only one of each among the alternatives.
-            ExprNoTopAlt::WithoutSuffix(ExprWithoutSuffix::Ident(ident))
-                if ident.0.as_str() != WILDCARD =>
-            {
-                keyword_name(ident.0.as_str())
-            }
-            // The wildcard is a token of any one character, which is what it is
-            // named for; the underscore it is written with names no type.
-            ExprNoTopAlt::WithoutSuffix(ExprWithoutSuffix::Ident(_)) => "Any".to_owned(),
-            ExprNoTopAlt::WithoutSuffix(ExprWithoutSuffix::Str(lit)) => {
-                let (text, _) = crate::semantics::str_value(lit);
-
-                literal_name(&text)
-            }
-            ExprNoTopAlt::WithoutSuffix(ExprWithoutSuffix::Unicode(lit)) => {
-                match crate::semantics::unicode_value(lit) {
-                    Ok(c) => punct_name(&c.to_string()),
-                    Err(_) => format!("Variant{}", index + 1),
-                }
-            }
-            ExprNoTopAlt::WithoutSuffix(ExprWithoutSuffix::Tilde(..)) => "Tilde".to_owned(),
-            ExprNoTopAlt::WithoutSuffix(ExprWithoutSuffix::Set(..)) => "Set".to_owned(),
-            ExprNoTopAlt::WithoutSuffix(ExprWithoutSuffix::Paren(..)) => "Group".to_owned(),
-            // An external call is named for what it calls, which the rule around
-            // it does not say.
-            ExprNoTopAlt::WithoutSuffix(ExprWithoutSuffix::Call(angle)) => {
-                keyword_name(angle.body.0.as_str())
-            }
-            ExprNoTopAlt::WithSuffix(ExprWithSuffix::Concat { .. }) => "Concat".to_owned(),
-            ExprNoTopAlt::WithSuffix(ExprWithSuffix::Followed { .. }) => "Followed".to_owned(),
-            ExprNoTopAlt::WithSuffix(ExprWithSuffix::Except { .. }) => "Except".to_owned(),
-            // The group is one alternative, but the operator it picked is what
-            // tells two alternatives of a rule apart, so the variant is still
-            // named for the operator rather than for the group.
-            ExprNoTopAlt::WithSuffix(ExprWithSuffix::Grouped { suffix, .. }) => {
-                match SuffixOp::of(suffix) {
-                    SuffixOp::Star(_) => "Star",
-                    SuffixOp::Question(_) => "Question",
-                    SuffixOp::Plus(_) => "Plus",
-                    SuffixOp::Repeat(_) => "Repeat",
-                }
-                .to_owned()
-            }
-        };
-
-        // A variant is named within the type it belongs to, so only the
-        // alternatives of one rule have to be kept apart from each other: a
-        // second alternative of the same rule steps aside rather than colliding.
-        let given = self.variants.entry(owner.to_owned()).or_default();
-        let named = if given.contains(&base) {
-            format!("{base}Variant{}", given.len() + 1)
-        } else {
-            base
-        };
-
-        given.insert(named.clone());
-
-        Ok(format!("{owner}{named}"))
     }
 
     /// The name of the type for the literal `lit`, shared by every rule that
@@ -1036,6 +1003,11 @@ impl Trivia {
 
     /// Returns `true` when taking this operand reaches the trivia that stands
     /// before it.
+    ///
+    /// A choice reaches its front only where every way it offers does, since one
+    /// answer is kept for the whole field: where a way does not reach, the
+    /// sequence around it keeps the run and that way's own terminal simply finds
+    /// nothing there to take.
     fn eats_leading(&self, ty: &FieldType) -> bool {
         match ty {
             FieldType::Named(name) => self.owns(name),
@@ -1045,6 +1017,7 @@ impl Trivia {
             FieldType::Gap => false,
             FieldType::Concat { first, .. } => self.eats_leading(first),
             FieldType::Group(tys) => tys.first().is_some_and(|ty| self.eats_leading(ty)),
+            FieldType::Alts(tys) => !tys.is_empty() && tys.iter().all(|ty| self.eats_leading(ty)),
             FieldType::Delimited { open, .. } => self.eats_leading(open),
         }
     }
@@ -1058,6 +1031,7 @@ impl Trivia {
             FieldType::Gap => false,
             FieldType::Concat { second, .. } => self.eats_trailing(second),
             FieldType::Group(tys) => tys.last().is_some_and(|ty| self.eats_trailing(ty)),
+            FieldType::Alts(tys) => !tys.is_empty() && tys.iter().all(|ty| self.eats_trailing(ty)),
             FieldType::Delimited { close, .. } => self.eats_trailing(close),
         }
     }
@@ -1152,6 +1126,9 @@ impl Trivia {
                 second: Box::new(self.ty(second)),
             },
             FieldType::Group(tys) => FieldType::Group(self.between(tys)),
+            // Each way of a choice settles its own trivia, which is what the
+            // sequence around the choice cannot do for it.
+            FieldType::Alts(tys) => FieldType::Alts(tys.iter().map(|ty| self.ty(ty)).collect()),
             FieldType::Punctuated { item, sep } => FieldType::Punctuated {
                 item: Box::new(self.ty(item)),
                 sep: Box::new(self.ty(sep)),
@@ -1320,6 +1297,98 @@ impl Trivia {
 /// other matches, which is when neither can open a run the other closes.
 fn overlaps(a: &[String], b: &[String]) -> bool {
     a.iter().any(|text| b.iter().any(|other| other == text))
+}
+
+/// What each operand of one alternative is called, in the order the rule wrote
+/// them, which is the shape the alternative is told apart from its siblings by.
+///
+/// These are descriptors and not types: an operand written out is counted where
+/// it stands even where the settling folds it away, since it is the rule as it
+/// was written that says which alternative this is.
+fn operand_names<I: UnsynInput>(seq: &ExprNoTopAlts<I>) -> Vec<String> {
+    let mut names = vec![operand_name(&seq.first)];
+
+    names.extend(seq.rest.iter().map(|(_, operand)| operand_name(operand)));
+
+    names
+}
+
+/// What one operand is called among the operands of its alternative.
+fn operand_name<I: UnsynInput>(expr: &ExprNoTopAlt<I>) -> String {
+    match expr {
+        // The word or the token an operand is built on is what it is called.
+        ExprNoTopAlt::WithoutSuffix(ExprWithoutSuffix::Ident(ident))
+            if ident.0.as_str() != WILDCARD =>
+        {
+            keyword_name(ident.0.as_str())
+        }
+        // The wildcard is a token of any one character, which is what it is
+        // named for; the underscore it is written with names no type.
+        ExprNoTopAlt::WithoutSuffix(ExprWithoutSuffix::Ident(_)) => "Any".to_owned(),
+        ExprNoTopAlt::WithoutSuffix(ExprWithoutSuffix::Str(lit)) => {
+            let (text, _) = crate::semantics::str_value(lit);
+
+            literal_name(&text)
+        }
+        ExprNoTopAlt::WithoutSuffix(ExprWithoutSuffix::Unicode(lit)) => {
+            match crate::semantics::unicode_value(lit) {
+                Ok(c) => punct_name(&c.to_string()),
+                // A code point that denotes nothing denotes no character to be
+                // named for, so it is named for what it is written with.
+                Err(_) => "Unicode".to_owned(),
+            }
+        }
+        ExprNoTopAlt::WithoutSuffix(ExprWithoutSuffix::Tilde(..)) => "Tilde".to_owned(),
+        ExprNoTopAlt::WithoutSuffix(ExprWithoutSuffix::Set(..)) => "Set".to_owned(),
+        ExprNoTopAlt::WithoutSuffix(ExprWithoutSuffix::Paren(..)) => "Group".to_owned(),
+        // An external call is named for what it calls, which the rule around
+        // it does not say.
+        ExprNoTopAlt::WithoutSuffix(ExprWithoutSuffix::Call(angle)) => {
+            keyword_name(angle.body.0.as_str())
+        }
+        ExprNoTopAlt::WithSuffix(ExprWithSuffix::Concat { .. }) => "Concat".to_owned(),
+        ExprNoTopAlt::WithSuffix(ExprWithSuffix::Followed { .. }) => "Followed".to_owned(),
+        ExprNoTopAlt::WithSuffix(ExprWithSuffix::Except { .. }) => "Except".to_owned(),
+        // A group of operators is one alternative, but the operator it picked is
+        // what tells two alternatives of a rule apart, so the operand is still
+        // named for the operator rather than for the group.
+        ExprNoTopAlt::WithSuffix(ExprWithSuffix::Grouped { suffix, .. }) => {
+            match SuffixOp::of(suffix) {
+                SuffixOp::Star(_) => "Star",
+                SuffixOp::Question(_) => "Question",
+                SuffixOp::Plus(_) => "Plus",
+                SuffixOp::Repeat(_) => "Repeat",
+            }
+            .to_owned()
+        }
+    }
+}
+
+/// The name the shape of one alternative gives it among its siblings.
+///
+/// An alternative is named for the first operand none of its siblings has at the
+/// same place, which is what divides it: of `A 'concat' B | A 'except' B` it is
+/// the operator in the middle and not the operand both of them start with. The
+/// name is read off the shape rather than off the place it holds so that writing
+/// the alternatives of a rule in another order does not rename them.
+fn variant_name(shapes: &[Vec<String>], index: usize) -> String {
+    let here = &shapes[index];
+
+    here.iter()
+        .enumerate()
+        .find(|(place, name)| {
+            shapes
+                .iter()
+                .enumerate()
+                .all(|(other, sibling)| other == index || sibling.get(*place) != Some(*name))
+        })
+        .map(|(_, name)| name.clone())
+        // Nothing at any place divides this alternative from its siblings, which
+        // leaves what it ends with: of `A B | A` the longer is already named for
+        // the operand that makes it longer, so the shorter keeps the one they
+        // share and the two are still told apart.
+        .or_else(|| here.last().cloned())
+        .expect("an alternative always has a first operand to be named for")
 }
 
 #[cfg(test)]

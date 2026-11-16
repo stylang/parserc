@@ -20,7 +20,12 @@ use parserc::{
     syntax::{Syntax, SyntaxInput},
 };
 use quote::quote;
-use unsyn::{codegen::Codegen, input::TokenStream, semantics::analyze, syntax::Crate};
+use unsyn::{
+    codegen::Codegen,
+    input::TokenStream,
+    semantics::analyze,
+    syntax::{Crate, Item},
+};
 
 #[allow(clippy::all, clippy::pedantic, unused_parens, dead_code)]
 #[path = "data/mini.rs"]
@@ -55,7 +60,7 @@ mod backend {
 //  The spec `data/mini.rs` was generated from, which `tests/dump.rs` prints too.
 //  It covers every construct `bootstrap.uns` is written with: sets, ranges, the
 //  wildcard, complements, `concat`, `except`, `followed`, counted runs, groups
-//  that need a type of their own, and rules that reach themselves.
+//  of several alternatives held as one field, and rules that reach themselves.
 include!("data/spec.rs");
 
 /// Reads all of `text` as one node of the generated tree, and says so if the
@@ -272,11 +277,14 @@ fn the_wildcard_stands_for_any_one_character() {
 
     // The run is of a group of two alternatives, so each of its elements says
     // which of them it was read as: a character the external takes, or any one
-    // character at all.
+    // character at all. The group is no type of its own, only the choice the
+    // field is written as.
+    let element: &::parserc::syntax::Or<mini::MATCHER<_>, mini::Any<_>> = &any.2[0].1;
+
     assert!(
         matches!(
-            any.2[0].1,
-            mini::ANYONE2::ANYONE2MATCHER(_) | mini::ANYONE2::ANYONE2Any(_)
+            element,
+            ::parserc::syntax::Or::First(_) | ::parserc::syntax::Or::Second(_)
         ),
         "{any:?}"
     );
@@ -307,11 +315,10 @@ fn a_group_at_the_head_of_a_rule_is_a_field_of_its_own() {
     // the middle of it, and no gap is needed before the name that follows.
     assert_eq!(either.1.1.as_str(), "[");
     assert_eq!(either.2.0.as_str(), "b");
+
+    // The name is an `IDENT`, which the group asks for first.
     assert!(
-        matches!(
-            either.0,
-            mini::Either1::Either1IDENT(_) | mini::Either1::Either1DIGIT(_)
-        ),
+        matches!(either.0, ::parserc::syntax::Or::First(_)),
         "{either:?}"
     );
 }
@@ -615,22 +622,25 @@ fn a_counted_run_is_checked_after_it_was_taken() {
 }
 
 #[test]
-fn a_group_inside_a_rule_is_a_type_named_for_the_rule_around_it() {
+fn a_group_inside_a_rule_is_a_field_of_it_and_not_a_type_of_its_own() {
     let long = taken::<mini::NUMBER<_>>("1_234");
 
     assert_eq!(long.2.len(), 4, "{long:?}");
 
     // The group `(DIGIT | '_')` is an alternative of its own, so each run of
-    // the repetition says which of its two members was taken.
-    let mini::NUMBER1::NUMBER1Underscore(under) = &long.2[0].1 else {
-        panic!(
-            "the first run of the group is not an underscore: {:?}",
-            long.2[0].1
-        );
+    // the repetition says which of its two members was taken; what it says it
+    // with is the choice itself, written into the field of the rule.
+    let runs: &::parserc::syntax::Or<mini::DIGIT<_>, mini::Underscore<_>> = &long.2[0].1;
+
+    let ::parserc::syntax::Or::Second(under) = runs else {
+        panic!("the first run of the group is not an underscore: {runs:?}");
     };
 
     assert_eq!(under.1.as_str(), "_");
-    assert!(matches!(long.2[1].1, mini::NUMBER1::NUMBER1DIGIT(_)));
+    assert!(
+        matches!(long.2[1].1, ::parserc::syntax::Or::First(_)),
+        "{long:?}"
+    );
 }
 
 #[test]
@@ -642,8 +652,10 @@ fn a_set_and_a_complement_written_in_a_rule_of_nodes_are_scanners_of_their_own()
     assert_eq!(escaped.2.len(), 3, "{escaped:?}");
     assert_eq!(range_of(&escaped), (0, 6));
 
-    let mini::TEXT1::TEXT1BSLASH(bslash, letter) = &escaped.2[1].1 else {
-        panic!("the second run is not the escape");
+    // The escape is the second member of the group, which is a pair written
+    // into the field of the rule rather than a type named for it.
+    let ::parserc::syntax::Or::Second((bslash, letter)) = &escaped.2[1].1 else {
+        panic!("the second run is not the escape: {:?}", escaped.2[1].1);
     };
 
     assert_eq!(bslash.0.as_str(), "\\");
@@ -763,6 +775,64 @@ fn an_item_and_its_separator_is_one_list_of_the_backends_own() {
         tight.0.body.tail.as_ref().expect("a name").0.as_str(),
         args.0.body.tail.as_ref().expect("a name").0.as_str()
     );
+}
+
+/// The names of the `enum`s a generated file declares.
+///
+/// The file is read as Rust rather than searched as text, since what matters is
+/// the declaration and not how the generator happened to space it.
+fn sums(written: &str) -> Vec<String> {
+    syn::parse_file(written)
+        .expect("the generated file should be valid Rust")
+        .items
+        .iter()
+        .filter_map(|item| match item {
+            syn::Item::Enum(def) => Some(def.ident.to_string()),
+            _ => None,
+        })
+        .collect()
+}
+
+/// The names the productions of `source` declare, which are the only names a
+/// generated file may give a type of its own.
+fn productions(source: &str) -> Vec<String> {
+    let mut tokens = TokenStream::from(source);
+    let file = Crate::parse(&mut tokens).expect("the spec should parse");
+
+    file.items
+        .iter()
+        .filter_map(|item| match item {
+            Item::Stmt(stmt) => Some(stmt.ident.0.as_str().to_owned()),
+            _ => None,
+        })
+        .collect()
+}
+
+/// A type that says which of several ways it was read is what a production with
+/// several alternatives turns out to be, and nothing else.
+///
+/// The sums of a generated file are therefore counted by name: an anonymous
+/// group on the right side of a `->` is a field of the rule that holds it,
+/// however many ways of being read it offers, and a type written for it would
+/// name a production the spec never declared. Names are checked rather than
+/// shapes because a shape is reached any number of ways, while a name says that
+/// something was declared.
+#[test]
+fn every_sum_type_is_a_production_of_the_spec() {
+    let written = regenerated();
+    let declared = productions(SPEC);
+
+    let counted = sums(&written);
+
+    assert_eq!(
+        counted,
+        ["PRIMARY", "BINOP", "LITERAL"],
+        "the sums of the spec are the alternatives of its three rules"
+    );
+
+    for name in counted {
+        assert!(declared.contains(&name), "{name} is no production");
+    }
 }
 
 #[test]

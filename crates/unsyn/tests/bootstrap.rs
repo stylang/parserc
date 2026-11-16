@@ -1,7 +1,9 @@
 use std::{fs, path::PathBuf};
 
 use parserc::{AsStr, syntax::Syntax};
+use quote::quote;
 use unsyn::{
+    codegen::Codegen,
     input::TokenStream,
     semantics::{NodeKind, analyze},
     syntax::{Crate, Item},
@@ -198,6 +200,67 @@ fn the_spec_names_the_types_the_crate_already_has() {
         assert!(
             module.definition(name).is_some(),
             "the spec no longer declares {name}, which the crate has a type of"
+        );
+    }
+}
+
+/// A type of its own is only ever what the left side of a production turns out
+/// to be, so the sums the generator writes for this spec are all names the spec
+/// declares.
+///
+/// The rule of the generator is that nothing on the right side of a `->` is
+/// named: a group of several alternatives is one field of the rule that holds
+/// it, and a type written for such a group would be a name no file ever gave,
+/// which is what a reader of the generated tree would have to keep straight.
+/// The names are checked rather than the shapes, since a shape is what the
+/// generator reaches by any number of routes and a name is what it declares.
+#[test]
+fn every_sum_type_of_the_generated_parser_is_a_production() {
+    let c = parse_bootstrap();
+
+    let module = analyze(&c).expect("the spec should be well-formed");
+
+    let generated = Codegen::new()
+        .with_externals([
+            ("XID_Start".to_owned(), quote!(::my_backend::xid_start)),
+            (
+                "XID_Continue".to_owned(),
+                quote!(::my_backend::xid_continue),
+            ),
+        ])
+        .generate(&module)
+        .expect("the spec should be writable")
+        .to_string();
+
+    let sums: Vec<String> = syn::parse_file(&generated)
+        .expect("the generated file should be valid Rust")
+        .items
+        .iter()
+        .filter_map(|item| match item {
+            syn::Item::Enum(def) => Some(def.ident.to_string()),
+            _ => None,
+        })
+        .collect();
+
+    // The five rules of the spec that are a choice of several ways are exactly
+    // the types that say which way was read; nothing a rule only holds earns
+    // one, which is why the comment rules and the escapes are not here.
+    assert_eq!(
+        sums,
+        [
+            "ExprNoTopAlt",
+            "ExprWithoutSuffix",
+            "ExprWithSuffix",
+            "Range",
+            "SetItem"
+        ],
+        "{sums:?}"
+    );
+
+    for name in sums {
+        assert!(
+            module.definition(&name).is_some(),
+            "{name} is a type of its own but no production of the spec"
         );
     }
 }

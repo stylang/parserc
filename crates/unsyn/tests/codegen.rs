@@ -279,7 +279,7 @@ fn a_suffix_that_needs_a_check_of_its_own_gets_a_type_for_it() {
 }
 
 #[test]
-fn a_group_of_operands_is_a_field_and_not_a_type_where_nothing_divides_them() {
+fn a_group_of_operands_is_a_field_and_never_a_type_of_its_own() {
     let content = leaked(
         "lexer Digit -> ['0'-'9'];
          lexer Dot -> '.';
@@ -288,23 +288,25 @@ fn a_group_of_operands_is_a_field_and_not_a_type_where_nothing_divides_them() {
 
     let file = plain(content);
 
-    // The group of two alternatives cannot be a field of the rule that names
-    // it, so it is given a type of its own, named for the rule it was written
-    // in; with no `whitespace` rule there is nothing to keep between the two
-    // operands of the rule, so they are two fields of it.
-    // A rule of two alternatives is a type of its own and not a field of the
-    // rule that names it, so the rule is two fields and the group is an enum.
+    // A group written on the right side of a `->` names nothing, whatever it
+    // holds: the two ways of reading it are the ordered choice the backend
+    // already has, written into the field of the rule that surrounds them. So
+    // the file declares one type per rule and no type for the group between
+    // them, and the rule itself is the two fields its sequence makes.
     assert_eq!(file.matches("struct").count(), 3, "{file}");
+    assert!(!file.contains("pubenum"), "{file}");
     assert!(
-        file.contains("pubstructNumber<I>(pubDigit<I>,pubNumber1<I>);"),
+        file.contains("pubstructNumber<I>(pubDigit<I>,pub::parserc::syntax::Or<Digit<I>,Dot<I>>);"),
         "{file}"
     );
-    // The group itself is the sum its two alternatives make.
-    assert!(file.contains("pubenumNumber1<I>{"), "{file}");
-    // The group itself is the sum its two alternatives make, and each is named
-    // for the group it belongs to.
-    assert!(file.contains("Number1Digit(Digit<I>)"), "{file}");
-    assert!(file.contains("Number1Dot(Dot<I>)"), "{file}");
+    // Taking the choice is one call of `parse` like any other field, and its
+    // span is the way that was read: `Or` answers both for the operand it holds,
+    // which is why nothing had to be declared to make the group a field.
+    assert!(
+        file.contains("input.parse::<::parserc::syntax::Or<Digit<I>,Dot<I>>>()?"),
+        "{file}"
+    );
+    assert!(file.contains(".1.to_span()"), "{file}");
 }
 
 /// A quantity operator is stored as the one group the production writes it as,
@@ -753,10 +755,39 @@ fn a_bootstrap_spec_is_read_as_the_shapes_it_writes() {
         suffix_variants
     );
 
-    for variant in &suffix_variants {
+    // Each of the four is named for the operand that divides it from the rest,
+    // which is the second one: all four start with the same `ExprWithoutSuffix`,
+    // and what the production writes after it is the suffix group, `concat`,
+    // `followed` and `except`. No variant carries a place in its name, so
+    // writing the four alternatives in another order renames none of them.
+    // `enum_variants` hands each variant back with the fields it holds and eats
+    // the parentheses that open them, so what is left of a name is its run of
+    // word characters.
+    let names: Vec<String> = suffix_variants
+        .iter()
+        .map(|variant| {
+            variant
+                .chars()
+                .take_while(char::is_ascii_alphanumeric)
+                .collect()
+        })
+        .collect();
+
+    assert_eq!(
+        names,
+        [
+            "ExprWithSuffixGroup",
+            "ExprWithSuffixConcat",
+            "ExprWithSuffixFollowed",
+            "ExprWithSuffixExcept",
+        ],
+        "`ExprWithSuffix` is {suffix_variants:?}"
+    );
+
+    for name in &names {
         for op in ["Question", "Plus", "Repeat"] {
             assert!(
-                !variant.starts_with(&format!("ExprWithSuffix{op}(")),
+                !name.ends_with(op),
                 "`{op}` is a variant of `ExprWithSuffix`, so the group was flattened \
                  into the node of its left side"
             );
@@ -776,13 +807,15 @@ fn a_bootstrap_spec_is_read_as_the_shapes_it_writes() {
     // has that same boundary: `syntax/expr.rs` declares `Repeat<I>` as
     // `Brace<I, RepeatGroup<I>>`, and `lexical/delimiter.rs`'s
     // `the_span_of_a_group_reaches_its_closing_token` parses `"{2, 3}"` as a
-    // `Repeat<_>` whose span reaches the `}`. The name the generated body carries
-    // (`Repeat1`) is the right-side group P5 still owes as an inline `Or<…>`.
+    // `Repeat<_>` whose span reaches the `}`. What sits between the braces is the
+    // group the production writes, held as the backend's own choice and named by
+    // nobody: this is the same `RepeatGroup<I>` the hand-written alias spells.
     assert!(
         written.contains(
             "structRepeat<I>(pub::parserc::syntax::Delimiter<BraceStart<I>,BraceEnd<I>,\
-             Repeat1<I>>);"
+             ::parserc::syntax::Or<(Comma<I>,LitDec<I>),::parserc::syntax::Or<(LitDec<I>,\
+             Comma<I>,::core::option::Option<LitDec<I>>),LitDec<I>>>>);"
         ),
-        "`Repeat` is not a single delimiter over its body: {written}"
+        "`Repeat` is not a delimiter over an unnamed choice: {written}"
     );
 }

@@ -54,7 +54,7 @@ use super::error::CodegenError;
 use super::name::type_ident;
 use super::pattern::{CharClass, TokenPattern};
 use super::scan::Emitter;
-use super::types::{Assert, Field, FieldType, Trivia, TypeDef, TypeDefKind, Variant};
+use super::types::{Assert, Field, FieldType, MAX_TUPLE, Trivia, TypeDef, TypeDefKind, Variant};
 
 /// The stream every generated type is written over, and the name its `parse`
 /// takes it by.
@@ -526,6 +526,12 @@ impl<'a> Renderer<'a> {
 
                 self.tuple(&flat)
             }
+            // Several ways of reading one operand, held as the ordered choice the
+            // backend already has and right nested, which is the shape an enum of
+            // tuple variants unfolds to when it is derived. Nothing is declared
+            // for it, and nothing is named: a group on the right side of a `->`
+            // is a way of reading, not a node.
+            FieldType::Alts(tys) => self.choice(tys, pointed),
             FieldType::Gap => self.gap(),
             FieldType::Punctuated { item, sep } => {
                 let (item, sep) = (self.ty(item, pointed), self.ty(sep, pointed));
@@ -545,14 +551,47 @@ impl<'a> Renderer<'a> {
         }
     }
 
+    /// The type of a group of alternatives: one operand where the group offers
+    /// one way of being read, and `Or` of it and the rest where it offers more.
+    ///
+    /// `parserc::syntax::Or` is named by full path rather than imported, since
+    /// the `'|'` of the language being generated is a type called `Or` too, and
+    /// the two would otherwise hide one another.
+    fn choice(&self, tys: &[FieldType], pointed: &HashSet<String>) -> TokenStream {
+        let parserc = &self.paths.parserc;
+        let (first, rest) = tys
+            .split_first()
+            .expect("a group of alternatives always has one alternative");
+        let first = self.ty(first, pointed);
+
+        match rest {
+            [] => first,
+            rest => {
+                let rest = self.choice(rest, pointed);
+
+                quote!(#parserc::syntax::Or<#first, #rest>)
+            }
+        }
+    }
+
     /// The type of a run of operands written beside each other: one tuple when
     /// there are several to hold, and the operand itself where there is only one
     /// to hold.
+    ///
+    /// A run longer than the backend derives a syntax for is cut in two and each
+    /// half made a tuple of its own, since a tuple of tuples is as much a syntax
+    /// as a flat one and no length of a sequence is reason to name a type.
     fn tuple(&self, tys: &[TokenStream]) -> TokenStream {
         match tys {
             [] => quote!(()),
             [only] => only.clone(),
-            tys => quote!(( #(#tys),* )),
+            tys if tys.len() <= MAX_TUPLE => quote!(( #(#tys),* )),
+            tys => {
+                let (head, tail) = tys.split_at(tys.len().div_ceil(2));
+                let (head, tail) = (self.tuple(head), self.tuple(tail));
+
+                quote!((#head, #tail))
+            }
         }
     }
 

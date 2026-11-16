@@ -1276,8 +1276,8 @@ where
 }
 #[allow(non_camel_case_types, non_snake_case)]
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
-pub struct TEXT11<I>(pub I);
-impl<I> ::parserc::syntax::Syntax<I> for TEXT11<I>
+pub struct TEXT1<I>(pub I);
+impl<I> ::parserc::syntax::Syntax<I> for TEXT1<I>
 where
     I: ::unsyn::runtime::GeneratedInput,
 {
@@ -1294,7 +1294,7 @@ where
             if input.len() == __from.len() {
                 return ::core::result::Result::Err(
                     ::parserc::Kind::Token(
-                        "TEXT11",
+                        "TEXT1",
                         ::parserc::ControlFlow::Recovable,
                         input.to_span_at(1),
                     )
@@ -1316,12 +1316,12 @@ where
 }
 #[allow(non_camel_case_types, non_snake_case)]
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
-pub struct TEXT12<I>(
+pub struct TEXT2<I>(
     pub ::core::option::Option<WS<I>>,
     pub I,
     pub ::core::option::Option<WS<I>>,
 );
-impl<I> ::parserc::syntax::Syntax<I> for TEXT12<I>
+impl<I> ::parserc::syntax::Syntax<I> for TEXT2<I>
 where
     I: ::unsyn::runtime::GeneratedInput,
 {
@@ -1339,7 +1339,7 @@ where
             if input.len() == __from.len() {
                 return ::core::result::Result::Err(
                     ::parserc::Kind::Token(
-                        "TEXT12",
+                        "TEXT2",
                         ::parserc::ControlFlow::Recovable,
                         input.to_span_at(1),
                     )
@@ -1404,8 +1404,8 @@ where
 }
 #[allow(non_camel_case_types, non_snake_case)]
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
-pub struct Commented11<I>(pub I);
-impl<I> ::parserc::syntax::Syntax<I> for Commented11<I>
+pub struct Commented1<I>(pub I);
+impl<I> ::parserc::syntax::Syntax<I> for Commented1<I>
 where
     I: ::unsyn::runtime::GeneratedInput,
 {
@@ -1421,7 +1421,7 @@ where
             if input.len() == __from.len() {
                 return ::core::result::Result::Err(
                     ::parserc::Kind::Token(
-                        "Commented11",
+                        "Commented1",
                         ::parserc::ControlFlow::Recovable,
                         input.to_span_at(1),
                     )
@@ -1790,7 +1790,10 @@ where
 pub struct NUMBER<I>(
     pub DIGIT<I>,
     pub ::core::option::Option<WS<I>>,
-    pub ::std::vec::Vec<(::core::option::Option<WS<I>>, NUMBER1<I>)>,
+    pub  ::std::vec::Vec<(
+        ::core::option::Option<WS<I>>,
+        ::parserc::syntax::Or<DIGIT<I>, Underscore<I>>,
+    )>,
 );
 impl<I> ::parserc::syntax::Syntax<I> for NUMBER<I>
 where
@@ -1805,7 +1808,10 @@ where
         ::core::result::Result::Ok(Self(
             input.parse::<DIGIT<I>>()?,
             input.parse::<::core::option::Option<WS<I>>>()?,
-            input.parse::<::std::vec::Vec<(::core::option::Option<WS<I>>, NUMBER1<I>)>>()?,
+            input.parse::<::std::vec::Vec<(
+                ::core::option::Option<WS<I>>,
+                ::parserc::syntax::Or<DIGIT<I>, Underscore<I>>,
+            )>>()?,
         ))
     }
     fn to_span(&self) -> ::parserc::Span {
@@ -1825,7 +1831,10 @@ where
 pub struct TEXT<I>(
     pub QUOTE<I>,
     pub ::core::option::Option<WS<I>>,
-    pub ::std::vec::Vec<(::core::option::Option<WS<I>>, TEXT1<I>)>,
+    pub  ::std::vec::Vec<(
+        ::core::option::Option<WS<I>>,
+        ::parserc::syntax::Or<TEXT1<I>, (BSLASH<I>, TEXT2<I>)>,
+    )>,
     pub ::core::option::Option<WS<I>>,
     pub QUOTE<I>,
 );
@@ -1842,7 +1851,10 @@ where
         ::core::result::Result::Ok(Self(
             input.parse::<QUOTE<I>>()?,
             input.parse::<::core::option::Option<WS<I>>>()?,
-            input.parse::<::std::vec::Vec<(::core::option::Option<WS<I>>, TEXT1<I>)>>()?,
+            input.parse::<::std::vec::Vec<(
+                ::core::option::Option<WS<I>>,
+                ::parserc::syntax::Or<TEXT1<I>, (BSLASH<I>, TEXT2<I>)>,
+            )>>()?,
             input.parse::<::core::option::Option<WS<I>>>()?,
             input.parse::<QUOTE<I>>()?,
         ))
@@ -2141,9 +2153,12 @@ where
 #[allow(non_camel_case_types, non_snake_case)]
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
 pub struct ANYONE<I>(
-    pub ANYONE1<I>,
+    pub ::parserc::syntax::Or<MATCHER<I>, Any<I>>,
     pub ::core::option::Option<WS<I>>,
-    pub ::std::vec::Vec<(::core::option::Option<WS<I>>, ANYONE2<I>)>,
+    pub  ::std::vec::Vec<(
+        ::core::option::Option<WS<I>>,
+        ::parserc::syntax::Or<MATCHER<I>, Any<I>>,
+    )>,
 );
 impl<I> ::parserc::syntax::Syntax<I> for ANYONE<I>
 where
@@ -2156,9 +2171,12 @@ where
             syntax::{Syntax, SyntaxInput},
         };
         ::core::result::Result::Ok(Self(
-            input.parse::<ANYONE1<I>>()?,
+            input.parse::<::parserc::syntax::Or<MATCHER<I>, Any<I>>>()?,
             input.parse::<::core::option::Option<WS<I>>>()?,
-            input.parse::<::std::vec::Vec<(::core::option::Option<WS<I>>, ANYONE2<I>)>>()?,
+            input.parse::<::std::vec::Vec<(
+                ::core::option::Option<WS<I>>,
+                ::parserc::syntax::Or<MATCHER<I>, Any<I>>,
+            )>>()?,
         ))
     }
     fn to_span(&self) -> ::parserc::Span {
@@ -2232,7 +2250,10 @@ pub struct Commented<I>(
     pub SLASH<I>,
     pub STAR<I>,
     pub ::core::option::Option<WS<I>>,
-    pub ::std::vec::Vec<(::core::option::Option<WS<I>>, Commented1<I>)>,
+    pub  ::std::vec::Vec<(
+        ::core::option::Option<WS<I>>,
+        ::parserc::syntax::Or<Commented1<I>, UNDER<I>>,
+    )>,
     pub ::core::option::Option<WS<I>>,
     pub STAR<I>,
     pub SLASH<I>,
@@ -2251,7 +2272,10 @@ where
             input.parse::<SLASH<I>>()?,
             input.parse::<STAR<I>>()?,
             input.parse::<::core::option::Option<WS<I>>>()?,
-            input.parse::<::std::vec::Vec<(::core::option::Option<WS<I>>, Commented1<I>)>>()?,
+            input.parse::<::std::vec::Vec<(
+                ::core::option::Option<WS<I>>,
+                ::parserc::syntax::Or<Commented1<I>, UNDER<I>>,
+            )>>()?,
             input.parse::<::core::option::Option<WS<I>>>()?,
             input.parse::<STAR<I>>()?,
             input.parse::<SLASH<I>>()?,
@@ -2275,7 +2299,11 @@ where
 }
 #[allow(non_camel_case_types, non_snake_case)]
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
-pub struct Either<I>(pub Either1<I>, pub LEFT<I>, pub IDENT<I>);
+pub struct Either<I>(
+    pub ::parserc::syntax::Or<IDENT<I>, DIGIT<I>>,
+    pub LEFT<I>,
+    pub IDENT<I>,
+);
 impl<I> ::parserc::syntax::Syntax<I> for Either<I>
 where
     I: ::unsyn::runtime::GeneratedInput,
@@ -2287,7 +2315,7 @@ where
             syntax::{Syntax, SyntaxInput},
         };
         ::core::result::Result::Ok(Self(
-            input.parse::<Either1<I>>()?,
+            input.parse::<::parserc::syntax::Or<IDENT<I>, DIGIT<I>>>()?,
             input.parse::<LEFT<I>>()?,
             input.parse::<IDENT<I>>()?,
         ))
@@ -2326,121 +2354,6 @@ where
             syntax::{Syntax, SyntaxInput},
         };
         ::parserc::Span::None.union(&self.0.to_span())
-    }
-}
-#[allow(non_camel_case_types, non_snake_case)]
-#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
-pub enum NUMBER1<I> {
-    NUMBER1DIGIT(DIGIT<I>),
-    NUMBER1Underscore(Underscore<I>),
-}
-impl<I> ::parserc::syntax::Syntax<I> for NUMBER1<I>
-where
-    I: ::unsyn::runtime::GeneratedInput,
-{
-    fn parse(input: &mut I) -> ::core::result::Result<Self, <I as ::parserc::Input>::Error> {
-        #[allow(unused_imports)]
-        use ::parserc::{
-            AsStr, Find, Input, Parser, StartWith,
-            syntax::{Syntax, SyntaxInput},
-        };
-        if let ::core::option::Option::Some(__alt) =
-            (|input: &mut I| -> ::core::result::Result<Self, <I as ::parserc::Input>::Error> {
-                ::core::result::Result::Ok(Self::NUMBER1DIGIT(input.parse::<DIGIT<I>>()?))
-            })
-            .ok()
-            .parse(input)?
-        {
-            return ::core::result::Result::Ok(__alt);
-        }
-        if let ::core::option::Option::Some(__alt) =
-            (|input: &mut I| -> ::core::result::Result<Self, <I as ::parserc::Input>::Error> {
-                ::core::result::Result::Ok(Self::NUMBER1Underscore(input.parse::<Underscore<I>>()?))
-            })
-            .ok()
-            .parse(input)?
-        {
-            return ::core::result::Result::Ok(__alt);
-        }
-        ::core::result::Result::Err(
-            ::parserc::Kind::Syntax(
-                "NUMBER1",
-                ::parserc::ControlFlow::Recovable,
-                input.to_span_at(1),
-            )
-            .into(),
-        )
-    }
-    fn to_span(&self) -> ::parserc::Span {
-        #[allow(unused_imports)]
-        use ::parserc::{
-            AsStr, Find, Input, Parser, StartWith,
-            syntax::{Syntax, SyntaxInput},
-        };
-        match self {
-            Self::NUMBER1DIGIT(__0) => ::parserc::Span::None.union(&__0.to_span()),
-            Self::NUMBER1Underscore(__0) => ::parserc::Span::None.union(&__0.to_span()),
-        }
-    }
-}
-#[allow(non_camel_case_types, non_snake_case)]
-#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
-pub enum TEXT1<I> {
-    TEXT1Tilde(TEXT11<I>),
-    TEXT1BSLASH(BSLASH<I>, TEXT12<I>),
-}
-impl<I> ::parserc::syntax::Syntax<I> for TEXT1<I>
-where
-    I: ::unsyn::runtime::GeneratedInput,
-{
-    fn parse(input: &mut I) -> ::core::result::Result<Self, <I as ::parserc::Input>::Error> {
-        #[allow(unused_imports)]
-        use ::parserc::{
-            AsStr, Find, Input, Parser, StartWith,
-            syntax::{Syntax, SyntaxInput},
-        };
-        if let ::core::option::Option::Some(__alt) =
-            (|input: &mut I| -> ::core::result::Result<Self, <I as ::parserc::Input>::Error> {
-                ::core::result::Result::Ok(Self::TEXT1Tilde(input.parse::<TEXT11<I>>()?))
-            })
-            .ok()
-            .parse(input)?
-        {
-            return ::core::result::Result::Ok(__alt);
-        }
-        if let ::core::option::Option::Some(__alt) =
-            (|input: &mut I| -> ::core::result::Result<Self, <I as ::parserc::Input>::Error> {
-                ::core::result::Result::Ok(Self::TEXT1BSLASH(
-                    input.parse::<BSLASH<I>>()?,
-                    input.parse::<TEXT12<I>>()?,
-                ))
-            })
-            .ok()
-            .parse(input)?
-        {
-            return ::core::result::Result::Ok(__alt);
-        }
-        ::core::result::Result::Err(
-            ::parserc::Kind::Syntax(
-                "TEXT1",
-                ::parserc::ControlFlow::Recovable,
-                input.to_span_at(1),
-            )
-            .into(),
-        )
-    }
-    fn to_span(&self) -> ::parserc::Span {
-        #[allow(unused_imports)]
-        use ::parserc::{
-            AsStr, Find, Input, Parser, StartWith,
-            syntax::{Syntax, SyntaxInput},
-        };
-        match self {
-            Self::TEXT1Tilde(__0) => ::parserc::Span::None.union(&__0.to_span()),
-            Self::TEXT1BSLASH(__0, __1) => ::parserc::Span::None
-                .union(&__0.to_span())
-                .union(&__1.to_span()),
-        }
     }
 }
 #[allow(non_camel_case_types, non_snake_case)]
@@ -2491,116 +2404,6 @@ where
 }
 #[allow(non_camel_case_types, non_snake_case)]
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
-pub enum ANYONE1<I> {
-    ANYONE1MATCHER(MATCHER<I>),
-    ANYONE1Any(Any<I>),
-}
-impl<I> ::parserc::syntax::Syntax<I> for ANYONE1<I>
-where
-    I: ::unsyn::runtime::GeneratedInput,
-{
-    fn parse(input: &mut I) -> ::core::result::Result<Self, <I as ::parserc::Input>::Error> {
-        #[allow(unused_imports)]
-        use ::parserc::{
-            AsStr, Find, Input, Parser, StartWith,
-            syntax::{Syntax, SyntaxInput},
-        };
-        if let ::core::option::Option::Some(__alt) =
-            (|input: &mut I| -> ::core::result::Result<Self, <I as ::parserc::Input>::Error> {
-                ::core::result::Result::Ok(Self::ANYONE1MATCHER(input.parse::<MATCHER<I>>()?))
-            })
-            .ok()
-            .parse(input)?
-        {
-            return ::core::result::Result::Ok(__alt);
-        }
-        if let ::core::option::Option::Some(__alt) =
-            (|input: &mut I| -> ::core::result::Result<Self, <I as ::parserc::Input>::Error> {
-                ::core::result::Result::Ok(Self::ANYONE1Any(input.parse::<Any<I>>()?))
-            })
-            .ok()
-            .parse(input)?
-        {
-            return ::core::result::Result::Ok(__alt);
-        }
-        ::core::result::Result::Err(
-            ::parserc::Kind::Syntax(
-                "ANYONE1",
-                ::parserc::ControlFlow::Recovable,
-                input.to_span_at(1),
-            )
-            .into(),
-        )
-    }
-    fn to_span(&self) -> ::parserc::Span {
-        #[allow(unused_imports)]
-        use ::parserc::{
-            AsStr, Find, Input, Parser, StartWith,
-            syntax::{Syntax, SyntaxInput},
-        };
-        match self {
-            Self::ANYONE1MATCHER(__0) => ::parserc::Span::None.union(&__0.to_span()),
-            Self::ANYONE1Any(__0) => ::parserc::Span::None.union(&__0.to_span()),
-        }
-    }
-}
-#[allow(non_camel_case_types, non_snake_case)]
-#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
-pub enum ANYONE2<I> {
-    ANYONE2MATCHER(MATCHER<I>),
-    ANYONE2Any(Any<I>),
-}
-impl<I> ::parserc::syntax::Syntax<I> for ANYONE2<I>
-where
-    I: ::unsyn::runtime::GeneratedInput,
-{
-    fn parse(input: &mut I) -> ::core::result::Result<Self, <I as ::parserc::Input>::Error> {
-        #[allow(unused_imports)]
-        use ::parserc::{
-            AsStr, Find, Input, Parser, StartWith,
-            syntax::{Syntax, SyntaxInput},
-        };
-        if let ::core::option::Option::Some(__alt) =
-            (|input: &mut I| -> ::core::result::Result<Self, <I as ::parserc::Input>::Error> {
-                ::core::result::Result::Ok(Self::ANYONE2MATCHER(input.parse::<MATCHER<I>>()?))
-            })
-            .ok()
-            .parse(input)?
-        {
-            return ::core::result::Result::Ok(__alt);
-        }
-        if let ::core::option::Option::Some(__alt) =
-            (|input: &mut I| -> ::core::result::Result<Self, <I as ::parserc::Input>::Error> {
-                ::core::result::Result::Ok(Self::ANYONE2Any(input.parse::<Any<I>>()?))
-            })
-            .ok()
-            .parse(input)?
-        {
-            return ::core::result::Result::Ok(__alt);
-        }
-        ::core::result::Result::Err(
-            ::parserc::Kind::Syntax(
-                "ANYONE2",
-                ::parserc::ControlFlow::Recovable,
-                input.to_span_at(1),
-            )
-            .into(),
-        )
-    }
-    fn to_span(&self) -> ::parserc::Span {
-        #[allow(unused_imports)]
-        use ::parserc::{
-            AsStr, Find, Input, Parser, StartWith,
-            syntax::{Syntax, SyntaxInput},
-        };
-        match self {
-            Self::ANYONE2MATCHER(__0) => ::parserc::Span::None.union(&__0.to_span()),
-            Self::ANYONE2Any(__0) => ::parserc::Span::None.union(&__0.to_span()),
-        }
-    }
-}
-#[allow(non_camel_case_types, non_snake_case)]
-#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
 pub struct Guarded1<I>(pub IDENT<I>);
 impl<I> ::parserc::syntax::Syntax<I> for Guarded1<I>
 where
@@ -2641,116 +2444,6 @@ where
             syntax::{Syntax, SyntaxInput},
         };
         ::parserc::Span::None.union(&self.0.to_span())
-    }
-}
-#[allow(non_camel_case_types, non_snake_case)]
-#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
-pub enum Commented1<I> {
-    Commented1Tilde(Commented11<I>),
-    Commented1UNDER(UNDER<I>),
-}
-impl<I> ::parserc::syntax::Syntax<I> for Commented1<I>
-where
-    I: ::unsyn::runtime::GeneratedInput,
-{
-    fn parse(input: &mut I) -> ::core::result::Result<Self, <I as ::parserc::Input>::Error> {
-        #[allow(unused_imports)]
-        use ::parserc::{
-            AsStr, Find, Input, Parser, StartWith,
-            syntax::{Syntax, SyntaxInput},
-        };
-        if let ::core::option::Option::Some(__alt) =
-            (|input: &mut I| -> ::core::result::Result<Self, <I as ::parserc::Input>::Error> {
-                ::core::result::Result::Ok(Self::Commented1Tilde(input.parse::<Commented11<I>>()?))
-            })
-            .ok()
-            .parse(input)?
-        {
-            return ::core::result::Result::Ok(__alt);
-        }
-        if let ::core::option::Option::Some(__alt) =
-            (|input: &mut I| -> ::core::result::Result<Self, <I as ::parserc::Input>::Error> {
-                ::core::result::Result::Ok(Self::Commented1UNDER(input.parse::<UNDER<I>>()?))
-            })
-            .ok()
-            .parse(input)?
-        {
-            return ::core::result::Result::Ok(__alt);
-        }
-        ::core::result::Result::Err(
-            ::parserc::Kind::Syntax(
-                "Commented1",
-                ::parserc::ControlFlow::Recovable,
-                input.to_span_at(1),
-            )
-            .into(),
-        )
-    }
-    fn to_span(&self) -> ::parserc::Span {
-        #[allow(unused_imports)]
-        use ::parserc::{
-            AsStr, Find, Input, Parser, StartWith,
-            syntax::{Syntax, SyntaxInput},
-        };
-        match self {
-            Self::Commented1Tilde(__0) => ::parserc::Span::None.union(&__0.to_span()),
-            Self::Commented1UNDER(__0) => ::parserc::Span::None.union(&__0.to_span()),
-        }
-    }
-}
-#[allow(non_camel_case_types, non_snake_case)]
-#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
-pub enum Either1<I> {
-    Either1IDENT(IDENT<I>),
-    Either1DIGIT(DIGIT<I>),
-}
-impl<I> ::parserc::syntax::Syntax<I> for Either1<I>
-where
-    I: ::unsyn::runtime::GeneratedInput,
-{
-    fn parse(input: &mut I) -> ::core::result::Result<Self, <I as ::parserc::Input>::Error> {
-        #[allow(unused_imports)]
-        use ::parserc::{
-            AsStr, Find, Input, Parser, StartWith,
-            syntax::{Syntax, SyntaxInput},
-        };
-        if let ::core::option::Option::Some(__alt) =
-            (|input: &mut I| -> ::core::result::Result<Self, <I as ::parserc::Input>::Error> {
-                ::core::result::Result::Ok(Self::Either1IDENT(input.parse::<IDENT<I>>()?))
-            })
-            .ok()
-            .parse(input)?
-        {
-            return ::core::result::Result::Ok(__alt);
-        }
-        if let ::core::option::Option::Some(__alt) =
-            (|input: &mut I| -> ::core::result::Result<Self, <I as ::parserc::Input>::Error> {
-                ::core::result::Result::Ok(Self::Either1DIGIT(input.parse::<DIGIT<I>>()?))
-            })
-            .ok()
-            .parse(input)?
-        {
-            return ::core::result::Result::Ok(__alt);
-        }
-        ::core::result::Result::Err(
-            ::parserc::Kind::Syntax(
-                "Either1",
-                ::parserc::ControlFlow::Recovable,
-                input.to_span_at(1),
-            )
-            .into(),
-        )
-    }
-    fn to_span(&self) -> ::parserc::Span {
-        #[allow(unused_imports)]
-        use ::parserc::{
-            AsStr, Find, Input, Parser, StartWith,
-            syntax::{Syntax, SyntaxInput},
-        };
-        match self {
-            Self::Either1IDENT(__0) => ::parserc::Span::None.union(&__0.to_span()),
-            Self::Either1DIGIT(__0) => ::parserc::Span::None.union(&__0.to_span()),
-        }
     }
 }
 #[allow(non_camel_case_types, non_snake_case)]

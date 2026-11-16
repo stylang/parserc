@@ -349,6 +349,9 @@
 `bootstrap.uns:124` 的 `'<' Ident '>'` 这个组在手写侧是内联的
 `Angle<I, Ident<I>>`，没有 `ExprWithoutSuffix1` 这种名字。
 
+**（下面这两段是动工前的实测，现已完成：那 2 个 + 6 个右侧组 enum 都已内联，
+判据已写成 `tests/generated.rs` 与 `tests/bootstrap.rs` 各一条结构断言。）**
+
 实测的偏离（一个临时探针，跑 `bootstrap.uns` 全量 codegen 后统计，已删）：36 条
 产生式，58 个具名类型。多出的 22 个里：
 
@@ -392,16 +395,28 @@ fixture `tests/data/spec.rs` 上同一违规有六个：`NUMBER1`（`DIGIT ( DIG
       里都有同名产生式，任何一侧单独改名都会红。
       `tests/data/spec.rs` 那套示例语言的 SCREAMING 写法**没动**：它是 fixture 的输入，改了要
       连带重生 `tests/data/mini.rs`，归下面那条重生 fixture 一起做。
-- [ ] `FieldType` 缺一个"多选一"分支：它有 `Group`（元组）、`Concat`、`Opt`、`Many`、
+- [x] `FieldType` 缺一个"多选一"分支：它有 `Group`（元组）、`Concat`、`Opt`、`Many`、
       `Punctuated`、`Delimited`，都是内联的类型表达式，唯独没有 alternative，所以
       多选只能落到 `enum_of` + `anonymous_as` 造一个具名 enum。补一个内联分支（
       `FieldType::Alts(Vec<Vec<FieldType>>)` 或二叉 `Alt`），`render.rs::ty` 把它展成右
       结合的 `::parserc::syntax::Or<A, B>`（`crates/parserc/src/syntax.rs:400`，现成的，
       不需要生成器声明任何东西），`read`/`to_span` 对应 `Or::First`/`Or::Second`。
-- [ ] `codegen/types.rs::group()` 在 `expr.rest` 非空时不再走 `next(owner)` +
+      **已做**：`FieldType::Alts(Vec<FieldType>)`（`codegen/types.rs:187`），文档写明它
+      是"右侧的组，不留名字"；`render.rs::ty` 走新的 `Renderer::choice`，展成右结合的
+      全限定 `::parserc::syntax::Or<first, rest>`（全限定是必需的：生成物里有
+      `Or<I>` 这个存 `'|'` 的 punct 类型，不限定就互相遮蔽）。`takes_nothing` 取
+      任一候选为空即空；trivia 由 `Trivia::ty` 逐个候选各自结算，因为"哪条路被读
+      出来"决定中间那个串归谁。
+- [x] `codegen/types.rs::group()` 在 `expr.rest` 非空时不再走 `next(owner)` +
       `anonymous_as(…)`，而是返回上一条那个内联类型。同理，超过 `MAX_GROUP` 的长
       序列也不该提名字，而是**嵌套元组**（元组没有 arity 上限问题，只要拆成树）。
-- [ ] 保留那些**不得不**具名的例外，它们不是右侧中间节点，而是 `parserc` 代数里
+      **已做**：`group()` 单候选直接返回 `alternative()`，多候选返回 `Alts`；
+      `anonymous_as` 与 `MAX_GROUP` 都已删除；`Renderer::tuple` 在 `len > MAX_TUPLE`
+      时从 `div_ceil(2)` 处拆成嵌套元组。`types.rs` 模块文档里那条"超过十六个操作数
+      要具名类型"的旧理由同步改掉，现在写的是"三样东西才需要具名类型"：`{n,m}` 的
+      `Bounds`、`except`/`followed` 的 `Asserted`、以及字符级模式在 syntax 规则里
+      需要的 token 类型（`TypeBuilder::token`）。
+- [x] 保留那些**不得不**具名的例外，它们不是右侧中间节点，而是 `parserc` 代数里
       没有对应节点、必须自己写 `Syntax` impl 的东西：终结符 token 类型（`token()` /
       `Step` 字符类）与 `Asserted`（`except`/`followed` 的 lookahead）。`{n,m}` 现在
       也造具名类型，那是 P4 记录的取舍（报错带名字）而非结构需要：`Limits*<T, N>`
@@ -411,7 +426,13 @@ fixture `tests/data/spec.rs` 上同一违规有六个：`NUMBER1`（`DIGIT ( DIG
       trivia 属于每条候选自己的序列，而 `Or<F, S>` 本身不留位置是对的。它用的是
       `F::into_parser().ok()`（`parserc/src/syntax.rs:414`），不回落 `Fatal` ——
       与 `#[derive(Syntax)]` 给 enum 生成的完全同一个形状，所以行为不会变。
-- [ ] 上面两条做完后，“变体名冲突”只剩**左侧规则**这一种情况，才轮到命名卫生：
+      **已定**：例外集合就是上面那三样，已写进 `codegen/types.rs` 的模块文档；
+      `{n,m}` 保留具名载体（P4 的错误名取舍）。
+      **判据的更正**：计划原本想用"出现以产生式名为前缀的 `…1`/`…2` 就是回归"当
+      结构门，这个模式不成立 —— token 类型与 `Bounds`/`Asserted` 载体合法地用同样
+      后缀（`TEXT1`、`SHAPE1`、`Guarded1`）。真正的判据是：**每个具名 `enum` 的名字
+      必须是一条产生式的左侧名字**，右侧组永远不该有 enum。两条测试据此实现。
+- [x] 上面两条做完后，“变体名冲突”只剩**左侧规则**这一种情况，才轮到命名卫生：
       `syntax ExprWithSuffix -> ExprWithoutSuffix (…) | ExprWithoutSuffix 'concat' … | …`
       四条都同一个开头，`named_variant` 只看 `seq.first` 就得到四个
       `ExprWithoutSuffix`，于是 `Variant{2,3,4}` 后缀。改成从"该变体独有的形状特征"
@@ -419,6 +440,15 @@ fixture `tests/data/spec.rs` 上同一违规有六个：`NUMBER1`（`DIGIT ( DIG
       那个后缀组），而不是加序号。手写侧改成 4 变体不缩小这一条：它从来只是命名
       问题，不是形状问题，而且上面那条决定定下来之后，“右侧组参与不参与外层扁平
       化”已经不会再被重新推翻。
+      **已做**：`named_variant` 删除，`enum_of` 先把全部候选的形状读成
+      `operand_names` 列表，再交给 `variant_name(&shapes, index)` —— 取第一个“在这个
+      位置上没有兄弟也有”的操作数名字（`operand_name` 不失败：解不出的码点写作
+      `Unicode`）；只有两个变体派生出同一个名字时才加 `{name}Variant{n}`。
+      `bootstrap.uns:132-143` 四条因此得到 `ExprWithSuffixGroup` / `…Concat` /
+      `…Followed` / `…Except`，不再有序号后缀；`tests/codegen.rs` 里`the_four_quantity_operators…`
+      与 `a_bootstrap_spec_is_read_as_the_shapes_it_writes` 两处钉住这件事（后者原先
+      用 `starts_with("ExprWithSuffix(")` 断言，那是空断言：`enum_variants` 会把括号
+      本身吃据，已改成把变体名截到字母数字处再比）。
 - [x] **形状后果已定（用户定夺：改手写侧）**：`('*'|'?'|'+'|Repeat)` 不参与外层
       扁平化。手写的 `syntax/expr.rs` 的 `ExprWithSuffix` 从 **7 个变体** 改成
       **4 个**，与 `bootstrap.uns:132-143` 的四条一一对应：`Grouped` / `Concat` /
@@ -465,17 +495,37 @@ fixture `tests/data/spec.rs` 上同一违规有六个：`NUMBER1`（`DIGIT ( DIG
 - [x] ~~**一个需要定夺的形状后果**~~ —— 已定并已改，见上面那条：取 **4 个变体**，
       改的是手写侧（`Star`/`Question`/`Plus`/`Repeat` 四个变体合成了 `Grouped` 一个）。
       剩下的只是把生成侧的 `ExprWithSuffix1` 换成内联的 `Or<…>`，归本段第一条。
-- [ ] 生成器内部引用代数节点一律全限定（`::parserc::syntax::Or`、`Delimiter`、
+- [x] 生成器内部引用代数节点一律全限定（`::parserc::syntax::Or`、`Delimiter`、
       `Punctuated`、`Limits*`），避免与生成的 punct 类型 `Or`/`Tilde`/`Comma` 冲突。
       第一条把 `Or` 变成天天用的内联节点后，这一条从“应修”变成“必须”：生成的
       `Or<I>`（`'|'` 那个 punct）与 `parserc::syntax::Or` 同名，不限定就互相遮蔽。
-- [ ] 重生 `tests/data/mini.rs`：这一条改动会删掉上面那六个右侧组 enum（以及
+      **已做**：`choice`/`tuple`/`read`/`to_span` 写的都是 `::parserc::syntax::Or<…>`，
+      `Renderer::choice` 的注释说明了为何必须限定的理由。
+- [x] 重生 `tests/data/mini.rs`：这一条改动会删掉上面那六个右侧组 enum（以及
       bootstrap 侧的 `Repeat1`/`ExprWithSuffix1`），fixture 与 `tests/generated.rs`
       的形状断言跟着改。
-- [ ] 门：`cargo test -p unsyn --all-features` + `RUSTDOCFLAGS=-D warnings cargo doc`。
+      **已做**：fixture 97,948 → **86,801** 字节（-11,147），`NUMBER1`/`TEXT1`/`Commented1`/
+      `Either1`/`ANYONE1`/`ANYONE2` 六个右侧组 enum 没了，留下的 `TEXT1`/`TEXT2`/`Commented1`
+      是字符级模式的 token 类型（重新编了号），`SHAPE1`/`Guarded1`/`Dotted1` 是
+      `{n,m}` 与 `followed` 的载体。`tests/generated.rs` 四处断言改成内联形状：
+      `Or<MATCHER, Any>`（`ANYONE`)、`Or<IDENT, DIGIT>`（`Either`)、
+      `Or<DIGIT, Underscore>`（`NUMBER`)、`Or<TEXT1, (BSLASH, TEXT2)>`（`TEXT`)；其中
+      一个测试名从 `a_group_inside_a_rule_is_a_type_named_for_the_rule_around_it`
+      改成 `…_is_a_field_of_it_and_not_a_type_of_its_own`，因为它断言的东西变了。
+      `tests/dump.rs` 与 `tests/generated.rs` 里“groups that need a type of their own”
+      那句旧描述也跟着改了。
+- [x] 门：`cargo test -p unsyn --all-features` + `RUSTDOCFLAGS=-D warnings cargo doc`。
       再加一条结构断言：**生成的具名类型集合，必须等于产生式左侧名字集合 加
       上面那些不得不具名的例外集合**；出现任何以产生式名为前缀的右侧组类型
       （`…1`、`…2`）就是回归。这条断言比任何名字派生规则都更难钻。
+      **已做**（判据按上面那条更正重写）：两条测试用 `syn` 读生成物里真正的
+      `enum` 声明（不是文本搜索），逐个比规范声明的产生式：
+      `tests/generated.rs::every_sum_type_is_a_production_of_the_spec` 断言 fixture
+      只有 `PRIMARY`/`BINOP`/`LITERAL`；`tests/bootstrap.rs::
+      every_sum_type_of_the_generated_parser_is_a_production` 断言 `bootstrap.uns`
+      只有 `ExprNoTopAlt`/`ExprWithoutSuffix`/`ExprWithSuffix`/`Range`/`SetItem`
+      —— 恰好是那五条多备选的产生式，注释规则与转义都不在列。
+      门表数字见末尾「门」小节 P5 那一段。
 
 ## P6 — 自举验收（本计划的终点）
 
@@ -510,6 +560,11 @@ fixture `tests/data/spec.rs` 上同一违规有六个：`NUMBER1`（`DIGIT ( DIG
 - [ ] 等价性测试：对 `bootstrap.uns` 与 `crates/unsyn/**/*.uns`、
       `tests/data/*.uns`（含故意写坏的样本）**同时**跑手写 parser 与生成 parser，
       断言 CST 与错误位置一致；不一致就回到 P1–P5 修生成侧或改规范。
+      **已知的名字差（不要静默改名，待定夺哪侧）**：生成侧
+      `ExprWithSuffix::ExprWithSuffixGroup` 对 手写侧 `ExprWithSuffix::Grouped`。
+      前者说的是"区分它的那个操作数是个括号组"，后者说的是"它带一个数量算子"；
+      两者指的是同一条候选，但描述的不是同一件事。上一轮说过要"改手写侧"，
+      但改名会动到 span 偏移相关的断言，所以先记在这里，到等价性测试跑通后再一并定。
 - [ ] 全部等价后，才替换 `src/lexical/` + `src/syntax/` 的手写实现。
 - [ ] 门（替换后）：`cargo test --workspace`、`--no-default-features --features runtime`、
       `--features codegen`、三组 clippy、四组 rustdoc、`cargo fmt --all --check`。
@@ -545,6 +600,26 @@ fixture `tests/data/spec.rs` 上同一违规有六个：`NUMBER1`（`DIGIT ( DIG
 > 6 四组均 0 警告，且额外加了 `--all-features --document-private-items` 一组 ——
 > 它揭出 4 条早就断的内链，已补成全路径；7 干净。`tests/data/mini.rs` 95,837 →
 > 97,948 字节（新增 `REACH` 一条规则，`IDENT`/`Asked` 两处的 `except` 改写）。
+>
+> P5 收尾时再跑全表：1 全绿（**182** lib / **6** bootstrap / 19 codegen / 1 dump /
+> **27** generated / 3 doctests），2 十五行全 `ok`；3 runtime-only 2 绿；4
+> `--no-default-features --features codegen` 180 lib + 6 + 19 + 1 + 3 全绿；
+> 5 三组均在 `crates/unsyn` 里 0 条；6 五组（含 `--document-private-items`）均 0 警告；
+> 7 干净。新增测试：lib 两条是集合成员重复的四条 lint 端到端钉字
+> （`semantics::tests::a_repeated_member_is_reported_in_every_kind_of_rule`、
+> `each_relation_between_two_members_is_named_in_its_message`）；bootstrap 与 generated
+> 各一条是 P5 的结构断言。fixture `tests/data/mini.rs` 97,948 → **86,801** 字节。
+>
+> **一个更正（本轮）**：上一轮对三个提问的回答引到了不存在的文件与符号
+> （`src/semantic/`、`src/lexical/parser.rs`、`CharClass` 在 semantics、`DuplicateAlt`、
+> `MAX_MEMBER_NAMES` 等），所以那三条结论作废。按真实代码重查：
+> 集合成员的重复**早就**在 `semantics/check.rs::validate_set` 里检了（四种关系
+> `DuplicateMember`/`CoveredMember`/`CoversMember`/`OverlappingMember`，走 lint 通道）；
+> `range` 两端必须是单 char 也**早就**在 `validate_range` 里以 `NotAChar` 定了（本轮
+> 新加的两条测试把它端到端钉住）；`except` 是按操作符的，生成侧
+> `Step::Except { item, removed }`、分图侧 `with_suffix_same_offset` 两处一致，没有洞；
+> 左递归用 `first_edges` + `same_offset_edges` 显式栈 DFS（`graph.rs::cyclic_nodes` /
+> `visit_edges`）而非计数器，所以也不存在 `saturating_add` 那回事。
 
 ## P7 — 收尾
 

@@ -794,6 +794,56 @@ mod tests {
         assert!(lints[2].contains("member `'b'`"), "{lints:#?}");
     }
 
+    /// A set says its members wherever it is written, so a member it says twice
+    /// is reported wherever it is written: the rule of a node of the language,
+    /// the rule of its trivia, or the rule of a token.
+    #[test]
+    fn a_repeated_member_is_reported_in_every_kind_of_rule() {
+        // A set written in a rule of nodes is a token of its own, but it is the
+        // same kind of set, and the same kind of report.
+        let lints = lints_of("lexer A -> 'a'; syntax P -> A ['a', 'a'] A;");
+
+        assert_eq!(lints.len(), 1, "{lints:#?}");
+        assert!(
+            lints[0].contains("member `'a'` of this set is already declared"),
+            "{lints:#?}"
+        );
+
+        // The trivia of the language is a pattern like any other.
+        let lints = lints_of("whitespace W -> [' ', ' '];");
+
+        assert_eq!(lints.len(), 1, "{lints:#?}");
+    }
+
+    /// The four relations a member can bear to an earlier member of the same set
+    /// are four different messages, and each names both of the members it
+    /// compares: which of them is the redundant one is what the reader of the
+    /// file has to work out.
+    #[test]
+    fn each_relation_between_two_members_is_named_in_its_message() {
+        for (body, want) in [
+            ("['a', 'a']", "member `'a'` of this set is already declared"),
+            (
+                "['a'-'z', 'c']",
+                "member `'c'` is covered by the earlier member `'a'-'z'`",
+            ),
+            (
+                "['c', 'a'-'z']",
+                "member `'a'-'z'` covers the earlier member `'c'`",
+            ),
+            (
+                "['a'-'c', 'b'-'d']",
+                "member `'b'-'d'` overlaps the earlier member `'a'-'c'`",
+            ),
+            ("[LF, LF]", "member `LF` of this set is already declared"),
+        ] {
+            let lints = lints_of(&format!("lexer A -> {body}; lexer LF -> 'l';"));
+
+            assert_eq!(lints.len(), 1, "{body}: {lints:#?}");
+            assert!(lints[0].contains(want), "{body}: {}", lints[0]);
+        }
+    }
+
     #[test]
     fn a_range_needs_single_characters() {
         // A range is drawn over code points, so both bounds must be a char.
