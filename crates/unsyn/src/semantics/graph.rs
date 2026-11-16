@@ -21,7 +21,9 @@ use crate::{
     input::UnsynInput,
     lexical::{delimiter::Angle, ident::Ident},
     semantics::{NodeKind, SymbolTable, check::items, check::repeat_lower, value::str_chars},
-    syntax::{Expr, ExprNoTopAlt, ExprNoTopAlts, ExprWithSuffix, ExprWithoutSuffix, SetItem},
+    syntax::{
+        Expr, ExprNoTopAlt, ExprNoTopAlts, ExprWithSuffix, ExprWithoutSuffix, SetItem, SuffixOp,
+    },
 };
 
 /// The name of the pattern that matches any single character.
@@ -233,16 +235,14 @@ fn with_suffix_refs<'a, I: UnsynInput, F: FnMut(&'a Ident<I>)>(
     f: &mut F,
 ) {
     match expr {
-        ExprWithSuffix::Star(target, _)
-        | ExprWithSuffix::Question(target, _)
-        | ExprWithSuffix::Plus(target, _) => without_suffix_refs(target, f),
+        // A quantity operator leaves the shape of the operand it repeats
+        // untouched, and the bounds in the `{…}` member are decimals, not names.
+        ExprWithSuffix::Grouped { target, .. } => without_suffix_refs(target, f),
         // Whatever is excepted is still matched, so it is a dependency too.
         ExprWithSuffix::Except { target, tokens, .. } => {
             without_suffix_refs(target, f);
             without_suffix_refs(tokens, f);
         }
-        // The bounds of a repetition are decimal literals, not names.
-        ExprWithSuffix::Repeat { target, .. } => without_suffix_refs(target, f),
         ExprWithSuffix::Concat { target, suffix, .. }
         | ExprWithSuffix::Followed { target, suffix, .. } => {
             without_suffix_refs(target, f);
@@ -311,14 +311,13 @@ fn with_suffix_calls<'a, I: UnsynInput, F: FnMut(&'a Angle<I, Ident<I>>)>(
     f: &mut F,
 ) {
     match expr {
-        ExprWithSuffix::Star(target, _)
-        | ExprWithSuffix::Question(target, _)
-        | ExprWithSuffix::Plus(target, _) => without_suffix_calls(target, f),
+        // The bounds inside the group's `{…}` member are decimals, which call
+        // no external; only the operand can.
+        ExprWithSuffix::Grouped { target, .. } => without_suffix_calls(target, f),
         ExprWithSuffix::Except { target, tokens, .. } => {
             without_suffix_calls(target, f);
             without_suffix_calls(tokens, f);
         }
-        ExprWithSuffix::Repeat { target, .. } => without_suffix_calls(target, f),
         ExprWithSuffix::Concat { target, suffix, .. }
         | ExprWithSuffix::Followed { target, suffix, .. } => {
             without_suffix_calls(target, f);
@@ -393,10 +392,9 @@ fn with_suffix_sequences<'a, I: UnsynInput, F: FnMut(&'a ExprNoTopAlts<I>)>(
     f: &mut F,
 ) {
     match expr {
-        ExprWithSuffix::Star(target, _)
-        | ExprWithSuffix::Question(target, _)
-        | ExprWithSuffix::Plus(target, _)
-        | ExprWithSuffix::Repeat { target, .. } => without_suffix_sequences(target, f),
+        // A group is no sequence of its own, and neither are the bounds in its
+        // `{…}` member, so only the operand is read here.
+        ExprWithSuffix::Grouped { target, .. } => without_suffix_sequences(target, f),
         // The operand a keyword introduces is an assertion about the text and
         // no element of the sequence, so only a group written inside it is.
         ExprWithSuffix::Concat { target, suffix, .. }
@@ -535,13 +533,15 @@ fn with_suffix_nullable<I: UnsynInput>(
     nullable: &HashMap<&str, bool>,
 ) -> bool {
     match expr {
-        ExprWithSuffix::Star(..) | ExprWithSuffix::Question(..) => true,
-        ExprWithSuffix::Plus(target, _) => without_suffix_nullable(target, table, nullable),
-        ExprWithSuffix::Repeat { target, suffix } => {
+        ExprWithSuffix::Grouped { target, suffix } => match SuffixOp::of(suffix) {
+            SuffixOp::Star(_) | SuffixOp::Question(_) => true,
+            SuffixOp::Plus(_) => without_suffix_nullable(target, table, nullable),
             // `{0, N}` may match nothing at all, and any other count matches the
             // empty string when its target does.
-            repeat_lower(&suffix.body) == 0 || without_suffix_nullable(target, table, nullable)
-        }
+            SuffixOp::Repeat(brace) => {
+                repeat_lower(&brace.body) == 0 || without_suffix_nullable(target, table, nullable)
+            }
+        },
         ExprWithSuffix::Concat { target, suffix, .. } => {
             // Both operands of `concat` are matched and joined into one token,
             // so the sequence can match nothing only when both of them can.
@@ -627,10 +627,9 @@ fn with_suffix_first<'a, I: UnsynInput>(
     names: &mut Vec<&'a str>,
 ) {
     match expr {
-        ExprWithSuffix::Star(target, _)
-        | ExprWithSuffix::Question(target, _)
-        | ExprWithSuffix::Plus(target, _)
-        | ExprWithSuffix::Repeat { target, .. } => {
+        // Every quantity operator asks whether its own operand can begin the
+        // match, and the bounds of `{…}` contribute no node at the front.
+        ExprWithSuffix::Grouped { target, .. } => {
             without_suffix_first(target, table, nullable, names);
         }
         ExprWithSuffix::Concat { target, suffix, .. } => {
@@ -728,10 +727,9 @@ fn with_suffix_same_offset<'a, I: UnsynInput>(
     names: &mut Vec<&'a str>,
 ) {
     match expr {
-        ExprWithSuffix::Star(target, _)
-        | ExprWithSuffix::Question(target, _)
-        | ExprWithSuffix::Plus(target, _)
-        | ExprWithSuffix::Repeat { target, .. } => {
+        // A quantity operator tests nothing at this position beyond the operand
+        // it carries, and `{…}` is read off the text, not matched against it.
+        ExprWithSuffix::Grouped { target, .. } => {
             without_suffix_same_offset(target, table, nullable, names);
         }
         // The operand after `concat` and after `followed` starts where the

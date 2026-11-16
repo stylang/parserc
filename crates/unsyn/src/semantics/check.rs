@@ -20,7 +20,7 @@ use crate::{
     semantics::value::{dec_usize, dec_value, str_chars, str_value, unicode_value},
     syntax::{
         Expr, ExprNoTopAlt, ExprNoTopAlts, ExprWithSuffix, ExprWithoutSuffix, Range, Repeat,
-        SetItem,
+        SetItem, SuffixOp,
     },
 };
 
@@ -62,12 +62,14 @@ fn validate_alt<I: UnsynInput>(expr: &ExprNoTopAlt<I>, report: &mut Diagnostics)
 
 fn validate_with_suffix<I: UnsynInput>(expr: &ExprWithSuffix<I>, report: &mut Diagnostics) {
     match expr {
-        ExprWithSuffix::Star(target, _)
-        | ExprWithSuffix::Question(target, _)
-        | ExprWithSuffix::Plus(target, _) => validate_without_suffix(target, report),
-        ExprWithSuffix::Repeat { target, suffix } => {
+        // The bounds of a repetition are part of the group, and are the only
+        // member of it with a value to check.
+        ExprWithSuffix::Grouped { target, suffix } => {
             validate_without_suffix(target, report);
-            validate_repeat(&suffix.body, report);
+
+            if let SuffixOp::Repeat(brace) = SuffixOp::of(suffix) {
+                validate_repeat(&brace.body, report);
+            }
         }
         ExprWithSuffix::Concat { target, suffix, .. }
         | ExprWithSuffix::Followed { target, suffix, .. } => {

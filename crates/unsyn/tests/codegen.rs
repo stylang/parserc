@@ -68,7 +68,40 @@ fn plain(content: &'static str) -> String {
     }
 }
 
-/// A generator told what the two names a spec of identifiers writes call.
+/// The variants of the `enum` a generated file declares under `name`, split at
+/// the commas that separate them and at nothing nested inside one of them.
+///
+/// The text has had its whitespace removed, so a comma separates two variants
+/// only when no delimiter is open around it.
+fn enum_variants(written: &str, name: &str) -> Vec<String> {
+    let head = format!("pubenum{name}<I>{{");
+
+    let start = written
+        .find(&head)
+        .unwrap_or_else(|| panic!("`{name}` is written as no enum"));
+
+    let mut depth = 0usize;
+    let mut current = String::new();
+    let mut variants = Vec::new();
+
+    for ch in written[start + head.len()..].chars() {
+        match ch {
+            '<' | '(' | '[' => depth += 1,
+            '>' | ')' | ']' if depth > 0 => depth -= 1,
+            ',' if depth == 0 => variants.push(std::mem::take(&mut current)),
+            '}' if depth == 0 => {
+                variants.push(std::mem::take(&mut current));
+
+                return variants;
+            }
+            other => current.push(other),
+        }
+    }
+
+    panic!("`{name}` is never closed");
+}
+
+/// A generator told what the two names a spec of identifiers writes calls.
 ///
 /// This is the caller's own table: the paths lead to a backend of the test's
 /// naming, since nothing in unsyn ships or assumes an implementation of a
@@ -267,6 +300,28 @@ fn a_group_of_operands_is_a_field_and_not_a_type_where_nothing_divides_them() {
     // for the group it belongs to.
     assert!(file.contains("Number1Digit(Digit<I>)"), "{file}");
     assert!(file.contains("Number1Dot(Dot<I>)"), "{file}");
+}
+
+/// A quantity operator is stored as the one group the production writes it as,
+/// but the variant naming a rule is still named for the operator it picked.
+#[test]
+fn the_four_quantity_operators_are_one_alternative_but_four_names() {
+    let content = leaked(
+        "lexer A -> ['a'];
+         syntax S -> A* | A? | A+ | A{2};",
+    );
+
+    let file = plain(content);
+
+    // Folding `('*' | '?' | '+' | Repeat)` into a single alternative of the rule
+    // must not fold the names with it: the generator reads the operator back out
+    // of the group, so four alternatives of a rule are still four distinguishable
+    // variants rather than four copies of one `Grouped`.
+    assert!(file.contains("SStar("), "{file}");
+    assert!(file.contains("SQuestion("), "{file}");
+    assert!(file.contains("SPlus("), "{file}");
+    assert!(file.contains("SRepeat("), "{file}");
+    assert!(!file.contains("SGrouped"), "{file}");
 }
 
 #[test]
@@ -651,7 +706,7 @@ fn a_bootstrap_spec_is_read_as_the_shapes_it_writes() {
     // actually says, not the widest reach of the terminals written in it.
     //
     // `bootstrap.uns:123` is `'~' '[' ( SetItem ',' )* SetItem? ']'`, and the
-    // hand-written node for it is `expr.rs:335`'s
+    // hand-written node for it is `expr.rs:354`'s
     // `Tilde(Tilde<I>, Bracket<I, Punctuated<SetItem<I>, Comma<I>>>)`: the `~`
     // stands outside the brackets, which close a run of their own. Folding
     // instead by leftmost reach would pair the `~` with the `]`.
@@ -676,6 +731,31 @@ fn a_bootstrap_spec_is_read_as_the_shapes_it_writes() {
             written.contains(&folded),
             "`{variant}` was not folded into the shape the hand-written node has"
         );
+    }
+
+    // The group `('*' | '?' | '+' | Repeat)` of `bootstrap.uns:134-139` stays
+    // the one alternative the production writes it as: `ExprWithSuffix` has one
+    // variant per alternative of the rule — four — and the four operators inside
+    // the group did not sink into the enum as variants of their own. This is the
+    // shape the hand-written `ExprWithSuffix` now has too: a node for the left
+    // side of a production, none for a group on its right side.
+    let suffix_variants = enum_variants(&written, "ExprWithSuffix");
+
+    assert_eq!(
+        suffix_variants.len(),
+        4,
+        "`ExprWithSuffix` is {:?}",
+        suffix_variants
+    );
+
+    for variant in &suffix_variants {
+        for op in ["Question", "Plus", "Repeat"] {
+            assert!(
+                !variant.starts_with(&format!("ExprWithSuffix{op}(")),
+                "`{op}` is a variant of `ExprWithSuffix`, so the group was flattened \
+                 into the node of its left side"
+            );
+        }
     }
 
     // `'[' ( SetItem ',' )* SetItem? ']'` — the separator and the items are

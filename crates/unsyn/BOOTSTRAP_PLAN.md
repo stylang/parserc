@@ -217,7 +217,7 @@
       `~` 会把 `]` 抢走，折出 `Delimited<Tilde, BracketEnd, …>` —— 把 `~` 和 `]` 当成一对，
       而产生式从没这么说过。改成最窄，得到
       `Tilde` + `Delimiter<BracketStart, BracketEnd, Punctuated<SetItem, Comma>>`，与手写
-      `syntax/expr.rs:335` 的 `Tilde(Tilde<I>, Bracket<I, Punctuated<…>>)` 同形。
+      `syntax/expr.rs:354` 的 `Tilde(Tilde<I>, Bracket<I, Punctuated<…>>)` 同形。
 - [x] `eats_leading`/`eats_trailing`：`Named` 查归属表，`Concat` 看首/尾，`Delimited` 看
       open/close，`Opt`/`Many`/`Punctuated`/`Gap` 一律 false（它们可以什么都不吃，不能指望）。
       宁可多一个 `Option<WS>` 字段，不可少一个。
@@ -252,7 +252,7 @@
       拿字段数当指标还有更坏的一层：它给上面 `Delimiter` 那个真错打了高分 —— 窗口取得越
       贪就越"省字段"，所以这个指标只会把错误方向奖励成成绩，把 `~` 和 `]` 配成一对这种
       形状错误完全看不见。现在核对的四条（`bootstrap.uns:123-126` 对
-      `syntax/expr.rs:335-350`）：
+      `syntax/expr.rs:342-376` 的 `enum ExprWithoutSuffix`）：
       - `'~' '[' … ']'` → `Tilde(Tilde, Delimiter<BracketStart, BracketEnd, Punctuated>)`
         同形于手写的 `Tilde(Tilde<I>, Bracket<I, Punctuated<SetItem<I>, Comma<I>>>)`；
       - `'[' … ']'` → 同形于手写的 `Set(Bracket<I, Punctuated<SetItem<I>, Comma<I>>>)`；
@@ -321,7 +321,7 @@
 
 要去掉名字的只有 `'<' IDENTIFIER '>'`、`( '*' | '?' | '+' | Repeat )` 这种**匿名括号组
 自身**——它们是联结结构而不是引用。手写侧就是这么写的：`bootstrap.uns:145` 的
-`Repeat` 是左侧（也是引用点），所以 `syntax/expr.rs:394` 有 `enum Repeat`；而
+`Repeat` 是左侧（也是引用点），所以 `syntax/expr.rs:420` 有 `enum Repeat`；而
 `bootstrap.uns:124` 的 `'<' IDENTIFIER '>'` 这个组在手写侧是内联的
 `Angle<I, Ident<I>>`，没有 `ExprWithoutSuffix1` 这种名字。
 
@@ -368,14 +368,32 @@ fixture `tests/data/spec.rs` 上同一违规有六个：`NUMBER1`（`DIGIT ( DIG
       四条都同一个开头，`named_variant` 只看 `seq.first` 就得到四个
       `ExprWithoutSuffix`，于是 `Variant{2,3,4}` 后缀。改成从"该变体独有的形状特征"
       派生稳定名字（这里区分四条的是第二个操作符 `concat`/`followed`/`except` 和
-      那个后缀组），而不是加序号。
-- [ ] **一个需要定夺的形状后果**（不是我能替用户定的）：`('*'|'?'|'+'|Repeat)` 内联
-      后，生成的 `ExprWithSuffix` 是 **4 个变体**（第一条持 `ExprWithoutSuffix` 加一个
-      `Or<…>`），而手写的 `syntax/expr.rs:235` 是 **7 个变体**（`Star`/`Question`/
-      `Plus`/`Repeat`/`Concat`/`Followed`/`Except`）—— 它把右侧那个括号组**下沉**到了
-      外层。两者解析同一个语言，但 CST 不同。按「`bootstrap.uns` 为准」应取 4 变体，
-      那就是改手写的一侧（影响 DSL 自己的树）；或者把“括号组参不参与外层扁平化”
-      写成一条明定。自举前必须定，归 P6 的等价清单。
+      那个后缀组），而不是加序号。手写侧改成 4 变体不缩小这一条：它从来只是命名
+      问题，不是形状问题，而且上面那条决定定下来之后，“右侧组参与不参与外层扁平
+      化”已经不会再被重新推翻。
+- [x] **形状后果已定（用户定夺：改手写侧）**：`('*'|'?'|'+'|Repeat)` 不参与外层
+      扁平化。手写的 `syntax/expr.rs` 的 `ExprWithSuffix` 从 **7 个变体** 改成
+      **4 个**，与 `bootstrap.uns:132-143` 的四条一一对应：`Grouped` / `Concat` /
+      `Followed` / `Except`。那个括号组存成它本来的样子：
+      `SuffixGroup<I> = Choice<Star<I>, Choice<Question<I>, Choice<Plus<I>,
+      Brace<I, Repeat<I>>>>>`（即 `parserc::syntax::Or` 的右嵌套；只是个类型别名，
+      不新增节点）。消费方用 `SuffixOp::of(&group)` 把算子读回来 —— 那是**视图不是
+      节点**，树上不存它。
+
+      改动落在 `syntax/expr.rs`（枚举本体 + 两处自己构树的测试）、`semantics/graph.rs`
+      （6 处，其中 4 处因为四个算子合成一条反而变短了）、`semantics/check.rs`、
+      `codegen/pattern.rs`、`codegen/types.rs`。
+
+      生成物**逐字节不变**：`types.rs::with_suffix` 按算子分支，`SuffixOp::of` 把四个
+      算子重新读出来，所以 `A*` 仍生成 `Vec<A<I>>`，fixture 漂移断言仍绿。新增两条
+      断言钉住这个决定：`the_four_quantity_operators_are_one_alternative_but_four_names`
+      （`syntax S -> A* | A? | A+ | A{2};` 仍得到 `SStar`/`SQuestion`/`SPlus`/`SRepeat`，
+      合并变体不能把算子的名字塌掉）与 `a_bootstrap_spec_is_read_as_the_shapes_it_writes`
+      里的 `enum_variants` 计数（生成的 `ExprWithSuffix` 恰好 4 个变体，且不出现以
+      `Question`/`Plus`/`Repeat` 打头的变体）。
+- [x] ~~**一个需要定夺的形状后果**~~ —— 已定并已改，见上面那条：取 **4 个变体**，
+      改的是手写侧（`Star`/`Question`/`Plus`/`Repeat` 四个变体合成了 `Grouped` 一个）。
+      剩下的只是把生成侧的 `ExprWithSuffix1` 换成内联的 `Or<…>`，归本段第一条。
 - [ ] 生成器内部引用代数节点一律全限定（`::parserc::syntax::Or`、`Delimiter`、
       `Punctuated`、`Limits*`），避免与生成的 punct 类型 `Or`/`Tilde`/`Comma` 冲突。
       第一条把 `Or` 变成天天用的内联节点后，这一条从“应修”变成“必须”：生成的

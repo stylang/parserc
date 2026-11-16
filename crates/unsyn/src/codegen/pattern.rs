@@ -26,6 +26,7 @@ use crate::semantics::WILDCARD;
 use crate::semantics::{dec_usize, str_value, unicode_value};
 use crate::syntax::{
     Expr, ExprNoTopAlt, ExprNoTopAlts, ExprWithSuffix, ExprWithoutSuffix, Range, Repeat, SetItem,
+    SuffixOp,
 };
 
 use super::error::{CodegenError, CodegenKind};
@@ -540,17 +541,19 @@ impl<'a> PatternBuilder<'a> {
 
     fn with_suffix<I: UnsynInput>(&self, expr: &ExprWithSuffix<I>) -> Result<Step, CodegenError> {
         match expr {
-            ExprWithSuffix::Star(target, _) => self.rep(0, None, target, expr),
-            ExprWithSuffix::Question(target, _) => self.rep(0, Some(1), target, expr),
-            ExprWithSuffix::Plus(target, _) => self.rep(1, None, target, expr),
-            ExprWithSuffix::Repeat { target, suffix } => {
-                let (min, max) = repeat_bounds(&suffix.body).ok_or_else(|| CodegenError {
-                    kind: CodegenKind::InvalidRepeat,
-                    span: expr.to_span(),
-                })?;
+            ExprWithSuffix::Grouped { target, suffix } => match SuffixOp::of(suffix) {
+                SuffixOp::Star(_) => self.rep(0, None, target, expr),
+                SuffixOp::Question(_) => self.rep(0, Some(1), target, expr),
+                SuffixOp::Plus(_) => self.rep(1, None, target, expr),
+                SuffixOp::Repeat(brace) => {
+                    let (min, max) = repeat_bounds(&brace.body).ok_or_else(|| CodegenError {
+                        kind: CodegenKind::InvalidRepeat,
+                        span: expr.to_span(),
+                    })?;
 
-                self.rep(min, max, target, expr)
-            }
+                    self.rep(min, max, target, expr)
+                }
+            },
             ExprWithSuffix::Concat { target, suffix, .. } => {
                 // Both operands are taken, the second from where the first
                 // ended, and the two together are one token.

@@ -18,7 +18,7 @@
 
 use parserc::{
     BeforeSpan, ControlFlow, Kind,
-    syntax::{Delimiter, Punctuated, Syntax},
+    syntax::{Delimiter, Or as Choice, Punctuated, Syntax},
 };
 
 use crate::{
@@ -230,39 +230,23 @@ where
 }
 
 /// An operand with one suffix.
+///
+/// The four quantity operators are the one alternative the production writes
+/// them as (`bootstrap.uns:133-139`), and not one alternative apiece. A tree has
+/// a node for the left side of a production; the group on this production's
+/// right side is denoted by [`SuffixGroup`], which names nothing of its own.
 #[derive(Debug, PartialEq, Eq, PartialOrd, Ord, Clone, Syntax)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub enum ExprWithSuffix<I>
 where
     I: UnsynInput,
 {
-    /// `*`, the operand matches zero or more times.
-    Star(
-        /// the repeated operand.
-        ExprWithoutSuffix<I>,
-        /// the star punct `*`
-        Star<I>,
-    ),
-    /// `?`, the operand matches at most once.
-    Question(
-        /// the optional operand.
-        ExprWithoutSuffix<I>,
-        /// the question punct `?`
-        Question<I>,
-    ),
-    /// `+`, the operand matches one or more times.
-    Plus(
-        /// the repeated operand.
-        ExprWithoutSuffix<I>,
-        /// the plus punct `+`
-        Plus<I>,
-    ),
-    /// `{…}`, the operand matches a bounded number of times.
-    Repeat {
-        /// the repeated operand.
+    /// The operand carries one of `*`, `?`, `+` or `{…}`.
+    Grouped {
+        /// the operand the operator applies to.
         target: ExprWithoutSuffix<I>,
-        /// the bounds, in braces
-        suffix: Brace<I, Repeat<I>>,
+        /// the operator the group picked.
+        suffix: SuffixGroup<I>,
     },
     /// `concat`, which asks the backend to join what the operands matched into
     /// one token. Both operands are matched, the second one from where the first
@@ -308,6 +292,48 @@ where
         /// the operand to take out, which cannot itself have a suffix.
         tokens: ExprWithoutSuffix<I>,
     },
+}
+
+/// The group `('*' | '?' | '+' | Repeat)`, in the shape the production writes
+/// it: a choice of four, and no name of its own.
+///
+/// The nested [`Choice`] is the algebra node for a choice, so a group is stored
+/// as the group it is rather than as a type declared for it. [`SuffixOp::of`]
+/// reads the operator back out for the code that has to know which one it was.
+pub type SuffixGroup<I> =
+    Choice<Star<I>, Choice<Question<I>, Choice<Plus<I>, Brace<I, Repeat<I>>>>>;
+
+/// The one operator a [`SuffixGroup`] picked, flattened so that a match can name
+/// the operators instead of walking the nested [`Choice`].
+///
+/// This is a *view* of the group and not a node: no tree stores one, and taking
+/// it costs nothing but reading a reference.
+#[derive(Debug)]
+pub enum SuffixOp<'a, I>
+where
+    I: UnsynInput,
+{
+    /// `*`, the operand matches zero or more times.
+    Star(&'a Star<I>),
+    /// `?`, the operand matches at most once.
+    Question(&'a Question<I>),
+    /// `+`, the operand matches one or more times.
+    Plus(&'a Plus<I>),
+    /// `{…}`, the operand matches a bounded number of times.
+    Repeat(&'a Brace<I, Repeat<I>>),
+}
+
+impl<'a, I: UnsynInput> SuffixOp<'a, I> {
+    /// The operator the group picked, reading the nested [`Choice`] in the order
+    /// the production writes its four alternatives.
+    pub fn of(group: &'a SuffixGroup<I>) -> Self {
+        match group {
+            Choice::First(star) => Self::Star(star),
+            Choice::Second(Choice::First(question)) => Self::Question(question),
+            Choice::Second(Choice::Second(Choice::First(plus))) => Self::Plus(plus),
+            Choice::Second(Choice::Second(Choice::Second(brace))) => Self::Repeat(brace),
+        }
+    }
 }
 
 /// An operand that stands alone.
@@ -475,10 +501,15 @@ mod tests {
             TokenStream::from("A?").parse::<Expr<_>>(),
             Ok(Expr {
                 first: ExprNoTopAlts {
-                    first: ExprNoTopAlt::WithSuffix(ExprWithSuffix::Question(
-                        ExprWithoutSuffix::Ident(Ident(TokenStream::from((0, "A")))),
-                        Question(None, TokenStream::from((1, "?")), None),
-                    )),
+                    first: ExprNoTopAlt::WithSuffix(ExprWithSuffix::Grouped {
+                        target: ExprWithoutSuffix::Ident(Ident(TokenStream::from((0, "A")))),
+                        // The group picks its second alternative, `?`.
+                        suffix: Choice::Second(Choice::First(Question(
+                            None,
+                            TokenStream::from((1, "?")),
+                            None,
+                        ))),
+                    }),
                     rest: vec![],
                 },
                 rest: vec![],
@@ -544,14 +575,19 @@ mod tests {
                 .parse::<Expr<_>>()
                 .expect("a bounded repetition should parse");
 
-            let ExprNoTopAlt::WithSuffix(ExprWithSuffix::Repeat { target, suffix }) =
+            let ExprNoTopAlt::WithSuffix(ExprWithSuffix::Grouped { target, suffix }) =
                 &expr.first.first
             else {
                 panic!("{src}: {:?}", expr.first.first);
             };
 
+            // A bounded repetition is the group's last alternative.
+            let SuffixOp::Repeat(group) = SuffixOp::of(suffix) else {
+                panic!("{src}: the group picked no bounds");
+            };
+
             assert_eq!(target.to_span(), Span::Range(0..1), "{src}");
-            assert_eq!(suffix.to_span(), braces, "{src}");
+            assert_eq!(group.to_span(), braces, "{src}");
         }
 
         // The three forms keep their decimals and their comma apart.
@@ -559,9 +595,9 @@ mod tests {
             TokenStream::from("A{1,3}").parse::<Expr<_>>(),
             Ok(Expr {
                 first: ExprNoTopAlts {
-                    first: ExprNoTopAlt::WithSuffix(ExprWithSuffix::Repeat {
+                    first: ExprNoTopAlt::WithSuffix(ExprWithSuffix::Grouped {
                         target: ExprWithoutSuffix::Ident(Ident(TokenStream::from((0, "A")))),
-                        suffix: Brace {
+                        suffix: Choice::Second(Choice::Second(Choice::Second(Brace {
                             start: BraceStart(None, TokenStream::from((1, "{")), None),
                             end: BraceEnd(None, TokenStream::from((5, "}")), None),
                             body: Repeat::RangeFrom(
@@ -569,7 +605,7 @@ mod tests {
                                 Comma(None, TokenStream::from((3, ",")), None),
                                 Some(LitDec(TokenStream::from((4, "3")))),
                             ),
-                        },
+                        }))),
                     }),
                     rest: vec![],
                 },

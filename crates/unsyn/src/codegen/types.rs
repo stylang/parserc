@@ -78,7 +78,9 @@ use parserc::syntax::Syntax;
 
 use crate::input::UnsynInput;
 use crate::semantics::WILDCARD;
-use crate::syntax::{Expr, ExprNoTopAlt, ExprNoTopAlts, ExprWithSuffix, ExprWithoutSuffix};
+use crate::syntax::{
+    Expr, ExprNoTopAlt, ExprNoTopAlts, ExprWithSuffix, ExprWithoutSuffix, SuffixOp,
+};
 
 use super::error::{CodegenError, CodegenKind};
 use super::name::{Names, keyword_name, literal_name, punct_name};
@@ -472,20 +474,20 @@ impl TypeBuilder {
         expr: &ExprWithSuffix<I>,
     ) -> Result<FieldType, CodegenError> {
         match expr {
-            ExprWithSuffix::Star(target, _) => self.repeated(target, 0, None, owner, expr),
-            ExprWithSuffix::Question(target, _) => {
-                Ok(FieldType::Opt(Box::new(self.leaf(owner, target)?)))
-            }
-            ExprWithSuffix::Plus(target, _) => self.repeated(target, 1, None, owner, expr),
-            ExprWithSuffix::Repeat { target, suffix } => {
-                let (min, max) =
-                    super::pattern::repeat_bounds(&suffix.body).ok_or_else(|| CodegenError {
-                        kind: CodegenKind::InvalidRepeat,
-                        span: expr.to_span(),
-                    })?;
+            ExprWithSuffix::Grouped { target, suffix } => match SuffixOp::of(suffix) {
+                SuffixOp::Star(_) => self.repeated(target, 0, None, owner, expr),
+                SuffixOp::Question(_) => Ok(FieldType::Opt(Box::new(self.leaf(owner, target)?))),
+                SuffixOp::Plus(_) => self.repeated(target, 1, None, owner, expr),
+                SuffixOp::Repeat(brace) => {
+                    let (min, max) =
+                        super::pattern::repeat_bounds(&brace.body).ok_or_else(|| CodegenError {
+                            kind: CodegenKind::InvalidRepeat,
+                            span: expr.to_span(),
+                        })?;
 
-                self.counted(target, min, max, owner, &expr.to_span())
-            }
+                    self.counted(target, min, max, owner, &expr.to_span())
+                }
+            },
             ExprWithSuffix::Concat { target, suffix, .. } => Ok(FieldType::Concat {
                 first: Box::new(self.leaf(owner, target)?),
                 second: Box::new(self.ty(owner, suffix)?),
@@ -877,10 +879,18 @@ impl TypeBuilder {
             ExprNoTopAlt::WithSuffix(ExprWithSuffix::Concat { .. }) => "Concat".to_owned(),
             ExprNoTopAlt::WithSuffix(ExprWithSuffix::Followed { .. }) => "Followed".to_owned(),
             ExprNoTopAlt::WithSuffix(ExprWithSuffix::Except { .. }) => "Except".to_owned(),
-            ExprNoTopAlt::WithSuffix(ExprWithSuffix::Star(..)) => "Star".to_owned(),
-            ExprNoTopAlt::WithSuffix(ExprWithSuffix::Plus(..)) => "Plus".to_owned(),
-            ExprNoTopAlt::WithSuffix(ExprWithSuffix::Question(..)) => "Question".to_owned(),
-            ExprNoTopAlt::WithSuffix(ExprWithSuffix::Repeat { .. }) => "Repeat".to_owned(),
+            // The group is one alternative, but the operator it picked is what
+            // tells two alternatives of a rule apart, so the variant is still
+            // named for the operator rather than for the group.
+            ExprNoTopAlt::WithSuffix(ExprWithSuffix::Grouped { suffix, .. }) => {
+                match SuffixOp::of(suffix) {
+                    SuffixOp::Star(_) => "Star",
+                    SuffixOp::Question(_) => "Question",
+                    SuffixOp::Plus(_) => "Plus",
+                    SuffixOp::Repeat(_) => "Repeat",
+                }
+                .to_owned()
+            }
         };
 
         // A variant is named within the type it belongs to, so only the
