@@ -72,8 +72,12 @@
   被**就地重复内联**（`Expr.0` 与 `Expr1.1` 各一份）。注意：规范里本来就没有
   `ExprNoTopAlts` 规则，它是手写树为复用而引入的；生成物内联成元组即可，
   **不需要**造这个名字（见 P3 决定）。
-- `enum Repeat1` 出现 `Repeat1DEC_LITERALVariant3` 这种"同名加序号"的变体名；
-  `ExprWithSuffixExprWithoutSuffixVariant2/3/4` 同理。可读性问题，非正确性问题。
+- `enum Repeat1` 出现 `Repeat1DEC_LITERALVariant3` 这种"同名加序号"的变体名。
+  **这一条不是可读性问题**（我原先这么记，是错的）：`Repeat1` 根本不是产生式的左侧，
+  它是 `Repeat` 右侧那个匿名括号组 `( ',' DEC_LITERAL | … )` 被生成器提成了一个具名
+  enum —— 按「只为产生式左侧生成 CST 节点」，它本来不该存在，见 P5。相比之下
+  `ExprWithSuffixExprWithoutSuffixVariant2/3/4` 不同：`ExprWithSuffix` 是左侧的具名规
+  则，它的变体名冲突才是真的命名问题。
 - 生成的 punct 类型叫 `Or`/`Comma`/`Semi`/`Minus`/`Tilde`/`Star`，与
   `parserc::syntax::Or` 同名；生成代码里凡是用到代数节点都必须全限定（P5）。
 - `{n,m}` 目前是手写 `loop` + `__items.len()` 比较，失败报
@@ -295,13 +299,94 @@
 - [ ] 门：新增行为测试全绿（`lexerX` 这一类必须用 `analyze` + 生成代码在
       `tests/generated.rs` 里编译后实测，而不是只看生成文本）。
 
-## P5 — 命名卫生
+## P5 — 只为产生式左侧生成节点，与命名卫生
 
+**原则**（本轮定下，原 P5 第二条把它当成命名问题，是误判断）：生成的 CST
+**节点类型只对应一条产生式的左侧**；右侧那些**本身没有名字的联结结构**（括号组里的
+多选与序列）一律**内联**成 `parserc` 的代数类型表达式 —— 元组、`Option<…>`、
+`Vec<…>`、`Delimiter<…>`、`Punctuated<…>`，以及下面要补的 `Or<…>` —— 不替它们造名字。
+
+**"内联"不适用于对已声明产生式的引用**（用户 2026-11-16 的质疑成立，措辞在此钉死）：
+产生式右侧写成 `IDENTIFIER`、`Repeat`、`DEC_LITERAL` 这类**左侧名字的引用**，当然要
+生成 CST 节点，而且现在就已经是节点，本条不改这个行为。实测证据（全量 codegen
+`bootstrap.uns`，以及 fixture）：
+
+- `SetItem` 四个变体持 `Range<I>` / `STRING_LITERAL<I>` / `UNICODE_LITERAL<I>` /
+  `IDENTIFIER<I>`；
+- `ExprNoTopAlt` 两个变体持 `Box<ExprWithSuffix<I>>` / `Box<ExprWithoutSuffix<I>>`；
+- `Repeat` 持 `Delimiter<BraceStart<I>, BraceEnd<I>, …>`；
+- `tests/data/mini.rs:1386` 的 `ITEM` 持 `Delimiter<ARROW<I>, SEMI<I>, EXPR<I>>`，
+  `EXPR:1424` 持 `Box<PRIMARY<I>>`，`PRIMARY:1469` 各变体持 `IDENT<I>` / `LITERAL<I>` /
+  `Box<GROUP<I>>`。
+
+要去掉名字的只有 `'<' IDENTIFIER '>'`、`( '*' | '?' | '+' | Repeat )` 这种**匿名括号组
+自身**——它们是联结结构而不是引用。手写侧就是这么写的：`bootstrap.uns:145` 的
+`Repeat` 是左侧（也是引用点），所以 `syntax/expr.rs:394` 有 `enum Repeat`；而
+`bootstrap.uns:124` 的 `'<' IDENTIFIER '>'` 这个组在手写侧是内联的
+`Angle<I, Ident<I>>`，没有 `ExprWithoutSuffix1` 这种名字。
+
+实测的偏离（一个临时探针，跑 `bootstrap.uns` 全量 codegen 后统计，已删）：36 条
+产生式，58 个具名类型。多出的 22 个里：
+
+- **20 个是字面终结符的 token 类型**（`Or`/`Comma`/`Star`/`ArrowRight`/`Concat` …，
+  就是 `'|'`、`','`、`'*'` 这些写在产生式里的符号）。它们要存下 token 和它的
+  trivia，必须有类型，与手写侧的 `lexical::punct`/`lexical::keyword` 同职，**不是**
+  要清理的对象。
+- **2 个才是真正的违规**：`Repeat1`（`Repeat` 右侧那个三选一括号组）和
+  `ExprWithSuffix1`（`('*'|'?'|'+'|Repeat)` 那个四选一）—— 右侧中间结构被提成了
+  具名 enum。
+
+fixture `tests/data/spec.rs` 上同一违规有六个：`NUMBER1`（`DIGIT ( DIGIT | '_' )*`
+里那个组）、`TEXT1`、`Commented1`、`Either1`、`ANYONE1` 与 `ANYONE2`。最后两个是
+同一形状的**两份副本**（`(MATCHER | _)` 在 `ANYONE` 里写了两次）—— 提具名类型不
+仅多余，还会造重复体，而内联没这个问题。剩下那些多出的名字不要误伤：
+`Plus`/`Minus`/`Underscore`/`Any` 是 `'+'`/`'-'`/`'_'`/`_` 的 token 类型，`TEXT11`/
+`TEXT12`/`Commented11` 是 `~[…]`/`[…]` 这类字符级模式的 token 类型，`SHAPE1`/
+`Dotted1` 是 `{n,m}` 的载体，`Guarded1` 是 `followed` 的 `Asserted`。
+
+- [ ] `FieldType` 缺一个"多选一"分支：它有 `Group`（元组）、`Concat`、`Opt`、`Many`、
+      `Punctuated`、`Delimited`，都是内联的类型表达式，唯独没有 alternative，所以
+      多选只能落到 `enum_of` + `anonymous_as` 造一个具名 enum。补一个内联分支（
+      `FieldType::Alts(Vec<Vec<FieldType>>)` 或二叉 `Alt`），`render.rs::ty` 把它展成右
+      结合的 `::parserc::syntax::Or<A, B>`（`crates/parserc/src/syntax.rs:400`，现成的，
+      不需要生成器声明任何东西），`read`/`to_span` 对应 `Or::First`/`Or::Second`。
+- [ ] `codegen/types.rs::group()` 在 `expr.rest` 非空时不再走 `next(owner)` +
+      `anonymous_as(…)`，而是返回上一条那个内联类型。同理，超过 `MAX_GROUP` 的长
+      序列也不该提名字，而是**嵌套元组**（元组没有 arity 上限问题，只要拆成树）。
+- [ ] 保留那些**不得不**具名的例外，它们不是右侧中间节点，而是 `parserc` 代数里
+      没有对应节点、必须自己写 `Syntax` impl 的东西：终结符 token 类型（`token()` /
+      `Step` 字符类）与 `Asserted`（`except`/`followed` 的 lookahead）。`{n,m}` 现在
+      也造具名类型，那是 P4 记录的取舍（报错带名字）而非结构需要：`Limits*<T, N>`
+      是内联代数类型，按原则应该内联；要不要为了错误信息保留具名类型，归 P4 判。
+      一个有利于内联的事实：`|` 是 DSL 层的元符号，**不是**目标语言里的 token，
+      所以一个多选组周围不需要、也不应有一个存 `'|'` 或存 gap 的字段；组内部的
+      trivia 属于每条候选自己的序列，而 `Or<F, S>` 本身不留位置是对的。它用的是
+      `F::into_parser().ok()`（`parserc/src/syntax.rs:414`），不回落 `Fatal` ——
+      与 `#[derive(Syntax)]` 给 enum 生成的完全同一个形状，所以行为不会变。
+- [ ] 上面两条做完后，“变体名冲突”只剩**左侧规则**这一种情况，才轮到命名卫生：
+      `syntax ExprWithSuffix -> ExprWithoutSuffix (…) | ExprWithoutSuffix 'concat' … | …`
+      四条都同一个开头，`named_variant` 只看 `seq.first` 就得到四个
+      `ExprWithoutSuffix`，于是 `Variant{2,3,4}` 后缀。改成从"该变体独有的形状特征"
+      派生稳定名字（这里区分四条的是第二个操作符 `concat`/`followed`/`except` 和
+      那个后缀组），而不是加序号。
+- [ ] **一个需要定夺的形状后果**（不是我能替用户定的）：`('*'|'?'|'+'|Repeat)` 内联
+      后，生成的 `ExprWithSuffix` 是 **4 个变体**（第一条持 `ExprWithoutSuffix` 加一个
+      `Or<…>`），而手写的 `syntax/expr.rs:235` 是 **7 个变体**（`Star`/`Question`/
+      `Plus`/`Repeat`/`Concat`/`Followed`/`Except`）—— 它把右侧那个括号组**下沉**到了
+      外层。两者解析同一个语言，但 CST 不同。按「`bootstrap.uns` 为准」应取 4 变体，
+      那就是改手写的一侧（影响 DSL 自己的树）；或者把“括号组参不参与外层扁平化”
+      写成一条明定。自举前必须定，归 P6 的等价清单。
 - [ ] 生成器内部引用代数节点一律全限定（`::parserc::syntax::Or`、`Delimiter`、
       `Punctuated`、`Limits*`），避免与生成的 punct 类型 `Or`/`Tilde`/`Comma` 冲突。
-- [ ] 变体名冲突（`Repeat1DEC_LITERALVariant3`）：改成从"该变体独有的形状特征"派生
-      稳定名字，而不是加 `Variant{n}` 后缀。
+      第一条把 `Or` 变成天天用的内联节点后，这一条从“应修”变成“必须”：生成的
+      `Or<I>`（`'|'` 那个 punct）与 `parserc::syntax::Or` 同名，不限定就互相遮蔽。
+- [ ] 重生 `tests/data/mini.rs`：这一条改动会删掉上面那六个右侧组 enum（以及
+      bootstrap 侧的 `Repeat1`/`ExprWithSuffix1`），fixture 与 `tests/generated.rs`
+      的形状断言跟着改。
 - [ ] 门：`cargo test -p unsyn --all-features` + `RUSTDOCFLAGS=-D warnings cargo doc`。
+      再加一条结构断言：**生成的具名类型集合，必须等于产生式左侧名字集合 加
+      上面那些不得不具名的例外集合**；出现任何以产生式名为前缀的右侧组类型
+      （`…1`、`…2`）就是回归。这条断言比任何名字派生规则都更难钻。
 
 ## P6 — 自举验收（本计划的终点）
 
