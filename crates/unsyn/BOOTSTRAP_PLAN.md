@@ -257,11 +257,13 @@
       - `stmt: LEADING_KEYWORDS IDENTIFIER '->' Expr ';'`（`:167`）→ 生成的是
         `Delimiter<ArrowRight, Semi, Expr>`，手写原先是 `arrow_right, expr, semi` 三个
         平铺字段 —— **已改手写的一侧**：`syntax/expr.rs` 的 `Stmt` 三个变体现在都是
-        `definition: Delimiter<ArrowRight<I>, Semi<I>, Expr<I>>`，`symbol.rs::stmt_expr`
+        `definition: Delimiter<ArrowRight<I>, Semi<I>, Expr<I>>`，`Definition::expr`
         读 `definition.body`。改完既有断言全部原样通过（包括
         `a_statement_without_a_semicolon_is_told_where_one_belongs`）：缺 `;` 的错误仍由
         `Expr` 体内的 `map_expr_err` 先报，位置不变；另外把四种缺 `;` 的写法（EOF、`)`、
         关键字、`|`）的 `Punct(Semi, Fatal, …)` 补成了永久断言。
+        同一条规则还要求 `Stmt` 是 **struct** 而不是按关键字分三的 enum，见下面 P6 那一
+        条（已按 `LeadingKey` 解决）。
       关于"缺闭合符报 `Fatal`"：手写 `lexical/delimiter.rs:18` 的 `Bracket` 本就是
       `parserc::syntax::Delimiter`，而 `Delimiter::parse` 对 `End` 加了 `.fatal()`
       （`parserc/src/syntax.rs:209`），`delimiter.rs:82` 的既有断言就是 `ControlFlow::Fatal`。
@@ -311,13 +313,23 @@
       注意 `Item -> WHITESPACE | …` 里对 trivia 节点的**裸引用**会被 `fold_separators` 保留
       （整条序列只有它自己），所以这一条能工作；生成的 `Crate` 会是 `Vec<Item>` 的 newtype
       而不是命名字段 struct —— 按 P0 的「行为等价」决定，可以接受。
-- [ ] **第二个规范洞（本轮新发现）**：`Stmt` 的关键字。`bootstrap.uns:167` 把三种声明
-      写成**一条**规则 `syntax Stmt -> LEADING_KEYWORDS IDENTIFIER …`，而手写的 `Stmt`（
-      `syntax/expr.rs:53`）是一个**按关键字分三变体的 enum**，`semantics` 从变体名取
-      `NodeKind`（`graph.rs:811`、`mod.rs:233`、`symbol.rs:244`）。这一条不能靠“改手写
-      的一侧”解决：扁平成一个 struct 就会把“是哪三种声明”从结构里掉到文本里，语义阶段要
-      改成读 `LEADING_KEYWORDS` 的文本才能拿到 kind。要么把规范拆成三条规则（每个关键字
-      一条），要么定下 kind 从文本读。自举前必须定。
+- [x] **第二个规范洞（本轮新发现）：`Stmt` 的关键字** —— 已定：**改手写的一侧**。
+      `bootstrap.uns:167` 把三种声明写成**一条**规则
+      `syntax Stmt -> LEADING_KEYWORDS IDENTIFIER '->' Expr ';'`，生成的是四元素扁平
+      struct；手写的 `Stmt` 原先是按关键字分三变体的 enum，`semantics` 从变体名取
+      `NodeKind`。现在的形状：`Stmt<I>` 是 struct，字段
+      `keyword: LeadingKey<I>` / `ident` / `definition`，其中
+      `LeadingKey`（`syntax/expr.rs:50`）是 `Whitespace | Lexer | Syntax` 三个关键字 token
+      的和类型。kind 不从 `LEADING_KEYWORDS` 的**文本**读，而从 `LeadingKey` 的**变体**读
+      （`symbol.rs::stmt_kind`），所以「是哪三种声明」仍在结构里而没掉进文本里；这一步
+      同时把原来重复了四次的三路 `match` 收成这一个函数。
+      为什么 `LeadingKey` 不放 `lexical/keyword.rs`：那个模块全用 `define_keyword!` 配手写
+      `Syntax` impl，且写 `impl<I> parserc::syntax::Syntax<I>`，`use parserc::syntax::Syntax`
+      会和局部那个名为 `Syntax` 的关键字 struct 撞掉；`syntax/expr.rs` 已经在给同类
+      「若干个 token 节点的和类型」derive `Syntax`，放这里才一致。
+      与生成侧的剩余差别：生成的是一个统一的 `LEADING_KEYWORDS<I>` token 字段，手写的
+      `LeadingKey` 是三选一 —— 这是 P6 等价性测试要处理的一项，和关键字 trivia 的归属
+      差别（手写关键字只带后置 trivia，见 `lexical/keyword.rs:9-11`）同一类，本轮不动。
 - [ ] 搭一个 build 阶段：用 `codegen` 从 `bootstrap.uns` 生成 parser，编译进测试
       crate（`runtime`/`codegen` 两个 feature 已经分开，build 依赖放
       `[build-dependencies]`）。

@@ -122,9 +122,10 @@ where
 
 #[cfg(test)]
 mod tests {
-    use parserc::{Span, syntax::SyntaxInput};
-
-    use parserc::syntax::Delimiter;
+    use parserc::{
+        Span,
+        syntax::{Delimiter, SyntaxInput},
+    };
 
     use crate::{
         input::TokenStream,
@@ -136,7 +137,7 @@ mod tests {
             lit::{LitStr, StrSegment},
             punct::{ArrowRight, Semi},
         },
-        syntax::{Expr, ExprNoTopAlt, ExprNoTopAlts, ExprWithoutSuffix},
+        syntax::{Expr, ExprNoTopAlt, ExprNoTopAlts, ExprWithoutSuffix, LeadingKey},
     };
 
     use super::*;
@@ -201,11 +202,11 @@ mod tests {
             file.items,
             vec![
                 Item::S(S(TokenStream::from((5, "\n\n")))),
-                Item::Stmt(Stmt::Whitespace {
-                    keyword: Whitespace(
+                Item::Stmt(Stmt {
+                    keyword: LeadingKey::Whitespace(Whitespace(
                         TokenStream::from((7, "whitespace")),
                         Some(S(TokenStream::from((17, " ")))),
-                    ),
+                    )),
                     ident: Ident(TokenStream::from((18, "W"))),
                     definition: Delimiter {
                         start: ArrowRight(

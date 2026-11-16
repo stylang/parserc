@@ -788,7 +788,8 @@ mod tests {
 
     use crate::input::TokenStream;
     use crate::semantics::Definition;
-    use crate::syntax::{Crate, Item, Stmt};
+    use crate::semantics::symbol::stmt_kind;
+    use crate::syntax::{Crate, Item};
 
     use super::*;
 
@@ -807,19 +808,7 @@ mod tests {
         for item in file.items.iter() {
             let Item::Stmt(stmt) = item else { continue };
 
-            let kind = match stmt {
-                Stmt::Whitespace { .. } => NodeKind::Whitespace,
-                Stmt::Lexer { .. } => NodeKind::Lexer,
-                Stmt::Syntax { .. } => NodeKind::Syntax,
-            };
-
-            let ident = match stmt {
-                Stmt::Whitespace { ident, .. }
-                | Stmt::Lexer { ident, .. }
-                | Stmt::Syntax { ident, .. } => ident,
-            };
-
-            let _ = table.insert(Definition::from_stmt(kind, ident, stmt));
+            let _ = table.insert(Definition::from_stmt(stmt_kind(stmt), &stmt.ident, stmt));
         }
 
         f(&table)

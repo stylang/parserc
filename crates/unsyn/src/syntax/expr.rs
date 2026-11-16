@@ -34,15 +34,36 @@ use crate::{
     },
 };
 
-/// A statement, which defines one node of the syntax tree.
-///
-/// The three forms differ only by the keyword that opens them, and that keyword
-/// is what decides what the node is:
+/// The keyword that opens a statement, which is what decides what the node is:
 ///
 /// * `whitespace` for the trivia a pattern may skip over, of which a file
 ///   declares exactly one;
 /// * `lexer` for a token, matched against the source text;
 /// * `syntax` for a node of the tree, built from the tokens it refers to.
+///
+/// The three are one lexer in the grammar — `bootstrap.uns:37` writes
+/// `LEADING_KEYWORDS -> 'lexer' | 'syntax' | 'whitespace'` — but they cannot be one
+/// token here, because which of them stood at the front is the only thing that
+/// tells the [statement](Stmt) apart from the others of its shape.
+#[derive(Debug, PartialEq, Eq, PartialOrd, Ord, Clone, Syntax)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+pub enum LeadingKey<I>
+where
+    I: UnsynInput,
+{
+    /// keyword `whitespace`
+    Whitespace(Whitespace<I>),
+    /// keyword `lexer`
+    Lexer(Lexer<I>),
+    /// keyword `syntax`
+    Syntax(crate::lexical::keyword::Syntax<I>),
+}
+
+/// A statement, which defines one node of the syntax tree.
+///
+/// The kind of node a statement defines is not a field of its own but whichever
+/// [`LeadingKey`] it opens with, since the keyword is a part of the statement and
+/// carries its trivia with it.
 ///
 /// The `->` and the `;` are one field rather than three, because they are the two
 /// ends of the run the definition is written between: that is the shape
@@ -50,38 +71,17 @@ use crate::{
 /// its own, since it keeps no trivia and the `->` reaches the run before it.
 #[derive(Debug, PartialEq, Eq, PartialOrd, Ord, Clone, Syntax)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
-pub enum Stmt<I>
+pub struct Stmt<I>
 where
     I: UnsynInput,
 {
-    Whitespace {
-        /// keyword `whitespace`
-        #[parserc(crucial)]
-        keyword: Whitespace<I>,
-        /// node name.
-        ident: Ident<I>,
-        /// the `->` … `;` the definition is written between
-        definition: Delimiter<ArrowRight<I>, Semi<I>, Expr<I>>,
-    },
-    Lexer {
-        /// keyword `lexer`
-        #[parserc(crucial)]
-        keyword: Lexer<I>,
-        /// node name.
-        ident: Ident<I>,
-        /// the `->` … `;` the definition is written between
-        definition: Delimiter<ArrowRight<I>, Semi<I>, Expr<I>>,
-    },
-
-    Syntax {
-        /// keyword `syntax`
-        #[parserc(crucial)]
-        keyword: crate::lexical::keyword::Syntax<I>,
-        /// node name.
-        ident: Ident<I>,
-        /// the `->` … `;` the definition is written between
-        definition: Delimiter<ArrowRight<I>, Semi<I>, Expr<I>>,
-    },
+    /// whether this defines the trivia, a token or a node
+    #[parserc(crucial)]
+    pub keyword: LeadingKey<I>,
+    /// node name.
+    pub ident: Ident<I>,
+    /// the `->` … `;` the definition is written between
+    pub definition: Delimiter<ArrowRight<I>, Semi<I>, Expr<I>>,
 }
 
 /// The expression that defines what a node matches.
@@ -599,11 +599,11 @@ mod tests {
     fn a_statement_is_a_name_an_expression_and_a_semicolon() {
         assert_eq!(
             TokenStream::from("lexer OCT_DIGIT -> [\'0\'-\'7\'];").parse::<Stmt<_>>(),
-            Ok(Stmt::Lexer {
-                keyword: Lexer(
+            Ok(Stmt {
+                keyword: LeadingKey::Lexer(Lexer(
                     TokenStream::from((0, "lexer")),
                     Some(S(TokenStream::from((5, " "))))
-                ),
+                )),
                 ident: Ident(TokenStream::from((6, "OCT_DIGIT"))),
                 definition: Delimiter {
                     start: ArrowRight(

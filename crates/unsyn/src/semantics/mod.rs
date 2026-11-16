@@ -85,6 +85,7 @@ use crate::{
 };
 
 use self::graph::{syntax_refs_of_terminal, unresolved_refs, walk_sequences};
+use self::symbol::stmt_kind;
 
 /// Runs every semantic check over one parsed source file.
 ///
@@ -229,15 +230,9 @@ where
     }
 
     fn collect_stmt(&mut self, stmt: &'a Stmt<I>) {
-        let (kind, ident) = match stmt {
-            Stmt::Whitespace { ident, .. } => (NodeKind::Whitespace, ident),
-            Stmt::Lexer { ident, .. } => (NodeKind::Lexer, ident),
-            Stmt::Syntax { ident, .. } => (NodeKind::Syntax, ident),
-        };
-
-        if let Err(error) = self
-            .symbols
-            .insert(Definition::from_stmt(kind, ident, stmt))
+        if let Err(error) =
+            self.symbols
+                .insert(Definition::from_stmt(stmt_kind(stmt), &stmt.ident, stmt))
         {
             self.report.push(error);
         }

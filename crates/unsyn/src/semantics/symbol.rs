@@ -8,7 +8,7 @@ use crate::{
     errors::{SemanticsKind, UnsynError},
     input::UnsynInput,
     lexical::ident::Ident,
-    syntax::{Expr, Stmt},
+    syntax::{Expr, LeadingKey, Stmt},
 };
 
 /// The kind of a node introduced by a [`Stmt`].
@@ -104,17 +104,20 @@ where
     /// The body expression of this node.
     #[inline]
     pub fn expr(&self) -> &'a Expr<I> {
-        stmt_expr(self.stmt)
+        &self.stmt.definition.body
     }
 }
 
-/// The body expression of a definition statement.
+/// The kind of node a definition statement defines.
+///
+/// The keyword that opens a statement is the only thing that tells its kind, so
+/// this reads it back off the [`LeadingKey`] the parser kept.
 #[inline]
-pub(crate) fn stmt_expr<I: UnsynInput>(stmt: &Stmt<I>) -> &Expr<I> {
-    match stmt {
-        Stmt::Whitespace { definition, .. }
-        | Stmt::Lexer { definition, .. }
-        | Stmt::Syntax { definition, .. } => &definition.body,
+pub(crate) fn stmt_kind<I: UnsynInput>(stmt: &Stmt<I>) -> NodeKind {
+    match &stmt.keyword {
+        LeadingKey::Whitespace(_) => NodeKind::Whitespace,
+        LeadingKey::Lexer(_) => NodeKind::Lexer,
+        LeadingKey::Syntax(_) => NodeKind::Syntax,
     }
 }
 
@@ -240,11 +243,7 @@ mod tests {
         file.items
             .iter()
             .filter_map(|item| match item {
-                Item::Stmt(stmt) => Some(match stmt {
-                    Stmt::Whitespace { ident, .. } => (NodeKind::Whitespace, ident, stmt),
-                    Stmt::Lexer { ident, .. } => (NodeKind::Lexer, ident, stmt),
-                    Stmt::Syntax { ident, .. } => (NodeKind::Syntax, ident, stmt),
-                }),
+                Item::Stmt(stmt) => Some((stmt_kind(stmt), &stmt.ident, stmt)),
                 _ => None,
             })
             .collect()
