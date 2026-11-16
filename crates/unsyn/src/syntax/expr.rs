@@ -300,8 +300,7 @@ where
 /// The nested [`Choice`] is the algebra node for a choice, so a group is stored
 /// as the group it is rather than as a type declared for it. [`SuffixOp::of`]
 /// reads the operator back out for the code that has to know which one it was.
-pub type SuffixGroup<I> =
-    Choice<Star<I>, Choice<Question<I>, Choice<Plus<I>, Brace<I, Repeat<I>>>>>;
+pub type SuffixGroup<I> = Choice<Star<I>, Choice<Question<I>, Choice<Plus<I>, Repeat<I>>>>;
 
 /// The one operator a [`SuffixGroup`] picked, flattened so that a match can name
 /// the operators instead of walking the nested [`Choice`].
@@ -320,7 +319,7 @@ where
     /// `+`, the operand matches one or more times.
     Plus(&'a Plus<I>),
     /// `{…}`, the operand matches a bounded number of times.
-    Repeat(&'a Brace<I, Repeat<I>>),
+    Repeat(&'a Repeat<I>),
 }
 
 impl<'a, I: UnsynInput> SuffixOp<'a, I> {
@@ -410,23 +409,54 @@ where
     Str(LitStr<I>, #[parserc(crucial)] Minus<I>, LitStr<I>),
 }
 
-/// The bounds of a repetition, between the braces that follow an operand.
+/// The bounds of a repetition: the whole `{…}`, braces and all, which is what
+/// `bootstrap.uns:145-153` puts on the left side of the production.
+///
+/// A node is named for the left side of a production, and here that is the whole
+/// braced run — the operand it follows is the one that says what gets counted.
+/// What the braces hold is the group [`RepeatGroup`] writes out, which is why the
+/// group is a type expression and no type of its own.
+pub type Repeat<I> = Brace<I, RepeatGroup<I>>;
+
+/// The group `(',' DEC_LITERAL | DEC_LITERAL ',' DEC_LITERAL? | DEC_LITERAL)` of
+/// `bootstrap.uns:147-151`, in the shape the production writes it.
 ///
 /// The comma form is read before the bare count, which is what lets `{2, 3}` be
 /// two bounds rather than a count of two followed by a closing brace that finds
 /// a comma and fails fatally.
-#[derive(Debug, PartialEq, Eq, PartialOrd, Ord, Clone, Syntax)]
-#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
-pub enum Repeat<I>
+pub type RepeatGroup<I> =
+    Choice<(Comma<I>, LitDec<I>), Choice<(LitDec<I>, Comma<I>, Option<LitDec<I>>), LitDec<I>>>;
+
+/// The bounds a [`RepeatGroup`] spells, flattened so that a match can name the
+/// three forms instead of walking the nested [`Choice`] and the tuples inside it.
+///
+/// This is a *view* of the group and not a node: no tree stores one, and taking
+/// it costs nothing but reading a reference.
+#[derive(Debug)]
+pub enum RepeatBound<'a, I>
 where
     I: UnsynInput,
 {
     /// `,n`, at most `n` times.
-    RangeTo(Comma<I>, LitDec<I>),
+    RangeTo(&'a Comma<I>, &'a LitDec<I>),
     /// `n,m`, or `n,` with no bound above.
-    RangeFrom(LitDec<I>, Comma<I>, Option<LitDec<I>>),
+    RangeFrom(&'a LitDec<I>, &'a Comma<I>, Option<&'a LitDec<I>>),
     /// `n`, exactly `n` times.
-    Count(LitDec<I>),
+    Count(&'a LitDec<I>),
+}
+
+impl<'a, I: UnsynInput> RepeatBound<'a, I> {
+    /// The form the group picked, reading the nested [`Choice`] in the order the
+    /// production writes its three alternatives.
+    pub fn of(group: &'a RepeatGroup<I>) -> Self {
+        match group {
+            Choice::First((comma, end)) => Self::RangeTo(comma, end),
+            Choice::Second(Choice::First((start, comma, end))) => {
+                Self::RangeFrom(start, comma, end.as_ref())
+            }
+            Choice::Second(Choice::Second(count)) => Self::Count(count),
+        }
+    }
 }
 
 #[cfg(test)]
@@ -600,11 +630,12 @@ mod tests {
                         suffix: Choice::Second(Choice::Second(Choice::Second(Brace {
                             start: BraceStart(None, TokenStream::from((1, "{")), None),
                             end: BraceEnd(None, TokenStream::from((5, "}")), None),
-                            body: Repeat::RangeFrom(
+                            // `{n, m}` is the group's second alternative.
+                            body: Choice::Second(Choice::First((
                                 LitDec(TokenStream::from((2, "1"))),
                                 Comma(None, TokenStream::from((3, ",")), None),
                                 Some(LitDec(TokenStream::from((4, "3")))),
-                            ),
+                            ))),
                         }))),
                     }),
                     rest: vec![],

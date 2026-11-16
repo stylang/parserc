@@ -478,9 +478,9 @@ impl TypeBuilder {
                 SuffixOp::Star(_) => self.repeated(target, 0, None, owner, expr),
                 SuffixOp::Question(_) => Ok(FieldType::Opt(Box::new(self.leaf(owner, target)?))),
                 SuffixOp::Plus(_) => self.repeated(target, 1, None, owner, expr),
-                SuffixOp::Repeat(brace) => {
+                SuffixOp::Repeat(repeat) => {
                     let (min, max) =
-                        super::pattern::repeat_bounds(&brace.body).ok_or_else(|| CodegenError {
+                        super::pattern::repeat_bounds(repeat).ok_or_else(|| CodegenError {
                             kind: CodegenKind::InvalidRepeat,
                             span: expr.to_span(),
                         })?;

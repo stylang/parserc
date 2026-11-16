@@ -765,7 +765,14 @@ fn a_bootstrap_spec_is_read_as_the_shapes_it_writes() {
         "`a b*` was not folded into one list: {written}"
     );
 
-    // `'{' Expr1+ '}'`
+    // `bootstrap.uns:145-153` is `'{' ( ',' DEC_LITERAL | DEC_LITERAL ','
+    // DEC_LITERAL? | DEC_LITERAL ) '}'`, so the node named `Repeat` is the whole
+    // braced run and not what sits between the braces. The hand-written side now
+    // has that same boundary: `syntax/expr.rs` declares `Repeat<I>` as
+    // `Brace<I, RepeatGroup<I>>`, and `lexical/delimiter.rs`'s
+    // `the_span_of_a_group_reaches_its_closing_token` parses `"{2, 3}"` as a
+    // `Repeat<_>` whose span reaches the `}`. The name the generated body carries
+    // (`Repeat1`) is the right-side group P5 still owes as an inline `Or<…>`.
     assert!(
         written.contains(
             "structRepeat<I>(pub::parserc::syntax::Delimiter<BraceStart<I>,BraceEnd<I>,\

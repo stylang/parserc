@@ -20,7 +20,7 @@ use crate::{
     semantics::value::{dec_usize, dec_value, str_chars, str_value, unicode_value},
     syntax::{
         Expr, ExprNoTopAlt, ExprNoTopAlts, ExprWithSuffix, ExprWithoutSuffix, Range, Repeat,
-        SetItem, SuffixOp,
+        RepeatBound, SetItem, SuffixOp,
     },
 };
 
@@ -67,8 +67,8 @@ fn validate_with_suffix<I: UnsynInput>(expr: &ExprWithSuffix<I>, report: &mut Di
         ExprWithSuffix::Grouped { target, suffix } => {
             validate_without_suffix(target, report);
 
-            if let SuffixOp::Repeat(brace) = SuffixOp::of(suffix) {
-                validate_repeat(&brace.body, report);
+            if let SuffixOp::Repeat(repeat) = SuffixOp::of(suffix) {
+                validate_repeat(repeat, report);
             }
         }
         ExprWithSuffix::Concat { target, suffix, .. }
@@ -269,14 +269,14 @@ fn bound<I: UnsynInput>(lit: &LitDec<I>, report: &mut Diagnostics) -> Option<usi
 fn validate_repeat<I: UnsynInput>(repeat: &Repeat<I>, report: &mut Diagnostics) {
     let span = repeat.to_span();
 
-    match repeat {
+    match RepeatBound::of(&repeat.body) {
         // `{, N}` and `{N}` matching nothing at all is never intended.
-        Repeat::RangeTo(_, end) | Repeat::Count(end) => {
+        RepeatBound::RangeTo(_, end) | RepeatBound::Count(end) => {
             if let Some(0) = bound(end, report) {
                 report.push(UnsynError::Semantics(SemanticsKind::InvalidRepeat, span));
             }
         }
-        Repeat::RangeFrom(start, _, end) => {
+        RepeatBound::RangeFrom(start, _, end) => {
             let Some(start) = bound(start, report) else {
                 return;
             };
@@ -299,9 +299,11 @@ fn validate_repeat<I: UnsynInput>(repeat: &Repeat<I>, report: &mut Diagnostics) 
 /// A bound that can not be evaluated is treated as `0`, which keeps the
 /// recursion analysis conservative instead of reporting the same literal twice.
 pub(crate) fn repeat_lower<I: UnsynInput>(repeat: &Repeat<I>) -> usize {
-    match repeat {
-        Repeat::RangeTo(..) => 0,
-        Repeat::RangeFrom(start, _, _) | Repeat::Count(start) => dec_usize(start).unwrap_or(0),
+    match RepeatBound::of(&repeat.body) {
+        RepeatBound::RangeTo(..) => 0,
+        RepeatBound::RangeFrom(start, _, _) | RepeatBound::Count(start) => {
+            dec_usize(start).unwrap_or(0)
+        }
     }
 }
 
@@ -407,7 +409,6 @@ mod tests {
     use parserc::syntax::SyntaxInput;
 
     use crate::input::TokenStream;
-    use crate::lexical::delimiter::Brace;
     use crate::syntax::{Expr, Repeat};
 
     use super::*;
@@ -643,10 +644,10 @@ mod tests {
             ("{1_0, 20}", 10),
         ] {
             let repeat = TokenStream::from(body)
-                .parse::<Brace<_, Repeat<_>>>()
+                .parse::<Repeat<_>>()
                 .expect("the test repetition should parse");
 
-            assert_eq!(repeat_lower(&repeat.body), expected, "{body}");
+            assert_eq!(repeat_lower(&repeat), expected, "{body}");
         }
     }
 }

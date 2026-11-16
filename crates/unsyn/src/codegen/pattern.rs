@@ -25,8 +25,8 @@ use crate::lexical::lit::{LitStr, LitUnicode};
 use crate::semantics::WILDCARD;
 use crate::semantics::{dec_usize, str_value, unicode_value};
 use crate::syntax::{
-    Expr, ExprNoTopAlt, ExprNoTopAlts, ExprWithSuffix, ExprWithoutSuffix, Range, Repeat, SetItem,
-    SuffixOp,
+    Expr, ExprNoTopAlt, ExprNoTopAlts, ExprWithSuffix, ExprWithoutSuffix, Range, Repeat,
+    RepeatBound, SetItem, SuffixOp,
 };
 
 use super::error::{CodegenError, CodegenKind};
@@ -545,8 +545,8 @@ impl<'a> PatternBuilder<'a> {
                 SuffixOp::Star(_) => self.rep(0, None, target, expr),
                 SuffixOp::Question(_) => self.rep(0, Some(1), target, expr),
                 SuffixOp::Plus(_) => self.rep(1, None, target, expr),
-                SuffixOp::Repeat(brace) => {
-                    let (min, max) = repeat_bounds(&brace.body).ok_or_else(|| CodegenError {
+                SuffixOp::Repeat(repeat) => {
+                    let (min, max) = repeat_bounds(repeat).ok_or_else(|| CodegenError {
                         kind: CodegenKind::InvalidRepeat,
                         span: expr.to_span(),
                     })?;
@@ -760,11 +760,11 @@ fn range_ends<I: UnsynInput>(range: &Range<I>) -> Result<(char, char), CodegenEr
 
 /// The bounds a repetition asks for.
 pub(crate) fn repeat_bounds<I: UnsynInput>(repeat: &Repeat<I>) -> Option<(usize, Option<usize>)> {
-    match repeat {
-        Repeat::RangeTo(_, max) => Some((0, dec_usize(max))),
-        Repeat::RangeFrom(min, _, None) => Some((dec_usize(min)?, None)),
-        Repeat::RangeFrom(min, _, Some(max)) => Some((dec_usize(min)?, dec_usize(max))),
-        Repeat::Count(count) => dec_usize(count).map(|count| (count, Some(count))),
+    match RepeatBound::of(&repeat.body) {
+        RepeatBound::RangeTo(_, max) => Some((0, dec_usize(max))),
+        RepeatBound::RangeFrom(min, _, None) => Some((dec_usize(min)?, None)),
+        RepeatBound::RangeFrom(min, _, Some(max)) => Some((dec_usize(min)?, dec_usize(max))),
+        RepeatBound::Count(count) => dec_usize(count).map(|count| (count, Some(count))),
     }
 }
 

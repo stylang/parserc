@@ -102,7 +102,7 @@ mod tests {
         let mut input = TokenStream::from("{2, 3}");
 
         let group = input
-            .parse::<Brace<_, Repeat<_>>>()
+            .parse::<Repeat<_>>()
             .expect("the repetition should parse");
 
         assert_eq!(group.to_span(), Span::Range(0..6));

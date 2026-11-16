@@ -538,8 +538,8 @@ fn with_suffix_nullable<I: UnsynInput>(
             SuffixOp::Plus(_) => without_suffix_nullable(target, table, nullable),
             // `{0, N}` may match nothing at all, and any other count matches the
             // empty string when its target does.
-            SuffixOp::Repeat(brace) => {
-                repeat_lower(&brace.body) == 0 || without_suffix_nullable(target, table, nullable)
+            SuffixOp::Repeat(repeat) => {
+                repeat_lower(repeat) == 0 || without_suffix_nullable(target, table, nullable)
             }
         },
         ExprWithSuffix::Concat { target, suffix, .. } => {

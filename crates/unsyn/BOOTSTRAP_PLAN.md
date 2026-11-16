@@ -44,9 +44,10 @@
 - 文件级：`Item::S(S<I>)` —— trivia 是**兄弟节点**。
 - 节点代数已经在用手写树里：`Set(Bracket<I, Punctuated<SetItem<I>, Comma<I>>>)`、
   `Tilde(Tilde<I>, Bracket<I, Punctuated<SetItem<I>, Comma<I>>>)`、
-  `Call(Angle<I, Ident<I>>)`、`Paren(Paren<I, Box<Expr<I>>>)`、
-  `Repeat` 包在 `Brace<I, Repeat<I>>` 里；`Brace/Bracket/Paren/Angle` 是
-  `Delimiter` 的别名（`lexical/delimiter.rs`）。
+  `Call(Angle<I, Ident<I>>)`、`Paren(Paren<I, Box<Expr<I>>>)`；`Repeat<I>` 自己
+  就是 `Brace<I, RepeatGroup<I>>`（含花括号，与产生式左侧同边界）。
+  `Brace/Bracket/Paren/Angle` 是 `Delimiter` 的别名（`lexical/delimiter.rs`），
+  `RepeatGroup`/`SuffixGroup` 是 `Choice` 的别名 —— 别名不新增节点。
 - 13 个节点类型里 12 个用 `#[derive(Syntax)]`，只有 `Crate` 手写 `parse`/`to_span`。
 
 **当前生成物的实测状态**（`Codegen::new().with_externals(XID_Start/XID_Continue)`
@@ -66,8 +67,10 @@
   展平成一串字段（`BracketStart, Vec<(Vec<WS>, ExprWithoutSuffix1)>, Vec<WS>,
   Option<SetItem>, Vec<WS>, BracketEnd`），其中 `ExprWithoutSuffix1<I>` =
   `(SetItem<I>, Vec<WHITESPACE<I>>, Comma<I>)` —— 这就是 `Punctuated<SetItem, Comma>`。
-- `Repeat` = `(BraceStart, Vec<WS>, Repeat1, Vec<WS>, BraceEnd)`，而参考是
-  `Brace<I, Repeat<I>>`。
+- `Repeat` = `(BraceStart, Vec<WS>, Repeat1, Vec<WS>, BraceEnd)`，而手写侧的边界
+  现在就是 `Repeat<I>` = `Brace<I, RepeatGroup<I>>`（花括号在节点里，内部三选一
+  是匿名的 `Choice`）。剩下两处差异：生成侧把 `Repeat` 包成 newtype struct 而不是
+  别名（P0 已定为行为等价，不要求别名相同），以及那个括号组生成侧仍叫 `Repeat1`。
 - `syntax Expr -> ExprNoTopAlt+ ('|' ExprNoTopAlt+)?` 里的 `ExprNoTopAlt+`
   被**就地重复内联**（`Expr.0` 与 `Expr1.1` 各一份）。注意：规范里本来就没有
   `ExprNoTopAlts` 规则，它是手写树为复用而引入的；生成物内联成元组即可，
@@ -376,7 +379,7 @@ fixture `tests/data/spec.rs` 上同一违规有六个：`NUMBER1`（`DIGIT ( DIG
       **4 个**，与 `bootstrap.uns:132-143` 的四条一一对应：`Grouped` / `Concat` /
       `Followed` / `Except`。那个括号组存成它本来的样子：
       `SuffixGroup<I> = Choice<Star<I>, Choice<Question<I>, Choice<Plus<I>,
-      Brace<I, Repeat<I>>>>>`（即 `parserc::syntax::Or` 的右嵌套；只是个类型别名，
+      Repeat<I>>>`（即 `parserc::syntax::Or` 的右嵌套；只是个类型别名，
       不新增节点）。消费方用 `SuffixOp::of(&group)` 把算子读回来 —— 那是**视图不是
       节点**，树上不存它。
 
@@ -391,6 +394,29 @@ fixture `tests/data/spec.rs` 上同一违规有六个：`NUMBER1`（`DIGIT ( DIG
       合并变体不能把算子的名字塌掉）与 `a_bootstrap_spec_is_read_as_the_shapes_it_writes`
       里的 `enum_variants` 计数（生成的 `ExprWithSuffix` 恰好 4 个变体，且不出现以
       `Question`/`Plus`/`Repeat` 打头的变体）。
+- [x] **`Repeat` 的节点边界已改成含花括号**（同一类错的第二个例子，用户定夺同样
+      是改手写侧）：`bootstrap.uns:145-153` 的左侧是整个 `{…}`，所以手写的
+      `enum Repeat { RangeTo, RangeFrom, Count }` —— 它把产式的**名字**贴到了
+      右侧那个三选一**括号组**上 —— 被拆成：
+      `pub type Repeat<I> = Brace<I, RepeatGroup<I>>`（节点 = 整对花括号）加
+      `pub type RepeatGroup<I> = Choice<(Comma<I>, LitDec<I>),
+      Choice<(LitDec<I>, Comma<I>, Option<LitDec<I>>), LitDec<I>>>`（匿名组，不造
+      名字），外加视图 `RepeatBound<'a, I>`（`RangeTo`/`RangeFrom`/`Count`，沿用
+      原有词汇）。`validate_repeat`/`repeat_lower`/`repeat_bounds` 现在都拿整
+      个 `&Repeat<I>`，调用点从 `repeat_lower(&brace.body)` 成了 `repeat_lower(repeat)`。
+
+      **一个行为改变**：`SemanticsKind::InvalidRepeat` 的 span 以前只盖住花括号
+      里的内容，现在盖住整个 `{…}`——跟产生式左侧一致，也跟 `pattern.rs`/
+      `types.rs` 那两处 `CodegenKind::InvalidRepeat`（报的是整个带后缀的操作数）
+      一致。没有测试钉在旧 span 上。
+
+      生成物仍逐字节不变（fixture 漂移断言绿）。`tests/codegen.rs` 里那句注释
+      `'{' Expr1+ '}'` 本来就是错的，已改成真实产生式并说明手写侧已同边界；
+      `lexical/delimiter.rs` 的 `the_span_of_a_group_reaches_its_closing_token` 现在直接把
+      `"{2, 3}"` 当 `Repeat<_>` 解析并断言 span 到 `}`，这就是这个边界的测试。
+
+      剩下两处差异归 P6 等价清单：生成侧把 `Repeat` 包成 newtype struct（手写是
+      别名）、生成侧那个括号组仍叫 `Repeat1`（P5 第一条处里）。
 - [x] ~~**一个需要定夺的形状后果**~~ —— 已定并已改，见上面那条：取 **4 个变体**，
       改的是手写侧（`Star`/`Question`/`Plus`/`Repeat` 四个变体合成了 `Grouped` 一个）。
       剩下的只是把生成侧的 `ExprWithSuffix1` 换成内联的 `Or<…>`，归本段第一条。
