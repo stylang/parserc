@@ -10,11 +10,15 @@
 //!
 //! # The shortcuts
 //!
-//! - A step one character wide is a [`CharClass`], and a repetition of one is scanned
-//!   instead of looped over: `X*` is [`take_while`](parserc::take_while),
+//! - A step one character wide is a [`CharClass`], and a repetition of one is
+//!   scanned instead of looped over: `X*` is [`take_while`](parserc::take_while),
 //!   `~ […]*` is [`take_till`](parserc::take_till), and `X{n, m}` is
 //!   [`take_while_with`](parserc::take_while_with), each of which walks the text
-//!   once rather than calling a parser per character.
+//!   once rather than calling a parser per character. An unbounded `~ […]` takes
+//!   `take_till` and a bounded one `take_while_with`, which is not two ways of
+//!   doing the same thing: [`parserc::take_till`] *is* a `take_while` over a
+//!   negated predicate, so the unbounded form only asks for it at the cheaper
+//!   place, and `take_while_with` has no till-shaped counterpart to be asked for.
 //! - A literal of one character is [`next_if`](parserc::next_if) and of more
 //!   [`keyword`](parserc::keyword).
 //! - `~ ['lit']*` is [`take_until`](parserc::take_until) only where the step
@@ -287,10 +291,14 @@ impl<'a> Emitter<'a> {
 
                 stmts.extend(self.stmts(item, var)?);
 
-                let probe = self.probe(removed, quote!(#start.clone()))?;
+                // What is taken out is asked of the text the operand read, and
+                // only a "it takes all of that" answer refuses it: over the
+                // `let` of `lett` the keywords fit their head and leave a `t`
+                // behind, which is what makes `lett` a word of its own.
+                let whole = self.takes_all(removed, &start, var)?;
                 let fail = self.fail(var);
 
-                stmts.push(quote!(if #probe { return Err(#fail); }));
+                stmts.push(quote!(if #whole { return Err(#fail); }));
 
                 Ok(stmts)
             }
@@ -431,7 +439,10 @@ impl<'a> Emitter<'a> {
         let fail = self.fail(var);
 
         // `~ […]*` reads to where the set would fit: the same scan, with the
-        // question asked the other way about.
+        // question asked the other way about. `take_till` is spelled with the
+        // set as it was written because that is what it negates for a living;
+        // once a bound enters, `take_while_with` is the only combinator that
+        // carries one, so the negation moves here instead.
         if let Step::Rep { min, max, item } = item
             && let Some(class) = item.char_class(self.classes)
         {
@@ -526,6 +537,47 @@ impl<'a> Emitter<'a> {
                 })
                 .parse(&mut #probe)
                 .is_ok()
+            }
+        })
+    }
+
+    /// Asks whether one step takes the whole of the text read since `from`,
+    /// answering about a copy and taking nothing of it.
+    ///
+    /// The text is cut out of the source and handed to the step as an input of
+    /// its own, so the step can neither reach past the end of what the operand
+    /// read nor be told apart from it by what follows, and the answer counts
+    /// only when nothing of the text is left over. Asking where the operand
+    /// starts, which is what [`probe`](Self::probe) does for `followed`, would
+    /// refuse `lett` because `'let'` fits its head.
+    fn takes_all(
+        &self,
+        step: &Step,
+        from: &Ident,
+        var: &Ident,
+    ) -> Result<TokenStream, CodegenError> {
+        let parserc = &self.paths.parserc;
+        let ahead = format_ident!("__ahead");
+        let text = format_ident!("__text");
+        let probe = format_ident!("__probe");
+        let stmts = self.stmts(step, &probe)?;
+
+        Ok(quote! {
+            {
+                let mut #ahead = #from.clone();
+
+                // Both numbers are offsets of one source, so the piece cut off
+                // the front is exactly as much as the operand read.
+                let mut #text = #ahead.split_to(#var.start() - #from.start());
+
+                (|#probe: &mut I| -> ::core::result::Result<(), <I as #parserc::Input>::Error> {
+                    #(#stmts)*
+
+                    ::core::result::Result::Ok(())
+                })
+                .parse(&mut #text)
+                .is_ok()
+                    && #text.is_empty()
             }
         })
     }

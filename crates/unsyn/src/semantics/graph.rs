@@ -87,9 +87,10 @@ pub fn first_edges<'a, I: UnsynInput>(
 /// Where [`first_edges`] asks which nodes can *begin* the text a node matches,
 /// this asks which nodes must be *evaluated* before that match can be decided.
 /// The two differ exactly for the operands that never become part of the match:
-/// what an `except` takes away is tested at the position its target started at,
-/// however much the target consumes, and the lookahead of `followed` is here too
-/// whenever the operand before it can match nothing.
+/// what an `except` takes away is asked of the text its target read, starting at
+/// the position the target started at however much that text turns out to be,
+/// and the lookahead of `followed` is here too whenever the operand before it
+/// can match nothing.
 ///
 /// A complement is not one of them: `~ […]` asks its question of the character
 /// here and then takes it, so it is an operand like any other that consumes.

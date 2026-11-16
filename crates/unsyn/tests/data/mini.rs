@@ -309,13 +309,15 @@ where
             let __start = input.clone();
             input.parse::<WORD<I>>()?;
             if {
-                let mut __probe = __start.clone();
+                let mut __ahead = __start.clone();
+                let mut __text = __ahead.split_to(input.start() - __start.start());
                 (|__probe: &mut I| -> ::core::result::Result<(), <I as ::parserc::Input>::Error> {
                     __probe.parse::<KEYWORDS<I>>()?;
                     ::core::result::Result::Ok(())
                 })
-                .parse(&mut __probe)
+                .parse(&mut __text)
                 .is_ok()
+                    && __text.is_empty()
             } {
                 return Err(::parserc::Kind::Token(
                     "IDENT",
@@ -328,6 +330,64 @@ where
                 return ::core::result::Result::Err(
                     ::parserc::Kind::Token(
                         "IDENT",
+                        ::parserc::ControlFlow::Recovable,
+                        input.to_span_at(1),
+                    )
+                    .into(),
+                );
+            }
+            let __taken = __from.len() - input.len();
+            Ok(Self(__from.split_to(__taken)))
+        }
+    }
+    fn to_span(&self) -> ::parserc::Span {
+        #[allow(unused_imports)]
+        use ::parserc::{
+            AsStr, Find, Input, Parser, StartWith,
+            syntax::{Syntax, SyntaxInput},
+        };
+        self.0.to_span()
+    }
+}
+#[allow(non_camel_case_types, non_snake_case)]
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
+pub struct REACH<I>(pub I);
+impl<I> ::parserc::syntax::Syntax<I> for REACH<I>
+where
+    I: ::unsyn::runtime::GeneratedInput,
+{
+    fn parse(input: &mut I) -> ::core::result::Result<Self, <I as ::parserc::Input>::Error> {
+        #[allow(unused_imports)]
+        use ::parserc::{
+            AsStr, Find, Input, Parser, StartWith,
+            syntax::{Syntax, SyntaxInput},
+        };
+        {
+            let mut __from = input.clone();
+            let __start = input.clone();
+            input.parse::<LETTER<I>>()?;
+            if {
+                let mut __ahead = __start.clone();
+                let mut __text = __ahead.split_to(input.start() - __start.start());
+                (|__probe: &mut I| -> ::core::result::Result<(), <I as ::parserc::Input>::Error> {
+                    ::parserc::keyword("abcd").parse(__probe)?;
+                    ::core::result::Result::Ok(())
+                })
+                .parse(&mut __text)
+                .is_ok()
+                    && __text.is_empty()
+            } {
+                return Err(::parserc::Kind::Token(
+                    "REACH",
+                    ::parserc::ControlFlow::Recovable,
+                    input.to_span_at(1),
+                )
+                .into());
+            }
+            if input.len() == __from.len() {
+                return ::core::result::Result::Err(
+                    ::parserc::Kind::Token(
+                        "REACH",
                         ::parserc::ControlFlow::Recovable,
                         input.to_span_at(1),
                     )
@@ -2553,25 +2613,24 @@ where
             syntax::{Syntax, SyntaxInput},
         };
         let __taken = input.parse::<IDENT<I>>()?;
-        {
+        if !{
             let mut __probe = input.clone();
-            let __fits =
-                (|__probe: &mut I| -> ::core::result::Result<(), <I as ::parserc::Input>::Error> {
-                    __probe.parse::<Minus<I>>()?;
-                    ::core::result::Result::Ok(())
-                })
-                .ok()
-                .parse(&mut __probe)?;
-            if __fits.is_none() {
-                return ::core::result::Result::Err(
-                    ::parserc::Kind::Syntax(
-                        "Guarded1",
-                        ::parserc::ControlFlow::Recovable,
-                        input.to_span_at(1),
-                    )
-                    .into(),
-                );
-            }
+            (|__probe: &mut I| -> ::core::result::Result<(), <I as ::parserc::Input>::Error> {
+                __probe.parse::<Minus<I>>()?;
+                ::core::result::Result::Ok(())
+            })
+            .ok()
+            .parse(&mut __probe)?
+            .is_some()
+        } {
+            return ::core::result::Result::Err(
+                ::parserc::Kind::Syntax(
+                    "Guarded1",
+                    ::parserc::ControlFlow::Recovable,
+                    input.to_span_at(1),
+                )
+                .into(),
+            );
         }
         ::core::result::Result::Ok(Self(__taken))
     }

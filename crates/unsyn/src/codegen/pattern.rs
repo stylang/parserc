@@ -257,11 +257,12 @@ pub(crate) enum Step {
     },
     /// Fail when the set fits here, and take one character when it does not.
     Not(Box<Step>),
-    /// Take the operand unless what removes it fits where the operand starts.
+    /// Take the operand unless what removes it takes all of the text it read.
     Except {
         /// What is taken.
         item: Box<Step>,
-        /// What is taken out of it, tested at the start of the operand.
+        /// What is taken out of it, asked of the operand's own text and of
+        /// nothing behind that text.
         removed: Box<Step>,
     },
     /// Take the operand, and ask that what follows it come next without being
@@ -368,8 +369,8 @@ impl Step {
             Step::Except { item, removed } => {
                 // Removing is a complement of one character only when what is
                 // removed is one character too: `'a'-'c' except 'b'` is a class,
-                // while `Ident except Keywords` turns on the text that
-                // follows the character being decided on.
+                // while `Ident except Keywords` asks about a run of characters
+                // the operand read, which no single character answers.
                 let item = item.char_class(classes)?;
                 let removed = removed.char_class(classes)?;
 

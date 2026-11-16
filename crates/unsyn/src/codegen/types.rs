@@ -10,8 +10,8 @@
 //!
 //! - a repetition counted out (`X{n}`, `X{n}..{m}`), whose bound the code that
 //!   reads it has to check, which is [`TypeDefKind::Bounds`];
-//! - an operand with a question asked about the text around it (`except`,
-//!   `followed`), which is [`TypeDefKind::Asserted`];
+//! - an operand with a question asked about the text it read or the text after
+//!   it (`except`, `followed`), which is [`TypeDefKind::Asserted`];
 //! - a group with more than one alternative, which is a
 //!   [`TypeDefKind::Enum`] of its own, named after the rule it was written in;
 //! - anything a rule reaches through more than sixteen operands, since the

@@ -4,7 +4,7 @@
 //! [`Renderer`] is the last step of the generator and the only one that knows
 //! anything about Rust syntax. It reads the two IRs and writes items in each
 //! one's own terms: a [`TokenPattern`] is a tuple of the text it took, whose `parse`
-//! is the pattern [`scan`] ran over the stream, and a [`TypeDef`] is a tuple of
+//! is the pattern [`scan`](super::scan) ran over the stream, and a [`TypeDef`] is a tuple of
 //! the nodes it holds, whose `parse` takes one field after another.
 //!
 //! # What the generated file leans on
@@ -318,6 +318,13 @@ impl<'a> Renderer<'a> {
     /// operand is taken as often as it fits, up to the most the rule stated, and
     /// a run shorter than the least fails where it stands, which is recovable
     /// and so is rewound by whoever tried the rule.
+    ///
+    /// The count that ran out is reported under the name of the type it ran out
+    /// in rather than as [`parserc::Kind::Limits`], which is what the types
+    /// `parserc` counts with answer by: those carry no name, so an error made of
+    /// one could say that a run was too short but not which rule's run it was.
+    /// A counted run is always a type of its own here, which is where the name
+    /// comes from.
     fn bounds(
         &self,
         item: &FieldType,
@@ -369,6 +376,12 @@ impl<'a> Renderer<'a> {
 
     /// The type of an asserted operand, the `parse` that asks about the text
     /// around it, and the `to_span` of the one field it holds.
+    ///
+    /// Both questions are asked once the operand has been read, because both are
+    /// asked of the text around it: `except` about the text the operand took,
+    /// which it refuses when what it removes takes all of that, and `followed`
+    /// about the text after it, which it refuses when what it requires does not
+    /// fit there.
     fn asserted(
         &self,
         item: &FieldType,
@@ -376,25 +389,43 @@ impl<'a> Renderer<'a> {
         writing: &Writing<'_>,
     ) -> (TokenStream, TokenStream, TokenStream) {
         let input = writing.input;
+        let fail = writing.fail;
 
         let tys = self.ty(item, writing.pointed);
-        let (asked, before) = match assert {
-            Assert::Except(removed) => (removed, true),
-            Assert::Followed(next) => (next, false),
-        };
-        let probe = self.probe(asked, before, writing);
-        let (asked, taken) = if before {
-            (probe, quote!(let __taken = #input.parse::<#tys>()?;))
-        } else {
-            (quote!(let __taken = #input.parse::<#tys>()?;), probe)
+        let taken = quote!(let __taken = #input.parse::<#tys>()?;);
+
+        let asked = match assert {
+            Assert::Except(removed) => {
+                let from = format_ident!("__from");
+                let whole = self.takes_all(removed, &from, writing);
+
+                quote! {
+                    let #from = #input.clone();
+
+                    #taken
+
+                    if #whole {
+                        return ::core::result::Result::Err(#fail);
+                    }
+                }
+            }
+            Assert::Followed(next) => {
+                let fits = self.probe(next, writing);
+
+                quote! {
+                    #taken
+
+                    if !#fits {
+                        return ::core::result::Result::Err(#fail);
+                    }
+                }
+            }
         };
 
         (
             tys.clone(),
             quote! {
                 #asked
-
-                #taken
 
                 ::core::result::Result::Ok(Self(__taken))
             },
@@ -543,41 +574,68 @@ impl<'a> Renderer<'a> {
         }
     }
 
-    /// The statement that asks a question about the text and takes nothing of
-    /// it: `except` asked before the operand, which fails where what it removes
-    /// fits, and `followed` asked where the operand left off, which fails where
-    /// what it requires does not fit.
-    fn probe(&self, asked: &FieldType, before: bool, writing: &Writing<'_>) -> TokenStream {
+    /// The expression that says whether `asked` fits where the input stands, and
+    /// takes nothing of it: this is the question `followed` asks after its
+    /// operand, and it is the answer "it does not fit" that loses.
+    fn probe(&self, asked: &FieldType, writing: &Writing<'_>) -> TokenStream {
         let input = writing.input;
-        let fail = writing.fail;
 
         let tys = self.ty(asked, writing.pointed);
         let parserc = &self.paths.parserc;
         let probe = format_ident!("__probe");
-        let fits = format_ident!("__fits");
+
         // The question is asked over a copy of the stream, so whatever the
         // operand it asks about took is dropped with the copy.
-        let test = if before {
-            format_ident!("is_some")
-        } else {
-            format_ident!("is_none")
-        };
-
         quote! {
             {
                 let mut #probe = #input.clone();
 
-                let #fits = (|#probe: &mut I| -> ::core::result::Result<(), <I as #parserc::Input>::Error> {
+                (|#probe: &mut I| -> ::core::result::Result<(), <I as #parserc::Input>::Error> {
                     #probe.parse::<#tys>()?;
 
                     ::core::result::Result::Ok(())
                 })
                 .ok()
-                .parse(&mut #probe)?;
+                .parse(&mut #probe)?
+                .is_some()
+            }
+        }
+    }
 
-                if #fits.#test() {
-                    return ::core::result::Result::Err(#fail);
-                }
+    /// The expression that says whether `asked` takes the whole of the text read
+    /// since `from`: this is the question `except` asks of its operand, and it is
+    /// the answer "it takes all of it" that loses.
+    ///
+    /// The operand's own text is cut out and handed to `asked` as an input of its
+    /// own, so `asked` can neither reach past the end of that text nor be told
+    /// from it by whatever follows, and a fit that stops short of the end is not
+    /// an answer about the whole of it. See the same reasoning in
+    /// [`Emitter::takes_all`](super::scan::Emitter::takes_all).
+    fn takes_all(&self, asked: &FieldType, from: &Ident, writing: &Writing<'_>) -> TokenStream {
+        let input = writing.input;
+
+        let tys = self.ty(asked, writing.pointed);
+        let parserc = &self.paths.parserc;
+        let ahead = format_ident!("__ahead");
+        let text = format_ident!("__text");
+        let probe = format_ident!("__probe");
+
+        quote! {
+            {
+                let mut #ahead = #from.clone();
+
+                // Both numbers are offsets of one source, so the piece cut off
+                // the front is exactly as much as the operand read.
+                let mut #text = #ahead.split_to(#input.start() - #from.start());
+
+                (|#probe: &mut I| -> ::core::result::Result<(), <I as #parserc::Input>::Error> {
+                    #probe.parse::<#tys>()?;
+
+                    ::core::result::Result::Ok(())
+                })
+                .parse(&mut #text)
+                .is_ok()
+                    && #text.is_empty()
             }
         }
     }
@@ -643,7 +701,7 @@ impl<'a> Renderer<'a> {
     }
 
     /// The traits a generated body reaches by name, all of which the shortcuts
-    /// of [`scan`] and the fields of a type are written against.
+    /// of [`scan`](super::scan) and the fields of a type are written against.
     fn uses(&self) -> TokenStream {
         let parserc = &self.paths.parserc;
 
@@ -967,7 +1025,7 @@ mod tests {
     }
 
     #[test]
-    fn except_is_asked_where_the_operand_starts() {
+    fn except_is_asked_of_the_text_the_operand_took() {
         let def = TypeDef {
             name: "Owner1".to_owned(),
             kind: TypeDefKind::Asserted {
@@ -978,13 +1036,24 @@ mod tests {
 
         let written = render(&def, &[], &trivia(None));
 
-        // The question is asked before the operand is taken, and it is the
-        // answer "it fits" that loses.
-        assert!(written.contains("__fits.is_some()"), "{written}");
+        // The operand is read first, into a text cut out for the removed
+        // language to be run over, and it is a removal that leaves nothing of
+        // that text which loses.
+        assert!(written.contains("__text.is_empty()"), "{written}");
         assert!(
-            written.find("__fits").expect("a probe") < written.find("__taken").expect("an operand"),
+            written.find("__from").expect("where the operand starts")
+                < written.find("__taken").expect("the operand"),
             "{written}"
         );
+        assert!(
+            written.find("__taken").expect("the operand")
+                < written.find("__text").expect("the removed language"),
+            "{written}"
+        );
+
+        // The question is not asked with `ok`, which would rewind the text it
+        // was asked of: whether the removal reached the end is the whole answer.
+        assert!(!written.contains(".ok()"), "{written}");
     }
 
     #[test]
@@ -999,9 +1068,10 @@ mod tests {
 
         let written = render(&def, &[], &trivia(None));
 
-        assert!(written.contains("__fits.is_none()"), "{written}");
+        assert!(written.contains("?.is_some()"), "{written}");
         assert!(
-            written.find("__taken").expect("an operand") < written.find("__fits").expect("a probe"),
+            written.find("__taken").expect("an operand")
+                < written.find("__probe").expect("a probe"),
             "{written}"
         );
     }

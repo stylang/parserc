@@ -17,6 +17,7 @@ lexer LET -> 'let';
 lexer FN -> 'fn';
 lexer KEYWORDS -> LET | FN;
 lexer IDENT -> WORD except KEYWORDS;
+lexer REACH -> LETTER except 'abcd';
 lexer OPEN -> '(';
 lexer CLOSE -> ')';
 lexer COMMA -> ',';

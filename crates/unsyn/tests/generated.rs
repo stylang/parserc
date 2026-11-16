@@ -198,17 +198,33 @@ fn a_name_is_a_word_that_is_not_a_keyword() {
     assert_eq!(name.0.as_str(), "name");
     assert_eq!(rest, " x");
 
-    // The operand `except` removes is asked about where the operand it removes
-    // something from starts, and it takes nothing itself.
+    // What `except` removes is asked of the text the operand read, and it is
+    // refused only when that text is all of the removal: `let` and `fn` are the
+    // whole of what the keyword rule takes here.
     assert!(mini::IDENT::parse(&mut TokenStream::from("let x")).is_err());
     assert!(mini::IDENT::parse(&mut TokenStream::from("fn x")).is_err());
+    assert!(mini::IDENT::parse(&mut TokenStream::from("let")).is_err());
 
-    // `KEYWORDS` is `'let' | 'fn'` with nothing said about where either ends, so
-    // it reaches the head of `lett` too and the `except` refuses the whole word.
-    // A spec that wanted `lett` to be a name had to bound its keywords; what it
-    // wrote is what the generated rules do.
+    // A keyword that only heads the word leaves the rest of it standing, and the
+    // rest is what keeps the word from being that keyword at all: `lett` is a
+    // name, though `KEYWORDS` reads the `let` of it quite happily on its own.
     assert!(mini::KEYWORDS::parse(&mut TokenStream::from("lett")).is_ok());
-    assert!(mini::IDENT::parse(&mut TokenStream::from("lett x")).is_err());
+    assert!(mini::IDENT::parse(&mut TokenStream::from("lett x")).is_ok());
+
+    // Reading from the middle of a word is the same reading: the `let` in
+    // `xlet` is not a whole word either, and here it is not even a head.
+    assert!(mini::IDENT::parse(&mut TokenStream::from("xlet")).is_ok());
+}
+
+#[test]
+fn what_except_removes_cannot_see_past_the_text_it_is_asked_of() {
+    // `REACH` is `LETTER except 'abcd'`, so one letter is what it reads. The
+    // text the removal is asked of is that one letter alone, which the four
+    // characters of `'abcd'` cannot fit however the input behind them reads.
+    let (word, rest) = part::<mini::REACH<_>>("abcd");
+
+    assert_eq!(word.0.as_str(), "a");
+    assert_eq!(rest, "bcd");
 }
 
 #[test]

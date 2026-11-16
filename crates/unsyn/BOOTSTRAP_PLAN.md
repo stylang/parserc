@@ -285,24 +285,43 @@
 
 ## P4 — `except` 与加速函数
 
-- [ ] 多字符 `except` 改为整串差集（P0 的决定）：在被减语言上跑**目标吃掉的那段文本**，
+- [x] 多字符 `except` 改为整串差集（P0 的决定）：在被减语言上跑**目标吃掉的那段文本**，
       整段吃完才拒绝；字符类分支保持现在的 `item.and(removed.negated())`。
-- [ ] 同时改 `syntax/expr.rs` 的 `Except` 文档注释（现在写的是
-      "tested at the position the target starts at"）与 `codegen/pattern.rs::Step::Except`、
-      `render.rs::asserted` 的注释。
-- [ ] **必须翻过来的既有断言**：`tests/generated.rs:211`
-      `assert!(mini::IDENT::parse("lett x").is_err())` 是把"前缀探测"钉住的测试；
-      `except` 改成整串差集后 `lett` 必须是合法 `IDENT`，这条断言要改成 `is_ok()`，
-      并补 `"let x"`/`"fn x"` 仍被拒绝、`"xlet"` 被接受的用例。
-- [ ] 复核 `~[X]*`：现在生成 `take_while(|c| !class(c))`，与 `take_till(class)` 等价；
-      统一选一个并在文档里写明理由（倾向 `take_while`，因为它能带 `1..` 上界形式）。
-- [ ] 关键字边界：确认取消规范侧的额外规则后，`NonKeywordIdent` 的生成物
-      对 `lexer`、`lexerX`、`xlexer` 三个输入的行为与 `lexical/ident.rs` 一致，
-      并加测试。
-- [ ] 保留 `{n,m}` 报 `Kind::Syntax(具名)` 而不是 `Kind::Limits*`（后者不带名字）；
-      在 `render.rs::bounds` 的文档注释里补一句这个取舍。
-- [ ] 门：新增行为测试全绿（`lexerX` 这一类必须用 `analyze` + 生成代码在
-      `tests/generated.rs` 里编译后实测，而不是只看生成文本）。
+      两条路径都改了：词法侧 `codegen/scan.rs::Step::Except` 记下 `__start`，用
+      `input.start() - __start.start()` 把目标读过的那段 `split_to` 出来交给新增的
+      `Emitter::takes_all`（`is_ok() && is_empty()`，**不再** `.ok()` 后只比长度）；
+      节点侧 `codegen/render.rs::Assert::Except` 同形（`__from` + `takes_all`）。
+      `probe()` 去掉 `before` 参数、改成返回布尔表达式，仍服务于 `followed` 与补集。
+- [x] 同时改 `syntax/expr.rs` 的 `Except` 文档注释、`codegen/pattern.rs::Step::Except`、
+      `render.rs::asserted` 的注释；连带改了 `codegen/types.rs` 开头四条“需要自己的类型”
+      里对 `except` 的说法、`semantics/graph.rs::same_offset_edges` 的文档、
+      `runtime/input.rs` 里 `StartWith` 那条要点。`graph.rs` 的分析本身不用改：
+      被减语言仍然是在目标起始位置被 consulted 的，变的只是它能看到多少文本。
+- [x] **翻过来的既有断言**：`tests/generated.rs::a_name_is_a_word_that_is_not_a_keyword`
+      现在 `lett x`/`xlet` 为 `is_ok()`，`let`/`let x`/`fn x` 为 `is_err()`，
+      并保留 `KEYWORDS` 自己能吃掉 `lett` 的头部这一条事实断言。
+      新增 `what_except_removes_cannot_see_past_the_text_it_is_asked_of`：fixture 里加
+      `lexer REACH -> LETTER except 'abcd';`，`"abcd"` 只读走 `a`、留下 `bcd` ——
+      被减语言若能看到操作数后面的文本就一定会拒绝，这条就是“隔离”的钉子。
+      fixture 随之重生成（`tests/data/mini.rs` 95,837 → 97,948 字节，25 → 26 条实测）。
+- [x] 复核 `~[X]*`：**PLAN 原来写的理由是错的**。`crates/parserc/src/c.rs:186-196` 里
+      `take_till(cond)` 的定义**就是** `take_while(move |c| !cond(c))`（注释原文
+      “Shorthand for [`take_while`] with a negated predicate”），所以两者不是两份实现，
+      没有“统一选一个”的问题：无界形仍用 `take_till`（它本来就替我们取反，省一层闭包），
+      有界形只有 `take_while_with` 能承载边界，取反就写在我们这边。
+      理由记进 `codegen/scan.rs` 的 `# The shortcuts` 小节与 `complement()` 的注释。
+- [x] 关键字边界：手写侧新增 `lexical/ident.rs::a_name_that_only_borders_on_a_keyword_is_a_name`
+      （`lexer` 拒绝、`lexerX`/`xlexer` 接受），生成侧由 `IDENT -> WORD except KEYWORDS`
+      的 `let`/`lett`/`xlet` 三条同形断言钉住 —— 整串差集正是让这两侧一致的改动。
+      注：`NonKeywordIdent` 这个名字要等 P8 从 `bootstrap.uns` 生成出来才真正被编译，
+      今天对它的验证走的是 fixture 里的同形状规则，而不是它本身。
+- [x] 保留 `{n,m}` 报 `Kind::Syntax(具名)` 而不是 `Kind::Limits*`，取舍的理由写进
+      `render.rs::bounds` 的文档注释（`parserc` 自带的 `Limits*` 不带名字，报不出是哪条
+      规则短了；而这里的计数运行总是一个自己的类型，名字就从那里来）。
+- [x] 门：全表重跑见末尾「门」小节。新增的行为断言都是编译后实测（`tests/generated.rs`），
+      不是只看生成文本；生成文本本身另有 `render.rs`/`scan.rs` 单测与 `tests/codegen.rs`。
+      跑 `--document-private-items` 时又发现 4 条本来就断的内链（`render.rs` 两处
+      `[`scan`]`、`codegen/mod.rs` 两处 `[`Step::…`]`），一并补成全路径。
 
 ## P5 — 只为产生式左侧生成节点，与命名卫生
 
@@ -519,6 +538,13 @@ fixture `tests/data/spec.rs` 上同一违规有六个：`NUMBER1`（`DIGIT ( DIG
 > 生成物里的类型名随规范一起改了（`structWHITESPACE` → `structS<I>` 等，
 > `tests/codegen.rs` 的断言跟着改），但 fixture 是从 `tests/data/spec.rs` 生成的，
 > 不受影响（drift 测试绿）。
+>
+> P4 收尾时再跑全表：1 全绿（**180** lib / 5 bootstrap / 19 codegen / 1 dump /
+> **26** generated / 3 doctests），2 十五行全 `ok`；3 runtime-only 2 绿；4 与 1 同数；
+> 5 三组均在 `crates/unsyn` 里 0 条（仍只有既有的 `parserc` 4 条、`sourcespan` 1 条）；
+> 6 四组均 0 警告，且额外加了 `--all-features --document-private-items` 一组 ——
+> 它揭出 4 条早就断的内链，已补成全路径；7 干净。`tests/data/mini.rs` 95,837 →
+> 97,948 字节（新增 `REACH` 一条规则，`IDENT`/`Asked` 两处的 `except` 改写）。
 
 ## P7 — 收尾
 

@@ -278,9 +278,11 @@ where
         suffix: Box<ExprNoTopAlt<I>>,
     },
     /// `except`, which removes what the operand after the keyword matches from
-    /// the operand before it. What is removed is matched by the target as a
-    /// whole, so the operand is tested at the position the target starts at,
-    /// however much the target consumes.
+    /// the operand before it. What is removed is asked of the text the target
+    /// read and of nothing else: that text is cut out of the input, the removal
+    /// runs over it on its own, and only a removal that takes all of it refuses
+    /// the operand. `lett` is therefore a word of its own despite `'let'`, which
+    /// fits the head of it and leaves a `t` behind.
     Except {
         /// what the operand after the keyword is taken out of.
         target: ExprWithoutSuffix<I>,

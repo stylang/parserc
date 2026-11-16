@@ -92,4 +92,23 @@ mod tests {
 
         assert!(TokenStream::from("1abc").parse::<Ident<_>>().is_err());
     }
+
+    #[test]
+    fn a_name_that_only_borders_on_a_keyword_is_a_name() {
+        // The check is of the whole word, which is what `except` means by taking
+        // all of the text it is asked of: a keyword that leaves characters
+        // behind did not take the word, wherever those characters fall. The
+        // fixture's `lexer IDENT -> WORD except KEYWORDS` behaves the same way
+        // about `let`, `lett` and `xlet`, and `tests/generated.rs` says so.
+        assert_eq!(
+            TokenStream::from("lexer").parse::<Ident<_>>(),
+            Err(UnsynError::Semantics(
+                SemanticsKind::Keyword,
+                parserc::Span::Range(0..5)
+            )),
+            "a keyword is not a name"
+        );
+        assert!(TokenStream::from("lexerX").parse::<Ident<_>>().is_ok());
+        assert!(TokenStream::from("xlexer").parse::<Ident<_>>().is_ok());
+    }
 }

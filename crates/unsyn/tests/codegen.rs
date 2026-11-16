@@ -266,11 +266,16 @@ fn a_suffix_that_needs_a_check_of_its_own_gets_a_type_for_it() {
     assert!(file.contains("pubstructFixed1<I>"), "{file}");
     assert!(file.contains("__items.len()<2"), "{file}");
     assert!(file.contains(">=4"), "{file}");
-    // The assertion is a type of its own too, and it asks its question over a
-    // copy of the stream, which is what keeps `except` from taking anything.
+    // The assertion is a type of its own too. Its question is asked of the text
+    // the operand read, which is cut out for the removed language to be run
+    // over: `except` takes nothing itself, and refuses only what the removal
+    // exhausts.
     assert!(file.contains("pubstructAsked1<I>"), "{file}");
-    assert!(file.contains("letmut__probe=input.clone()"), "{file}");
-    assert!(file.contains("__fits.is_some()"), "{file}");
+    assert!(
+        file.contains("__ahead.split_to(input.start()-__from.start())"),
+        "{file}"
+    );
+    assert!(file.contains("__text.is_empty()"), "{file}");
 }
 
 #[test]

@@ -523,11 +523,13 @@ impl Plan {
 /// reaches it, never off what the characters of the described language happen to
 /// be:
 ///
-/// - the pattern denotes finitely many fixed strings ([`Step::fixed_strings`]),
+/// - the pattern denotes finitely many fixed strings
+///   ([`Step::fixed_strings`](pattern::Step::fixed_strings)),
 ///   so that the terminal is a word of the language and nothing else;
 /// - it is not the trivia node itself, whose own run would then be reached into
 ///   by the run before it;
-/// - no rule that reads text reaches it by name ([`Step::refers`]), since what a
+/// - no rule that reads text reaches it by name
+///   ([`Step::refers`](pattern::Step::refers)), since what a
 ///   name is inlined into the text of the rule that reaches it, and trivia kept
 ///   there would end up inside that token's own text;
 /// - none of the characters it could match is a character the trivia matches,
