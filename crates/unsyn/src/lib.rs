@@ -101,3 +101,5 @@ pub mod runtime;
 pub mod semantics;
 #[cfg(feature = "codegen")]
 pub mod syntax;
+#[cfg(feature = "codegen")]
+pub mod visit;

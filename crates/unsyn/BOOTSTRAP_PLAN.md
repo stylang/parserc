@@ -527,6 +527,70 @@ fixture `tests/data/spec.rs` 上同一违规有六个：`NUMBER1`（`DIGIT ( DIG
       —— 恰好是那五条多备选的产生式，注释规则与转义都不在列。
       门表数字见末尾「门」小节 P5 那一段。
 
+## V — visit 层（P6 的前置：让语义分析与生成器不再认识节点类型）
+
+自举后的 CST 由 `codegen` 生成，Rust 类型与手写的 `src/lexical`/`src/syntax`
+不同名也不同构，所以 `src/semantics/` 与 `src/codegen/` 里那些直接 `match`
+具体节点类型的遍历**没法复用**。visit 层把"读一棵 CST"与"CST 是什么类型"分开：
+节点只实现 `Visit`，把自己拆成 vocabulary 里的**形状**交给 `Visitor`；
+pass 只写形状的处理器，不知道上面是谁。
+
+- [x] **V0 vocabulary 与 `Visit` 实现**（`src/visit/`）：
+  - `vocab.rs`：与节点类型无关的词汇。`DefKind{Whitespace,Lexer,Syntax}`；
+    `Element{node: Option<&dyn Visit>, separator: Option<Span>}`（孩子句柄 +
+    它前面的分隔符，这就是"逗号分隔"在词汇里的形状）；`Shape` trait
+    （只有 `take_children`，让 `descend` 能驱动任何持有孩子的形状）；14 个形状
+    `Production/Declaration/Comment/Alternatives/Sequence/Quantity/Followed/
+    Excepted/Group/Set/Reference/Call/Literal/Token`；数据
+    `SetKind/SetMember/CharRange/RangeSide/TextLiteral/Piece/AsciiForm/CodePoint/
+    Count/Bounds/BoundsForm/Name/QuantityOp/LiteralValue`。
+    **成员与界是数据不是形状**：集合的成员、重复的次数不会变成能走进去的
+    地方，所以它们随父形状一次报出。
+  - `decompose.rs`：`Visit` 的实现只写在**产生式左侧**那些手写节点上
+    （`Crate/Item/Stmt/Expr/ExprNoTopAlts/…/LitStr/LitUnicode`）加若干
+    `pub(crate)` 适配器（`text_literal/code_point_literal/count/repeat_bounds/
+    set/member/…`）。三条形状映射在此定下：`Concat` → `Sequence`（关键字算
+    分隔符）、`Followed`/`Except` → 各自形状、`Grouped` → `Quantity`（只有
+    带 `{…}` 时才有 bounds）。
+  - `mod.rs`：`Visit`（`visit` + `to_span`）/`Visitor`（14 个默认空实现的
+    处理器）/`descend`（走 `Shape::take_children`，所以 pass 可以先把不关心
+    的孩子清空）/`bare_reference`（私有的 `Peek` visitor 探"这个节点是不是
+    只是裸引用"，取代原先对节点类型的 `match`）。
+- [x] **V0 记录器**（`trace.rs`）：`Trace`/`Line` 把一次 walk 写成一串纯
+      vocabulary 的行（形状名 + 值 + 位置）。**这就是自举等价性测试的判据**：
+      两棵类型不同的树没有 `PartialEq`，但可以有同一份记录。
+      6 条测试钉住契约（一共 14 个形状：body 能站到 10 个，另 4 个
+      `production/declaration/comment/token` 只在文件层出现）：
+      `a_walk_reaches_every_shape_a_body_holds`（一条 body 里摆满能摆的 10 个
+      形状，断言到达顺序；集合的成员是数据不是形状，所以 walk 不走进集合
+      内部）、`a_body_records_what_it_said_and_where`、
+      `a_broken_piece_is_recorded_where_it_stands`（坏代理对：值里是 U+FFFD，
+      转义的位置另记）、`a_set_records_the_values_its_members_denote`（四种
+      写法同一个字符，walk 全留，取舍是 lint 的事）、
+      `a_file_records_its_definitions_and_the_documents_above_them`、
+      `the_walk_of_a_real_grammar_reaches_every_definition_it_writes`（拿
+      `bootstrap.uns` 自己的树走一遍：每条定义都留下一行 `declaration`，且条数
+      等于树里的 `Item::Stmt` 数；到达 14 个形状里的 13 个 —— `followed` 不在，
+      因为规范只在备选里*列出*这个关键字，从不用它连两个操作数；`except` 到了，
+      因为 `NonKeywordIdent` 真的做了差集）。
+- [x] **V1 迁移 `semantics/check.rs`**：`Checker` 现在是一个 `Visitor`，只实现
+      `set/literal/quantity` 三个处理器；`validate_expr(expr, report)` 变成
+      `expr.visit(&mut Checker { report })`。`Member`/四种冲突关系不变，新增
+      `member_span/member_of/range_bounds/validate_bounds` 都只读 vocabulary。
+      `value.rs` 不再自己拆字面量，改为委派（`str_value = text_literal(lit).value()`
+      等），删掉重复的 `ascii_escape_value`/`unicode_escape_value`。
+      测试模块逐字节保留（它们是等价证明）：迁移那一步 182 条 lib 测试原样通过，
+      加上新写的 6 条记录器测试，现在是 **188** 条。
+- [ ] **V2 迁移 `semantics/graph.rs`**：`walk_refs/walk_calls/walk_sequences`、
+      `nullable/first/same_offset`、`left_recursive`、`cyclic_nodes`、
+      `unresolved_refs` 改成只走 `Visit`/`Shape`；`check::items`、
+      `check::repeat_lower` 两个 `pub(crate)` 出口跟着换成 vocabulary 的
+      `Declaration`/`Bounds`。
+- [ ] **V3 迁移 `src/codegen/*`**：`TypeBuilder`、`FieldType`、`pattern.rs` 的
+      `CharClass`、`render.rs`、`scan.rs` 一律不再 `match` 手写节点类型；
+      `dec_usize/str_value/unicode_value` 三处调用改走 vocabulary。
+      V3 之后 `codegen` 才能同时服务手写树与生成树，P6 才有得谈。
+
 ## P6 — 自举验收（本计划的终点）
 
 - [ ] **先补规范的洞**：`bootstrap.uns` 里**没有文件级规则**。手写的 `Crate{items: Vec<Item>}`
@@ -609,6 +673,15 @@ fixture `tests/data/spec.rs` 上同一违规有六个：`NUMBER1`（`DIGIT ( DIG
 > （`semantics::tests::a_repeated_member_is_reported_in_every_kind_of_rule`、
 > `each_relation_between_two_members_is_named_in_its_message`）；bootstrap 与 generated
 > 各一条是 P5 的结构断言。fixture `tests/data/mini.rs` 97,948 → **86,801** 字节。
+>
+> V（visit 层）V0+V1 收尾时再跑全表：1 全绿（**188** lib / 6 bootstrap / 19
+> codegen / 1 dump / 27 generated / 3 doctests —— lib 从 182 涨到 188 是新增的 6 条
+> `visit::trace` 契约测试），2 十五行全 `ok`；3 runtime-only 2 绿；4
+> `--features codegen` 与 1 同数；5 三组均在 `crates/unsyn` 里 0 条；6 五组均 0
+> 警告；7 干净。新模块自引入过 4 条内链问题，已全部改掉：1 条链到私有项
+> `semantics::graph`（改链公开的 `semantics::left_recursive`）、2 条公共文档链到
+> 私有的 `decompose`（指不到就不写成链接，改成文字“the private `decompose`”）、
+> 1 条 redundant explicit link target。
 >
 > **一个更正（本轮）**：上一轮对三个提问的回答引到了不存在的文件与符号
 > （`src/semantic/`、`src/lexical/parser.rs`、`CharClass` 在 semantics、`DuplicateAlt`、

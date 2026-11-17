@@ -10,35 +10,26 @@ use parserc::syntax::Syntax;
 use crate::{
     errors::{SemanticsKind, UnsynError},
     input::UnsynInput,
-    lexical::lit::{AsciiEscape, LitDec, LitStr, LitUnicode, StrSegment, UnicodeEscape},
+    lexical::lit::{LitDec, LitStr, LitUnicode},
+    visit::{code_point_literal, count, text_literal},
 };
 
 /// Decodes the character content of a string literal.
 ///
 /// The value is always returned; the second element of the tuple reports the
 /// first malformed escape found in it, if any.
+///
+/// The decoding itself belongs to the [vocabulary](crate::visit::TextLiteral),
+/// which is where the pieces of a literal say what they denote; this function
+/// only hands the literal to that reading and turns the place of a bad escape
+/// into a diagnostic.
 pub fn str_value<I: UnsynInput>(lit: &LitStr<I>) -> (String, Option<UnsynError>) {
-    let mut value = String::new();
-    let mut error = None;
+    let (value, invalid) = text_literal(lit).value();
 
-    for segment in &lit.content {
-        match segment {
-            StrSegment::QuoteEscape(_) => value.push('\''),
-            StrSegment::AsciiEscape(escape) => value.push(ascii_escape_value(escape)),
-            StrSegment::UnicodeEscape(escape) => match unicode_escape_value(escape) {
-                Some(c) => value.push(c),
-                None => {
-                    let err =
-                        UnsynError::Semantics(SemanticsKind::InvalidCodePoint, escape.to_span());
-                    error.get_or_insert(err);
-                    value.push(char::REPLACEMENT_CHARACTER);
-                }
-            },
-            StrSegment::CharWithException(chars) => value.push_str(chars.as_str()),
-        }
-    }
-
-    (value, error)
+    (
+        value,
+        invalid.map(|span| UnsynError::Semantics(SemanticsKind::InvalidCodePoint, span)),
+    )
 }
 
 /// Decodes a string literal, replacing malformed escapes with `U+FFFD`.
@@ -54,12 +45,7 @@ pub fn str_chars<I: UnsynInput>(lit: &LitStr<I>) -> Vec<char> {
 /// Returns `None` when the literal does not denote a Unicode scalar value.
 /// Use [`unicode_value`] when the result has to be validated.
 pub fn unicode_char<I: UnsynInput>(lit: &LitUnicode<I>) -> Option<char> {
-    let text = lit.0.as_str();
-    let digits = text.strip_prefix("U+")?;
-
-    u32::from_str_radix(digits, 16)
-        .ok()
-        .and_then(char::from_u32)
+    code_point_literal(lit).value()
 }
 
 /// Decodes a unicode code point literal, validating its range.
@@ -72,44 +58,12 @@ pub fn unicode_value<I: UnsynInput>(lit: &LitUnicode<I>) -> Result<char, UnsynEr
 ///
 /// Returns `None` when the value does not fit into a [`usize`].
 pub fn dec_usize<I: UnsynInput>(lit: &LitDec<I>) -> Option<usize> {
-    lit.0.as_str().replace('_', "").parse::<usize>().ok()
+    count(lit).value()
 }
 
 /// Evaluates a decimal literal, validating its value.
 pub fn dec_value<I: UnsynInput>(lit: &LitDec<I>) -> Result<usize, UnsynError> {
     dec_usize(lit).ok_or_else(|| UnsynError::Semantics(SemanticsKind::InvalidRepeat, lit.to_span()))
-}
-
-/// Returns the character denoted by an ASCII escape.
-fn ascii_escape_value<I: UnsynInput>(escape: &AsciiEscape<I>) -> char {
-    match escape {
-        AsciiEscape::LF(_) => '\n',
-        AsciiEscape::CR(_) => '\r',
-        AsciiEscape::Tab(_) => '\t',
-        AsciiEscape::BlackSlash(_) => '\\',
-        AsciiEscape::Null(_) => '\0',
-        AsciiEscape::Char(code) => {
-            // The lexical pass guarantees the `\xNN` shape and its `0x00..=0x7F`
-            // range, so a decoding failure here can only come from a handcrafted
-            // tree; fall back to the replacement character.
-            let text = code.as_str();
-
-            text.get(text.len() - 2..)
-                .and_then(|digits| u8::from_str_radix(digits, 16).ok())
-                .map(char::from)
-                .unwrap_or(char::REPLACEMENT_CHARACTER)
-        }
-    }
-}
-
-/// Returns the character denoted by a unicode escape, or `None` when the
-/// literal is outside the Unicode range or denotes a surrogate.
-fn unicode_escape_value<I: UnsynInput>(escape: &UnicodeEscape<I>) -> Option<char> {
-    let digits = escape.digits.as_str();
-
-    u32::from_str_radix(digits, 16)
-        .ok()
-        .and_then(char::from_u32)
 }
 
 #[cfg(test)]
