@@ -48,3 +48,7 @@ required-features = ["codegen"]
 [[test]]
 name = "generated"
 required-features = ["codegen", "runtime"]
+
+[[test]]
+name = "visit"
+required-features = ["codegen"]

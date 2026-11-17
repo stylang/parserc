@@ -527,69 +527,73 @@ fixture `tests/data/spec.rs` 上同一违规有六个：`NUMBER1`（`DIGIT ( DIG
       —— 恰好是那五条多备选的产生式，注释规则与转义都不在列。
       门表数字见末尾「门」小节 P5 那一段。
 
-## V — visit 层（P6 的前置：让语义分析与生成器不再认识节点类型）
+## V — visit 层（P6 的前置：让一棵树能被另一棵树读）
 
 自举后的 CST 由 `codegen` 生成，Rust 类型与手写的 `src/lexical`/`src/syntax`
 不同名也不同构，所以 `src/semantics/` 与 `src/codegen/` 里那些直接 `match`
-具体节点类型的遍历**没法复用**。visit 层把"读一棵 CST"与"CST 是什么类型"分开：
-节点只实现 `Visit`，把自己拆成 vocabulary 里的**形状**交给 `Visitor`；
-pass 只写形状的处理器，不知道上面是谁。
+具体节点类型的遍历**没法复用**。两棵类型不同的树没有 `PartialEq`，能共用的只有
+**接口**：一棵树是被怎样走过去的。
 
-- [x] **V0 vocabulary 与 `Visit` 实现**（`src/visit/`）：
-  - `vocab.rs`：与节点类型无关的词汇。`DefKind{Whitespace,Lexer,Syntax}`；
-    `Element{node: Option<&dyn Visit>, separator: Option<Span>}`（孩子句柄 +
-    它前面的分隔符，这就是"逗号分隔"在词汇里的形状）；`Shape` trait
-    （只有 `take_children`，让 `descend` 能驱动任何持有孩子的形状）；14 个形状
-    `Production/Declaration/Comment/Alternatives/Sequence/Quantity/Followed/
-    Excepted/Group/Set/Reference/Call/Literal/Token`；数据
-    `SetKind/SetMember/CharRange/RangeSide/TextLiteral/Piece/AsciiForm/CodePoint/
-    Count/Bounds/BoundsForm/Name/QuantityOp/LiteralValue`。
-    **成员与界是数据不是形状**：集合的成员、重复的次数不会变成能走进去的
-    地方，所以它们随父形状一次报出。
-  - `decompose.rs`：`Visit` 的实现只写在**产生式左侧**那些手写节点上
-    （`Crate/Item/Stmt/Expr/ExprNoTopAlts/…/LitStr/LitUnicode`）加若干
-    `pub(crate)` 适配器（`text_literal/code_point_literal/count/repeat_bounds/
-    set/member/…`）。三条形状映射在此定下：`Concat` → `Sequence`（关键字算
-    分隔符）、`Followed`/`Except` → 各自形状、`Grouped` → `Quantity`（只有
-    带 `{…}` 时才有 bounds）。
-  - `mod.rs`：`Visit`（`visit` + `to_span`）/`Visitor`（14 个默认空实现的
-    处理器）/`descend`（走 `Shape::take_children`，所以 pass 可以先把不关心
-    的孩子清空）/`bare_reference`（私有的 `Peek` visitor 探"这个节点是不是
-    只是裸引用"，取代原先对节点类型的 `match`）。
-- [x] **V0 记录器**（`trace.rs`）：`Trace`/`Line` 把一次 walk 写成一串纯
-      vocabulary 的行（形状名 + 值 + 位置）。**这就是自举等价性测试的判据**：
-      两棵类型不同的树没有 `PartialEq`，但可以有同一份记录。
-      6 条测试钉住契约（一共 14 个形状：body 能站到 10 个，另 4 个
-      `production/declaration/comment/token` 只在文件层出现）：
-      `a_walk_reaches_every_shape_a_body_holds`（一条 body 里摆满能摆的 10 个
-      形状，断言到达顺序；集合的成员是数据不是形状，所以 walk 不走进集合
-      内部）、`a_body_records_what_it_said_and_where`、
-      `a_broken_piece_is_recorded_where_it_stands`（坏代理对：值里是 U+FFFD，
-      转义的位置另记）、`a_set_records_the_values_its_members_denote`（四种
-      写法同一个字符，walk 全留，取舍是 lint 的事）、
-      `a_file_records_its_definitions_and_the_documents_above_them`、
-      `the_walk_of_a_real_grammar_reaches_every_definition_it_writes`（拿
-      `bootstrap.uns` 自己的树走一遍：每条定义都留下一行 `declaration`，且条数
-      等于树里的 `Item::Stmt` 数；到达 14 个形状里的 13 个 —— `followed` 不在，
-      因为规范只在备选里*列出*这个关键字，从不用它连两个操作数；`except` 到了，
-      因为 `NonKeywordIdent` 真的做了差集）。
-- [x] **V1 迁移 `semantics/check.rs`**：`Checker` 现在是一个 `Visitor`，只实现
-      `set/literal/quantity` 三个处理器；`validate_expr(expr, report)` 变成
-      `expr.visit(&mut Checker { report })`。`Member`/四种冲突关系不变，新增
-      `member_span/member_of/range_bounds/validate_bounds` 都只读 vocabulary。
-      `value.rs` 不再自己拆字面量，改为委派（`str_value = text_literal(lit).value()`
-      等），删掉重复的 `ascii_escape_value`/`unicode_escape_value`。
-      测试模块逐字节保留（它们是等价证明）：迁移那一步 182 条 lib 测试原样通过，
-      加上新写的 6 条记录器测试，现在是 **188** 条。
-- [ ] **V2 迁移 `semantics/graph.rs`**：`walk_refs/walk_calls/walk_sequences`、
-      `nullable/first/same_offset`、`left_recursive`、`cyclic_nodes`、
-      `unresolved_refs` 改成只走 `Visit`/`Shape`；`check::items`、
-      `check::repeat_lower` 两个 `pub(crate)` 出口跟着换成 vocabulary 的
-      `Declaration`/`Bounds`。
-- [ ] **V3 迁移 `src/codegen/*`**：`TypeBuilder`、`FieldType`、`pattern.rs` 的
-      `CharClass`、`render.rs`、`scan.rs` 一律不再 `match` 手写节点类型；
-      `dec_usize/str_value/unicode_value` 三处调用改走 vocabulary。
-      V3 之后 `codegen` 才能同时服务手写树与生成树，P6 才有得谈。
+第一版把接口设计成"节点自己拆成与类型无关的形状"（`dyn` 句柄 + 一套 vocabulary），
+被否掉：绕一大圈 `dyn`，换来的仍然只是"同一个 pass 读两棵树"，而这件事 `syn` 早
+就用更直白的办法做到了 —— **每个节点类型一个方法**，默认体一行，往下走。所以现在
+的 `src/visit/` 照 `syn::visit` 的形状写：
+
+- `mod.rs`：`pub trait Visit<'ast, I: UnsynInput>`，**51 个方法** —— 50 个节点类型
+  各一个（`visit_expr`、`visit_lit_str`、17 个 punct、6 个 keyword…），签名一律是
+  `&'ast X<I>`，没有 `dyn`、没有擦除句柄、没有中间词汇表；外加一个必需的叶子
+  `fn visit_input(&mut self, input: &'ast I)`。除叶子外每个默认体都只有一行
+  `walk::walk_x(self, node)`。
+- `walk.rs`：`pub fn walk_x<'ast, I, V: Visit<'ast, I> + ?Sized>(v, node)`，一个方法
+  配一个，把该节点持有的东西**按它们在文件里的先后**报出去。
+
+三条约定是这个接口"能被生成"的原因，都写在 `mod.rs` 的模块注释里：
+
+1. **默认体只许是那一行调用。**"这个节点装了什么、按什么顺序"因此只写在 `walk_x`
+   一处；能命名一个类型，就能同时发出接口的两半。
+2. **顺序是文件里的顺序，不是字段顺序。**`parserc::syntax::Delimiter` 的三个字段是
+   `start, end, body`，而 `walk_stmt` 走的是 `->`、body、`;`。
+3. **叶子不许跳过任何 token。**punct 吃掉它两侧的空白、keyword 只吃后侧，所以走完
+   一个文件，把所有 `visit_input` 的文本按到达顺序拼起来**就等于这个文件**。
+
+- [x] **接口与树一致，而且只与树一致**（`tests/visit.rs`，5 条）：
+  - `a_walk_of_a_file_reads_every_token_once_and_in_order`：走一遍"每种写法都摆了一句"
+    的 `uns` 文件，断言拼接等于原文，且每个 token 的 `Span` 与前一个首尾相接、最后
+    停在 EOF。这一条同时钉住"没跳过"和"没重复"。
+  - `every_method_of_the_interface_is_reached_by_a_file_of_the_language`：`Spy` 覆盖
+    全部 51 个方法，每个先记名字再往下走。断言**没有走不到的方法**（走不到的方法是
+    生成树必须凭空编一个答案的方法），并且拼接仍是原文 —— 走到了不等于走下去。
+  - `each_method_of_the_interface_hands_its_node_to_the_walk_named_for_it`：用 `syn`
+    读 `src/visit/mod.rs` 与 `src/visit/walk.rs` 的**源码**，断言方法 ↔ `walk_` 一一
+    对应、同后缀、默认体只有那一行、且没有第三种成员。
+  - `the_interface_names_exactly_the_nodes_of_the_tree`：同一趟扫描 `src/lexical/*` 与
+    `src/syntax/*`：凡**只对输入泛型**的 `pub struct`/`pub enum` 就是节点，
+    `define_punct!`/`define_keyword!` 的每一次调用也是。两处判定是显式的、写了理由的：
+    `BlockComment`/`LineComment` 排除（注释不进树，它只作为盖住它的那段 `S` 存在），
+    `pub type` 别名里只有**被一对定界符包住**的算节点（`Repeat`），`Choice` 那一类不算
+    （`SuffixGroup`/`RepeatGroup` —— 走进去的是选中的那个算子，不是选择本身）。断言这
+    50 个类型名与 50 个方法名**双向相等**。这一条是"接口 = 树，别的都不是"的机器版本：
+    新加节点类型却不给方法，或留着一个类型已不存在的方法，都会在这里失败。
+  - `every_node_the_spec_defines_has_a_method`：拿 `bootstrap.uns` 自己解析出来的树，
+    要求每条 `syntax` 产生式的左侧都有一个 `visit_<snake>`。这一条是**单向**的，理由
+    写在它上面的注释里：规范没有文件级规则，`Crate/Item/InnerDoc/OuterDoc` 不在任何
+    产生式左侧，所以规范只能说明"少了方法"，说明不了"多了方法"。这正是 P6 那个洞。
+  - 命名规则（类型名 → `visit_` + snake_case）眼下只在测试里有一份：`codegen` 目前
+    没有任何地方需要 snake_case（它写出的名字都是树已有的名字，见 `codegen/name.rs`），
+    所以没有可共用的出口。P6 生成 `Visit` 时必须接到同一份规则上，届时删掉这份本地
+    实现。
+  - 接口里有两个成员**规范给不出名字**：`LeadingKey`（规范把三种声明关键字写成一条
+    `lexer LeadingKeywords`）与 `Repeat`（规范左侧是 `'{' … '}'` 整段）。它们不是漏网，
+    是 P6 的活，所以这里不悄悄改名。
+- [ ] **V2 把 `semantics/check.rs`、`value.rs`、`graph.rs` 改成 `impl Visit`**：一个
+      pass 只写它关心的那几个方法，其余靠默认体往下走；
+      `validate_expr(expr, report)` 变成 `expr.visit(&mut Checker { report })` 那个形状。
+      三个文件现有的测试模块是等价证明，迁移时逐字保留。
+- [ ] **V3 把 `src/codegen/*` 改成读接口而不是读类型**：`TypeBuilder`、`FieldType`、
+      `pattern.rs`、`render.rs`、`scan.rs` 一律不再 `match` 手写节点类型。V3 之后
+      `codegen` 才能同时服务手写树与生成树，P6 才有得谈。
+- [ ] **V4 `VisitMut`/`Fold`**：这里没有要改写树的 pass，所以先不做；它们与 `Visit`
+      共用同一份"节点清单"，而那份清单现在由 `tests/visit.rs` 从源码里读出来。
 
 ## P6 — 自举验收（本计划的终点）
 
@@ -637,7 +641,7 @@ pass 只写形状的处理器，不知道上面是谁。
 
 | # | 命令 | 期望 |
 | --- | --- | --- |
-| 1 | `cargo test -p unsyn --all-features` | 全绿（lib / bootstrap / codegen / dump / generated / doctests） |
+| 1 | `cargo test -p unsyn --all-features` | 全绿（lib / bootstrap / codegen / dump / generated / visit / doctests） |
 | 2 | `cargo test --workspace` | 所有 `test result: ok` |
 | 3 | `cargo test -p unsyn --no-default-features --features runtime` | 全绿 |
 | 4 | `cargo test -p unsyn --features codegen` | 全绿 |
@@ -674,16 +678,24 @@ pass 只写形状的处理器，不知道上面是谁。
 > `each_relation_between_two_members_is_named_in_its_message`）；bootstrap 与 generated
 > 各一条是 P5 的结构断言。fixture `tests/data/mini.rs` 97,948 → **86,801** 字节。
 >
-> V（visit 层）V0+V1 收尾时再跑全表：1 全绿（**188** lib / 6 bootstrap / 19
-> codegen / 1 dump / 27 generated / 3 doctests —— lib 从 182 涨到 188 是新增的 6 条
-> `visit::trace` 契约测试），2 十五行全 `ok`；3 runtime-only 2 绿；4
-> `--features codegen` 与 1 同数；5 三组均在 `crates/unsyn` 里 0 条；6 五组均 0
-> 警告；7 干净。新模块自引入过 4 条内链问题，已全部改掉：1 条链到私有项
-> `semantics::graph`（改链公开的 `semantics::left_recursive`）、2 条公共文档链到
-> 私有的 `decompose`（指不到就不写成链接，改成文字“the private `decompose`”）、
-> 1 条 redundant explicit link target。
+> V 重做那一轮（`syn::visit` 那版，见上面的 V）跑过全表：1 全绿（182 lib / 6 bootstrap
+> / 19 codegen / 1 dump / 27 generated / **5 visit** / 3 doctests —— lib 没涨是因为上一版
+> 加在 `src/visit/trace.rs` 里的 6 条测试随那套 `dyn` 设计一起删了，新的 5 条在
+> `tests/visit.rs`），2 十六行全 `ok`（比上一轮多一行，就是 visit 这个测试目标）；3
+> runtime-only 2 绿；4 `--features codegen` 与 1 同数，`--no-default-features --features
+> codegen` 是 180 lib + 6 + 19 + 1 + **5 visit** + 3 全绿（`generated` 要 `runtime`，那一组
+> 不跑）；5 三组均在 `crates/unsyn` 里 0 条（仍只有既有的 `parserc` 4 条、`sourcespan` 1
+> 条）；6 五组（含 `--document-private-items`）均 0 警告；7 干净。`tests/data/mini.rs`
+> 未动（这一轮没碰 codegen，fixture 的 drift 测试原样通过）。
 >
-> **一个更正（本轮）**：上一轮对三个提问的回答引到了不存在的文件与符号
+> **两处计划本身要更正**：`codegen/matchers.rs` 连同"生成的节点类型不带 matcher"
+> 那一整个问题**已经不存在**（P5 之后 codegen 被重写过，现在是 `types`、`pattern`、
+> `scan`、`render`、`name` 五块），所以本轮原先排在 V 后面的两件小事（把生成的别名
+> 节点类型一般化、把 matcher/shape 这组名字改得一看就懂）已经没有对象，作废；
+> `src/grammar.rs`（那个临时规则头解析器）也已经删掉，`bootstrap.uns` 现在由手写
+> parser 自己读，P1 关于规则头形式的改动只当历史读。
+>
+> **一个更正（上一轮）**：上一轮对三个提问的回答引到了不存在的文件与符号
 > （`src/semantic/`、`src/lexical/parser.rs`、`CharClass` 在 semantics、`DuplicateAlt`、
 > `MAX_MEMBER_NAMES` 等），所以那三条结论作废。按真实代码重查：
 > 集合成员的重复**早就**在 `semantics/check.rs::validate_set` 里检了（四种关系

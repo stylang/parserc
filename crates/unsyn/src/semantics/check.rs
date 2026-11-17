@@ -10,27 +10,31 @@
 //! backwards — is an error. A value that another member of the same set already
 //! means is a lint: the set still denotes one language, it merely says part of
 //! it twice.
-//!
-//! The check is a [`Visitor`], so it walks the body of a definition rather than
-//! being handed each of its parts by name. That matters for two reasons. The
-//! first is that the values to compare are held together by the node that holds
-//! them — the members of one set, the two bounds of one range — and a walk that
-//! reaches a set reaches all of its members at once, which is the question a
-//! member can not answer on its own. The second is that a body of a tree this
-//! crate generated for itself decomposes into the same shapes, so the walk and
-//! everything it asks are written once.
 
-use parserc::{Span, syntax::Punctuated};
+use parserc::syntax::{Punctuated, Syntax};
 
 use crate::{
     errors::{Diagnostics, LintKind, SemanticsKind, UnsynError},
     input::UnsynInput,
-    syntax::{Expr, Repeat},
-    visit::{
-        CodePoint, Count, Literal, LiteralValue, Name, Quantity, RangeSide, Set, SetMember, Visit,
-        Visitor,
+    lexical::{delimiter::Bracket, lit::LitDec, punct::Comma},
+    semantics::value::{dec_usize, dec_value, str_chars, str_value, unicode_value},
+    syntax::{
+        Expr, ExprNoTopAlt, ExprNoTopAlts, ExprWithSuffix, ExprWithoutSuffix, Range, Repeat,
+        RepeatBound, SetItem, SuffixOp,
     },
 };
+
+/// Validates the literals, sets, ranges and repetitions of a node body.
+///
+/// Every problem found is reported to `report`, so one call states all the
+/// value-level diagnostics of one definition.
+pub fn validate_expr<I: UnsynInput>(expr: &Expr<I>, report: &mut Diagnostics) {
+    validate_alts(&expr.first, report);
+
+    for (_, alts) in expr.rest.iter() {
+        validate_alts(alts, report);
+    }
+}
 
 /// Iterates the items of a punctuated sequence.
 pub(crate) fn items<T, P>(punctuated: &Punctuated<T, P>) -> impl Iterator<Item = &T> {
@@ -41,66 +45,63 @@ pub(crate) fn items<T, P>(punctuated: &Punctuated<T, P>) -> impl Iterator<Item =
         .chain(punctuated.tail.iter().map(|tail| &**tail))
 }
 
-/// Returns the lowest number of repetitions `repeat` matches.
-///
-/// A bound that can not be evaluated is treated as `0`, which keeps the
-/// recursion analysis conservative instead of reporting the same literal twice.
-pub(crate) fn repeat_lower<I: UnsynInput>(repeat: &Repeat<I>) -> usize {
-    crate::visit::repeat_bounds(repeat).form.lower()
-}
+fn validate_alts<I: UnsynInput>(alts: &ExprNoTopAlts<I>, report: &mut Diagnostics) {
+    validate_alt(&alts.first, report);
 
-/// Validates the literals, sets, ranges and repetitions of a node body.
-///
-/// Every problem found is reported to `report`, so one call states all the
-/// value-level diagnostics of one definition.
-pub fn validate_expr<I: UnsynInput>(expr: &Expr<I>, report: &mut Diagnostics) {
-    expr.visit(&mut Checker { report });
-}
-
-/// The pass that asks only what a body says about values.
-///
-/// It answers for the four shapes that hold a value — a [`Set`], a [`Literal`],
-/// the bounds of a [`Quantity`], and the range that is one member of a set — and
-/// leaves the walk to carry it through the rest of the body.
-struct Checker<'a> {
-    report: &'a mut Diagnostics,
-}
-
-impl Visitor for Checker<'_> {
-    fn set(&mut self, set: &Set) {
-        validate_set(set, self.report);
+    for (_, expr) in alts.rest.iter() {
+        validate_alt(expr, report);
     }
+}
 
-    fn literal(&mut self, literal: &Literal) {
-        match &literal.value {
-            // A `'…'` standing on its own is a string of any length, and only
-            // the pieces of it can fail to denote a character.
-            LiteralValue::Str(text) => {
-                if let Some(span) = text.value().1 {
-                    self.report
-                        .push(UnsynError::Semantics(SemanticsKind::InvalidCodePoint, span));
-                }
+fn validate_alt<I: UnsynInput>(expr: &ExprNoTopAlt<I>, report: &mut Diagnostics) {
+    match expr {
+        ExprNoTopAlt::WithSuffix(expr) => validate_with_suffix(expr, report),
+        ExprNoTopAlt::WithoutSuffix(expr) => validate_without_suffix(expr, report),
+    }
+}
+
+fn validate_with_suffix<I: UnsynInput>(expr: &ExprWithSuffix<I>, report: &mut Diagnostics) {
+    match expr {
+        // The bounds of a repetition are part of the group, and are the only
+        // member of it with a value to check.
+        ExprWithSuffix::Grouped { target, suffix } => {
+            validate_without_suffix(target, report);
+
+            if let SuffixOp::Repeat(repeat) = SuffixOp::of(suffix) {
+                validate_repeat(repeat, report);
             }
-            LiteralValue::Char(code) => self.report_code_point(code),
         }
-    }
-
-    fn quantity(&mut self, quantity: &mut Quantity<'_>) {
-        if let Some(bounds) = &quantity.bounds {
-            validate_bounds(bounds, self.report);
+        ExprWithSuffix::Concat { target, suffix, .. }
+        | ExprWithSuffix::Followed { target, suffix, .. } => {
+            validate_without_suffix(target, report);
+            validate_alt(suffix, report);
+        }
+        ExprWithSuffix::Except { target, tokens, .. } => {
+            validate_without_suffix(target, report);
+            validate_without_suffix(tokens, report);
         }
     }
 }
 
-impl Checker<'_> {
-    /// Reports a code point that names no character, which is a number above
-    /// the Unicode range or a surrogate.
-    fn report_code_point(&mut self, code: &CodePoint) {
-        if code.value().is_none() {
-            self.report.push(UnsynError::Semantics(
-                SemanticsKind::InvalidCodePoint,
-                code.span.clone(),
-            ));
+fn validate_without_suffix<I: UnsynInput>(expr: &ExprWithoutSuffix<I>, report: &mut Diagnostics) {
+    match expr {
+        // A complement refuses the members of a set, which is what a set is.
+        ExprWithoutSuffix::Tilde(_, bracket) => validate_set(bracket, report),
+        // The target of a call is resolved by the linker, not here.
+        ExprWithoutSuffix::Call(_) => {}
+        // A reference carries no value to evaluate; see [`crate::semantics::Analyzer`].
+        ExprWithoutSuffix::Ident(_) => {}
+        ExprWithoutSuffix::Paren(paren) => validate_expr(&paren.body, report),
+        ExprWithoutSuffix::Set(bracket) => validate_set(bracket, report),
+        ExprWithoutSuffix::Str(lit) => {
+            if let Some(error) = str_value(lit).1 {
+                report.push(error);
+            }
+        }
+        ExprWithoutSuffix::Unicode(lit) => {
+            if let Err(error) = unicode_value(lit) {
+                report.push(error);
+            }
         }
     }
 }
@@ -112,29 +113,31 @@ impl Checker<'_> {
 /// meaningless, and so it belongs to the lint channel. A member is reported at
 /// most once, against the first earlier member it conflicts with: what it says
 /// twice is one fact, not the several ways it could be phrased.
-fn validate_set(set: &Set, report: &mut Diagnostics) {
-    if set.members.is_empty() {
+fn validate_set<I: UnsynInput>(
+    bracket: &Bracket<I, Punctuated<SetItem<I>, Comma<I>>>,
+    report: &mut Diagnostics,
+) {
+    if bracket.body.is_empty() {
         report.push(UnsynError::Semantics(
             SemanticsKind::EmptySet,
-            set.span.clone(),
+            bracket.to_span(),
         ));
         return;
     }
 
     let mut members: Vec<Member> = vec![];
-    let mut names: Vec<&Name> = vec![];
+    let mut names: Vec<&str> = vec![];
 
-    for member in &set.members {
+    for item in items(&bracket.body) {
         // The same name written twice is the same member written twice, however
         // little of that node one file knows: only whether two *different*
         // names denote values in common is the question the file can not answer
-        // (see `member_of`).
-        if let SetMember::Reference(name) = member {
-            if names.iter().any(|held| held.text == name.text) {
-                report.lint(
-                    LintKind::DuplicateMember(name.text.clone()),
-                    name.span.clone(),
-                );
+        // (see `validate_set_item`).
+        if let SetItem::Ident(ident) = item {
+            let name = ident.0.as_str();
+
+            if names.contains(&name) {
+                report.lint(LintKind::DuplicateMember(name.to_owned()), item.to_span());
             } else {
                 names.push(name);
             }
@@ -144,25 +147,18 @@ fn validate_set(set: &Set, report: &mut Diagnostics) {
 
         // A member that denotes no value at all carries its own error, and a
         // member that denotes an unknown one is not a value of this set yet.
-        let Some(value) = member_of(member, report) else {
+        let Some(member) = validate_set_item(item, report) else {
             continue;
         };
 
-        if let Some(kind) = members.iter().find_map(|earlier| conflict(earlier, &value)) {
-            report.lint(kind, member_span(member));
+        if let Some(kind) = members
+            .iter()
+            .find_map(|earlier| conflict(earlier, &member))
+        {
+            report.lint(kind, item.to_span());
         }
 
-        members.push(value);
-    }
-}
-
-/// The place a member was written, which is where a report about it points.
-fn member_span(member: &SetMember) -> Span {
-    match member {
-        SetMember::Char(code) => code.span.clone(),
-        SetMember::Str(text) => text.span.clone(),
-        SetMember::Range(range) => range.span.clone(),
-        SetMember::Reference(name) => name.span.clone(),
+        members.push(member);
     }
 }
 
@@ -172,40 +168,33 @@ fn member_span(member: &SetMember) -> Span {
 /// and a broken value is not worth comparing with anything — or when the member
 /// is a name, which is compared with the names of the set beside it rather than
 /// with the values here: one file can not know what the node it names denotes.
-fn member_of(member: &SetMember, report: &mut Diagnostics) -> Option<Member> {
-    match member {
-        SetMember::Range(range) => range_bounds(range, report).map(|(start, end)| {
-            if start == end {
-                Member::Char(start)
-            } else {
-                Member::Range(start, end)
-            }
-        }),
-        SetMember::Str(text) => {
+fn validate_set_item<I: UnsynInput>(item: &SetItem<I>, report: &mut Diagnostics) -> Option<Member> {
+    match item {
+        SetItem::Range(range) => {
+            validate_range(range, report).map(|(start, end)| Member::of_range(start, end))
+        }
+        SetItem::Str(lit) => {
             // `'…'` is a string as well as a character, and a set is a union of
             // strings, so a member of any length is meaningful here.
-            let (value, invalid) = text.value();
+            let (value, error) = str_value(lit);
 
-            if let Some(span) = invalid {
-                report.push(UnsynError::Semantics(SemanticsKind::InvalidCodePoint, span));
+            if let Some(error) = error {
+                report.push(error);
                 return None;
             }
 
             Some(Member::of_value(value))
         }
-        SetMember::Char(code) => match code.value() {
-            Some(value) => Some(Member::Char(value)),
-            None => {
-                report.push(UnsynError::Semantics(
-                    SemanticsKind::InvalidCodePoint,
-                    code.span.clone(),
-                ));
+        SetItem::Unicode(lit) => match unicode_value(lit) {
+            Ok(value) => Some(Member::Char(value)),
+            Err(error) => {
+                report.push(error);
                 None
             }
         },
         // A repeated name is linted by `validate_set`, which is where the names
         // of a set are kept together.
-        SetMember::Reference(_) => None,
+        SetItem::Ident(_) => None,
     }
 }
 
@@ -213,33 +202,34 @@ fn member_of(member: &SetMember, report: &mut Diagnostics) -> Option<Member> {
 ///
 /// `None` when a bound can not be evaluated or the bounds stand in the wrong
 /// order: such a range denotes no code point at all.
-fn range_bounds(range: &crate::visit::CharRange, report: &mut Diagnostics) -> Option<(char, char)> {
+fn validate_range<I: UnsynInput>(
+    range: &Range<I>,
+    report: &mut Diagnostics,
+) -> Option<(char, char)> {
     let mut sides: Vec<char> = vec![];
 
-    for side in [&range.start, &range.end] {
-        match side {
-            RangeSide::Char(code) => match code.value() {
-                Some(value) => sides.push(value),
-                None => report.push(UnsynError::Semantics(
-                    SemanticsKind::InvalidCodePoint,
-                    code.span.clone(),
-                )),
-            },
-            RangeSide::Str(text) => {
-                if let Some(span) = text.value().1 {
-                    report.push(UnsynError::Semantics(SemanticsKind::InvalidCodePoint, span));
+    match range {
+        Range::Unicode(start, _, end) => {
+            for lit in [start, end] {
+                match unicode_value(lit) {
+                    Ok(value) => sides.push(value),
+                    Err(error) => report.push(error),
+                }
+            }
+        }
+        Range::Str(start, _, end) => {
+            for lit in [start, end] {
+                if let Some(error) = str_value(lit).1 {
+                    report.push(error);
                     continue;
                 }
 
-                // A range is drawn between two characters, which is decided
-                // here rather than in the pattern: the `-` of `''-'abc'` would
-                // otherwise reach the code generator as a set of nothing.
-                let chars = text.chars();
+                let chars = str_chars(lit);
 
                 if chars.len() != 1 {
                     report.push(UnsynError::Semantics(
                         SemanticsKind::NotAChar,
-                        text.span.clone(),
+                        lit.to_span(),
                     ));
                     continue;
                 }
@@ -256,7 +246,7 @@ fn range_bounds(range: &crate::visit::CharRange, report: &mut Diagnostics) -> Op
     if start > end {
         report.push(UnsynError::Semantics(
             SemanticsKind::InvalidRange,
-            range.span.clone(),
+            range.to_span(),
         ));
         return None;
     }
@@ -264,49 +254,55 @@ fn range_bounds(range: &crate::visit::CharRange, report: &mut Diagnostics) -> Op
     Some((start, end))
 }
 
-/// Validates the bounds of a repetition and reports the count no operand can
-/// match.
-///
-/// A number that does not fit carries its own diagnostic, which is why the two
-/// bounds are compared only when both could be read.
-fn validate_bounds(bounds: &crate::visit::Bounds, report: &mut Diagnostics) {
-    // Evaluates one bound, reporting the number that is no number at all.
-    fn read(count: &Count, report: &mut Diagnostics) -> Option<usize> {
-        match count.value() {
-            Some(value) => Some(value),
-            None => {
-                report.push(UnsynError::Semantics(
-                    SemanticsKind::InvalidRepeat,
-                    count.span.clone(),
-                ));
-                None
-            }
+/// Evaluates a repetition bound, reporting a diagnostic when it can not be
+/// evaluated.
+fn bound<I: UnsynInput>(lit: &LitDec<I>, report: &mut Diagnostics) -> Option<usize> {
+    match dec_value(lit) {
+        Ok(value) => Some(value),
+        Err(error) => {
+            report.push(error);
+            None
         }
     }
+}
 
-    let span = bounds.span.clone();
+fn validate_repeat<I: UnsynInput>(repeat: &Repeat<I>, report: &mut Diagnostics) {
+    let span = repeat.to_span();
 
-    match &bounds.form {
+    match RepeatBound::of(&repeat.body) {
         // `{, N}` and `{N}` matching nothing at all is never intended.
-        crate::visit::BoundsForm::AtMost(end) | crate::visit::BoundsForm::Exactly(end) => {
-            if let Some(0) = read(end, report) {
+        RepeatBound::RangeTo(_, end) | RepeatBound::Count(end) => {
+            if let Some(0) = bound(end, report) {
                 report.push(UnsynError::Semantics(SemanticsKind::InvalidRepeat, span));
             }
         }
-        crate::visit::BoundsForm::AtLeast { from, to } => {
-            let Some(from) = read(from, report) else {
+        RepeatBound::RangeFrom(start, _, end) => {
+            let Some(start) = bound(start, report) else {
                 return;
             };
 
-            if let Some(to) = to {
-                let Some(to) = read(to, report) else {
+            if let Some(end) = end {
+                let Some(end) = bound(end, report) else {
                     return;
                 };
 
-                if to < from {
+                if end < start {
                     report.push(UnsynError::Semantics(SemanticsKind::InvalidRepeat, span));
                 }
             }
+        }
+    }
+}
+
+/// Returns the lowest number of repetitions `repeat` matches.
+///
+/// A bound that can not be evaluated is treated as `0`, which keeps the
+/// recursion analysis conservative instead of reporting the same literal twice.
+pub(crate) fn repeat_lower<I: UnsynInput>(repeat: &Repeat<I>) -> usize {
+    match RepeatBound::of(&repeat.body) {
+        RepeatBound::RangeTo(..) => 0,
+        RepeatBound::RangeFrom(start, _, _) | RepeatBound::Count(start) => {
+            dec_usize(start).unwrap_or(0)
         }
     }
 }
@@ -334,6 +330,15 @@ impl Member {
         match (chars.next(), chars.next()) {
             (Some(one), None) => Member::Char(one),
             _ => Member::Str(value),
+        }
+    }
+
+    /// The member the interval between two characters denotes.
+    fn of_range(start: char, end: char) -> Self {
+        if start == end {
+            Member::Char(start)
+        } else {
+            Member::Range(start, end)
         }
     }
 
