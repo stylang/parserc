@@ -7,10 +7,12 @@
 //! summary of it: every character of a file can be found again in the tree, which
 //! is what lets a diagnostic point at the text it talks about.
 //!
-//! A group on the right side of a production is no node of its own, since nothing
-//! names it: `X+` is [`OneOrMore`], `X*` is a [`Vec`], `('a' 'b')` is a tuple, and
-//! `'[' … ']'` is a [`Delimiter`]. What earns a type is a name on the *left* side,
-//! and the code that reads a tree reads the names.
+//! A group on the right side of a production is usually no node of its own, since
+//! nothing names it: `X+` is [`OneOrMore`], `X*` is a [`Vec`], `('a' 'b')` is a
+//! tuple, and `'[' … ']'` is a [`Delimiter`]. What earns a type is a name on the
+//! *left* side, and the code that reads a tree reads the names. The one exception
+//! is [`RepeatBound`], which names a group only because reading it means matching
+//! on it either way.
 //!
 //! # Where the trivia goes
 //!
@@ -464,57 +466,57 @@ where
 /// The bounds of a repetition: the whole `{…}`, braces and all, since that is
 /// what the production puts on its left side.
 ///
-/// The operand it follows is the one that says what gets counted. What the braces
-/// hold is the group [`RepeatBounds`] writes out, which is why the group is a type
-/// expression and no type of its own.
+/// The operand it follows is the one that says what gets counted, and what the
+/// braces hold is named by [`RepeatBound`].
 #[derive(Debug, PartialEq, Eq, PartialOrd, Ord, Clone, Syntax)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct Repeat<I>(
     /// The `{` … `}` the bounds are written between.
-    pub Delimiter<BraceStart<I>, BraceEnd<I>, RepeatBounds<I>>,
+    pub Delimiter<BraceStart<I>, BraceEnd<I>, RepeatBound<I>>,
 )
 where
     I: UnsynInput;
 
-/// The group `(',' LitDec | LitDec ',' LitDec? | LitDec)` of the [`Repeat`] rule,
-/// in the shape the production writes it.
+/// The group `(',' LitDec | LitDec ',' LitDec? | LitDec)` of the [`Repeat`] rule.
 ///
-/// The comma form is read before the bare count, which is what lets `{2, 3}` be
-/// two bounds rather than a count of two followed by a closing brace that finds a
-/// comma and fails fatally.
-pub type RepeatBounds<I> =
-    Choice<(Comma<I>, LitDec<I>), Choice<(LitDec<I>, Comma<I>, Option<LitDec<I>>), LitDec<I>>>;
-
-/// The bounds a [`Repeat`] spells, flattened so that a match can name the three
-/// forms instead of walking the nested [`Choice`] and the tuples inside it.
+/// A group on the right side of a production is usually no node of its own, since
+/// nothing names it and its shape is not worth walking past. This one is the
+/// exception because it is exactly the choice a reader has to make: whatever
+/// counts the repetitions has to tell the three forms apart, and spelling them as
+/// one flat match is the alternative to reaching through a [`Choice`] of tuples
+/// and a nested [`Choice`] at every reader of the form.
 ///
-/// This is a *view* of a [`Repeat`] and not a node: no tree stores one, and taking
-/// it costs nothing but reading a reference.
-#[derive(Debug)]
-pub enum RepeatBound<'a, I>
+/// The variants are tried in the order they are written, and that order carries
+/// the weight: the comma form comes before the bare count, which is what lets
+/// `{2, 3}` be two bounds rather than a count of two followed by a closing brace
+/// that finds a comma and fails fatally.
+#[derive(Debug, PartialEq, Eq, PartialOrd, Ord, Clone, Syntax)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+pub enum RepeatBound<I>
 where
     I: UnsynInput,
 {
     /// `,n`, at most `n` times.
-    RangeTo(&'a Comma<I>, &'a LitDec<I>),
+    RangeTo(
+        /// The `,` that opens the form, and says which form this is.
+        Comma<I>,
+        /// The bound above.
+        LitDec<I>,
+    ),
     /// `n,m`, or `n,` with no bound above.
-    RangeFrom(&'a LitDec<I>, &'a Comma<I>, Option<&'a LitDec<I>>),
+    RangeFrom(
+        /// The bound below.
+        LitDec<I>,
+        /// The `,` that divides the two bounds.
+        Comma<I>,
+        /// The bound above, if one is written.
+        Option<LitDec<I>>,
+    ),
     /// `n`, exactly `n` times.
-    Count(&'a LitDec<I>),
-}
-
-impl<'a, I: UnsynInput> RepeatBound<'a, I> {
-    /// The form the bounds were written in.
-    #[inline]
-    pub fn of(repeat: &'a Repeat<I>) -> Self {
-        match &repeat.0.body {
-            Choice::First((comma, end)) => Self::RangeTo(comma, end),
-            Choice::Second(Choice::First((start, comma, end))) => {
-                Self::RangeFrom(start, comma, end.as_ref())
-            }
-            Choice::Second(Choice::Second(count)) => Self::Count(count),
-        }
-    }
+    Count(
+        /// The count.
+        LitDec<I>,
+    ),
 }
 
 // ---------------------------------------------------------------------------
@@ -854,22 +856,14 @@ mod tests {
     fn the_bounds_of_a_repetition_have_three_forms() {
         use RepeatBound::{Count, RangeFrom, RangeTo};
 
-        assert!(matches!(
-            RepeatBound::of(&whole::<Repeat<_>>("{3}").unwrap()),
-            Count(_)
-        ));
-        assert!(matches!(
-            RepeatBound::of(&whole::<Repeat<_>>("{1, 6}").unwrap()),
-            RangeFrom(_, _, Some(_))
-        ));
-        assert!(matches!(
-            RepeatBound::of(&whole::<Repeat<_>>("{1,}").unwrap()),
-            RangeFrom(_, _, None)
-        ));
-        assert!(matches!(
-            RepeatBound::of(&whole::<Repeat<_>>("{,4}").unwrap()),
-            RangeTo(_, _)
-        ));
+        fn bounds(src: &str) -> RepeatBound<TokenStream<'_>> {
+            whole::<Repeat<_>>(src).unwrap().0.body
+        }
+
+        assert!(matches!(bounds("{3}"), Count(_)));
+        assert!(matches!(bounds("{1, 6}"), RangeFrom(_, _, Some(_))));
+        assert!(matches!(bounds("{1,}"), RangeFrom(_, _, None)));
+        assert!(matches!(bounds("{,4}"), RangeTo(_, _)));
 
         // A bound of two is not a bound followed by a brace that finds a comma.
         assert!(whole::<Repeat<_>>("{1, 2, 3}").is_err());
