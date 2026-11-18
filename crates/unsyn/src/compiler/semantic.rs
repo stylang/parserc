@@ -163,7 +163,7 @@ impl<'ast> Pattern<'ast> {
 
         for part in parts {
             if nullable {
-                heads.extend(part.heads.iter().cloned());
+                heads.extend(part.heads);
             }
 
             nullable &= part.nullable;
@@ -190,7 +190,7 @@ impl<'ast> Pattern<'ast> {
         let mut nullable = false;
 
         for part in parts {
-            heads.extend(part.heads.iter().cloned());
+            heads.extend(part.heads);
             nullable |= part.nullable;
             uses.extend(part.uses);
         }
@@ -217,11 +217,12 @@ impl<'ast> Pattern<'ast> {
             left.nullable
         };
 
-        let heads = if left.nullable {
-            left.heads.union(&right.heads).cloned().collect()
-        } else {
-            left.heads
-        };
+        // The left side is in the answer either way, so the right is merged into
+        // the set it already holds rather than a third set built from both.
+        let mut heads = left.heads;
+        if left.nullable {
+            heads.extend(right.heads);
+        }
 
         Self {
             heads,
