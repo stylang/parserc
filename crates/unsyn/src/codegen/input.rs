@@ -4,7 +4,7 @@ use std::fmt::Debug;
 
 use parserc::{AsBytes, AsStr, Find, Input, StartWith};
 
-use crate::errors::UnsynError;
+use super::errors::UnsynError;
 
 /// The capabilities an input stream needs to parse `unsyn`.
 ///

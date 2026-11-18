@@ -30,7 +30,7 @@ use parserc::{ControlFlow, ParseError, Span};
 /// Every variant names what the parser expected at the position it stopped on;
 /// [`PunctKind::map`] turns the error the underlying keyword parser produced
 /// into a [`UnsynError::Punct`] that carries this expectation.
-#[derive(Debug, thiserror::Error, PartialEq, Eq)]
+#[derive(Debug, thiserror::Error, PartialEq, Eq, Clone, Copy)]
 pub enum PunctKind {
     #[error("punct ';'")]
     Semi,
@@ -74,7 +74,7 @@ impl PunctKind {
     /// Map error to `punct` error.
     #[inline]
     pub fn map(self) -> impl FnOnce(UnsynError) -> UnsynError {
-        |err: UnsynError| UnsynError::Punct(self, err.control_flow(), err.to_span())
+        move |err: UnsynError| UnsynError::Punct(self, err.control_flow(), err.to_span())
     }
 }
 
@@ -83,7 +83,7 @@ impl PunctKind {
 /// A keyword is matched as a literal prefix, so this family also reports the
 /// case where a keyword is only the head of a longer word: `lexerX` is an
 /// identifier, and `lexer` inside it is not a keyword.
-#[derive(Debug, thiserror::Error, PartialEq, Eq)]
+#[derive(Debug, thiserror::Error, PartialEq, Eq, Clone, Copy)]
 pub enum KeywordKind {
     #[error("keyword 'lexer'")]
     Lexer,
@@ -100,10 +100,10 @@ pub enum KeywordKind {
 }
 
 impl KeywordKind {
-    /// Map error to `punct` error.
+    /// Map error to `keyword` error.
     #[inline]
     pub fn map(self) -> impl FnOnce(UnsynError) -> UnsynError {
-        |err: UnsynError| UnsynError::Keyword(self, err.control_flow(), err.to_span())
+        move |err: UnsynError| UnsynError::Keyword(self, err.control_flow(), err.to_span())
     }
 }
 
@@ -114,7 +114,7 @@ impl KeywordKind {
 /// the expression forms of a node definition. The one exception is
 /// [`SyntaxKind::Eof`], which a whole file reports when it cannot be read to its
 /// end.
-#[derive(Debug, thiserror::Error, PartialEq, Eq)]
+#[derive(Debug, thiserror::Error, PartialEq, Eq, Clone, Copy)]
 pub enum SyntaxKind {
     #[error("unicode literal")]
     Unicode,
@@ -144,6 +144,12 @@ pub enum SyntaxKind {
     Dec,
     #[error("expression")]
     ExprNoTopAlt,
+    /// One of the words a definition opens with, where none of them begins.
+    #[error("definition keyword")]
+    LeadingKeywords,
+    /// One of the words that join two operands, where none of them begins.
+    #[error("pattern operator keyword")]
+    FollowingKeywords,
     /// The end of a file: whatever an item cannot read is left over, and the
     /// construct that contains it reports this instead of handing the rest to
     /// its caller.
@@ -155,13 +161,13 @@ impl SyntaxKind {
     /// Map error to `syntax` error.
     #[inline]
     pub fn map(self) -> impl FnOnce(UnsynError) -> UnsynError {
-        |err: UnsynError| UnsynError::Syntax(self, err.control_flow(), err.to_span())
+        move |err: UnsynError| UnsynError::Syntax(self, err.control_flow(), err.to_span())
     }
 
     /// Map error to `syntax` fatal error.
     #[inline]
     pub fn map_into_fatal(self) -> impl FnOnce(UnsynError) -> UnsynError {
-        |err: UnsynError| UnsynError::Syntax(self, ControlFlow::Fatal, err.to_span())
+        move |err: UnsynError| UnsynError::Syntax(self, ControlFlow::Fatal, err.to_span())
     }
 }
 
@@ -223,7 +229,7 @@ impl SemanticsKind {
     /// Map error to `semantic` error.
     #[inline]
     pub fn map(self) -> impl FnOnce(UnsynError) -> UnsynError {
-        |err: UnsynError| UnsynError::Semantics(self, err.to_span())
+        move |err: UnsynError| UnsynError::Semantics(self, err.to_span())
     }
 }
 

@@ -27,7 +27,7 @@ lexer RawIdent -> 'r#' IdentOrKeyword;
 
 lexer NonKeywordIdent -> IdentOrKeyword except Keywords;
 
-lexer Ident -> NonKeywordIdent | RawIdent;
+lexer Ident -> RawIdent | NonKeywordIdent;
 
 lexer Keywords ->
       LeadingKeywords
@@ -48,7 +48,7 @@ lexer FollowingKeywords ->
 
 lexer LitStr ->
     '\'' (
-        ~['"','\\',CR]
+        ~['\'', '\\', CR]
       | QuoteEscape
       | AsciiEscape
       | UnicodeEscape
@@ -91,7 +91,7 @@ lexer BlockComment ->
     | '/***/'
     ;
 
-lexer InnerLineDoc -> '//!' ~[LF,CR];
+lexer InnerLineDoc -> '//!' ~[LF,CR]*;
 
 lexer InnerBlockDoc ->
     '/*!' ( BlockCommentOrDoc | ~['/*','*/'] )* '*/'
@@ -115,7 +115,7 @@ lexer BlockCommentOrDoc ->
     ;
 
 
-syntax Expr -> ExprNoTopAlt+ ( '|' ExprNoTopAlt+ )?;
+syntax Expr -> ExprNoTopAlt+ ( '|' ExprNoTopAlt+ )*;
 
 syntax ExprNoTopAlt -> ExprWithSuffix | ExprWithoutSuffix;
 

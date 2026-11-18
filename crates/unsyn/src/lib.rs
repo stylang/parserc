@@ -85,21 +85,10 @@
 //! documentation names the types a file it writes will call. Those links are
 //! allowed to break in that case rather than written twice, since nothing about
 //! the build changes, only what the documentation can show.
-#![cfg_attr(not(feature = "runtime"), allow(rustdoc::broken_intra_doc_links))]
+#![cfg_attr(docsrs, feature(doc_cfg))]
 
 #[cfg(feature = "codegen")]
 pub mod codegen;
-#[cfg(feature = "codegen")]
-pub mod errors;
-#[cfg(feature = "codegen")]
-pub mod input;
-#[cfg(feature = "codegen")]
-pub mod lexical;
-#[cfg(feature = "runtime")]
-pub mod runtime;
-#[cfg(feature = "codegen")]
-pub mod semantics;
-#[cfg(feature = "codegen")]
-pub mod syntax;
-#[cfg(feature = "codegen")]
-pub mod visit;
+
+#[cfg(feature = "runtimes")]
+pub mod runtimes;

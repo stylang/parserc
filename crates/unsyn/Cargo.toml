@@ -28,31 +28,7 @@ syn = { version = "^2", features = ["full"] }
 # The defaults carry both because a test here compiles a generated file, which
 # needs a runtime to compile it against.
 [features]
-default = ["serde", "codegen", "runtime"]
-runtime = []
+default = ["serde", "codegen", "runtimes"]
+runtimes = []
 codegen = ["dep:proc-macro2", "dep:quote", "dep:thiserror", "dep:unicode-ident", "parserc/syntax"]
 serde = ["dep:serde", "parserc/serde"]
-
-[[test]]
-name = "bootstrap"
-required-features = ["codegen"]
-
-[[test]]
-name = "codegen"
-required-features = ["codegen"]
-
-[[test]]
-name = "dump"
-required-features = ["codegen"]
-
-[[test]]
-name = "generated"
-required-features = ["codegen", "runtime"]
-
-[[test]]
-name = "shape"
-required-features = ["codegen"]
-
-[[test]]
-name = "visit"
-required-features = ["codegen"]
