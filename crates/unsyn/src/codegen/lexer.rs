@@ -708,61 +708,9 @@ where
 }
 
 // ---------------------------------------------------------------------------
-// `lexer LineComment -> '//' (~['/','!',LF] | '//') ~[LF]*;`
 // `lexer InnerLineDoc -> '//!' ~[LF,CR]*;`
 // `lexer OuterLineDoc -> '///' ( ~['/'] ~[LF,CR]* )?;`
 // ---------------------------------------------------------------------------
-
-/// A line comment, which reaches to the end of its line and holds none of it.
-#[derive(Debug, PartialEq, Eq, PartialOrd, Ord, Clone, Syntax)]
-#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
-pub struct LineComment<I>(#[parserc(parser = read_line_comment)] pub I)
-where
-    I: UnsynInput;
-
-/// Reads the `'//' (~['/','!',LF] | '//') ~[LF]*` of [`LineComment`].
-///
-/// The two forms the rule separates by their first character after the `//` are
-/// read by the length of the run of `/`: three of them open an outer document,
-/// and a `!` opens an inner one, so neither is a comment.
-fn read_line_comment<I>(input: &mut I) -> Result<I, UnsynError>
-where
-    I: UnsynInput,
-{
-    let mut whole = input.clone();
-
-    let header = take_while(|c: char| c == '/').parse(input)?;
-
-    match header.len() {
-        // Not a comment at all: `~['/','!',LF]` has nothing to take.
-        0 | 1 | 3 => {
-            return Err(UnsynError::Syntax(
-                SyntaxKind::LineComment,
-                ControlFlow::Recovable,
-                header.to_span(),
-            ));
-        }
-        // `//!` is an inner document, and `//` with no text after it is the
-        // `'//'` alternative with no `~[LF]*` to follow it.
-        2 => match input.iter().next() {
-            Some('!') | Some('\n') => {
-                return Err(UnsynError::Syntax(
-                    SyntaxKind::LineComment,
-                    ControlFlow::Recovable,
-                    whole.to_span_at(3),
-                ));
-            }
-            _ => {}
-        },
-        // Four or more: the `'//'` alternative took a pair, and the rest of the
-        // line is `~[LF]*`.
-        _ => {}
-    }
-
-    let body = take_while(|c: char| c != '\n').parse(input)?;
-
-    Ok(whole.split_to(header.len() + body.len()))
-}
 
 /// A line document that describes the file it is written in.
 #[derive(Debug, PartialEq, Eq, PartialOrd, Ord, Clone, Syntax)]
@@ -1111,7 +1059,6 @@ mod tests {
         AsciiEscape,
         UnicodeEscape,
         LitStr,
-        LineComment,
         InnerLineDoc,
         OuterLineDoc,
         BlockComment,
@@ -1431,19 +1378,6 @@ mod tests {
                 Span::Range(1..2),
             ))
         );
-    }
-
-    #[test]
-    fn a_line_comment_reaches_the_end_of_its_line() {
-        assert_eq!(text(&parse::<LineComment<_>>("//x").unwrap()), "//x");
-        assert_eq!(text(&parse::<LineComment<_>>("// x\ny").unwrap()), "// x");
-        assert_eq!(text(&parse::<LineComment<_>>("//// x").unwrap()), "//// x");
-        assert_eq!(text(&parse::<LineComment<_>>("//").unwrap()), "//");
-
-        // The three other forms are told apart by their first character.
-        assert!(parse::<LineComment<_>>("/// x").is_err());
-        assert!(parse::<LineComment<_>>("//! x").is_err());
-        assert!(parse::<LineComment<_>>("/x").is_err());
     }
 
     #[test]

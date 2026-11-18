@@ -356,8 +356,8 @@ where
     ///
     /// What `~` asks is answered by the character here, and takes it, so the
     /// complement fails where the set would have fitted and always consumes
-    /// input. That is what lets a line comment read to the end of its line with
-    /// `~[LF]*` rather than stopping short of it.
+    /// input. That is what lets a line document read to the end of its line with
+    /// `~[LF,CR]*` rather than stopping short of it.
     Tilde(
         /// The `~` punct.
         Tilde<I>,
@@ -988,9 +988,9 @@ mod tests {
             })
             .collect::<Vec<_>>();
 
-        // One `whitespace`, twenty-seven `lexer` and twelve `syntax` rules.
-        assert_eq!(statements.len(), 40);
-        assert_eq!(statements.iter().filter(|k| *k == "lexer").count(), 27);
+        // One `whitespace`, twenty-six `lexer` and twelve `syntax` rules.
+        assert_eq!(statements.len(), 39);
+        assert_eq!(statements.iter().filter(|k| *k == "lexer").count(), 26);
         assert_eq!(statements.iter().filter(|k| *k == "syntax").count(), 12);
         assert_eq!(statements.iter().filter(|k| *k == "whitespace").count(), 1);
 
@@ -1005,7 +1005,7 @@ mod tests {
             })
             .collect::<Vec<_>>();
 
-        assert_eq!(names.len(), 40, "a definition without a name");
+        assert_eq!(names.len(), 39, "a definition without a name");
         for name in [
             "S",
             "IdentOrKeyword",

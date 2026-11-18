@@ -126,8 +126,6 @@ pub enum SyntaxKind {
     StrContent,
     #[error("ident")]
     Ident,
-    #[error("line comment")]
-    LineComment,
     #[error("block comment")]
     BlockComment,
     #[error("outer line document")]

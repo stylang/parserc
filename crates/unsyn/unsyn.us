@@ -78,10 +78,6 @@ lexer LitDec -> DecDigit ( DecDigit | '_' )*;
 
 lexer LitUnicode -> 'U+' concat HexDigit{4};
 
-lexer LineComment ->
-    '//' (~['/','!',LF] | '//') ~[LF]*
-    ;
-
 lexer BlockComment ->
       '/*'
         ( ~['*','!','/*'] | '**' | BlockCommentOrDoc )
