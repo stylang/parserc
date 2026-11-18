@@ -87,7 +87,8 @@ use parserc::syntax::Syntax;
 use crate::input::UnsynInput;
 use crate::semantics::WILDCARD;
 use crate::syntax::{
-    Expr, ExprNoTopAlt, ExprNoTopAlts, ExprWithSuffix, ExprWithoutSuffix, SuffixOp,
+    Expr, ExprNoTopAlt, ExprNoTopAlts, ExprWithSuffix, ExprWithoutSuffix, Operand, SuffixOp,
+    Suffixed,
 };
 
 use super::error::{CodegenError, CodegenKind};
@@ -426,7 +427,7 @@ impl TypeBuilder {
         owner: &str,
         expr: &Expr<I>,
     ) -> Result<TypeDefKind, CodegenError> {
-        if expr.rest.is_empty() {
+        if expr.is_single() {
             return Ok(TypeDefKind::Struct {
                 fields: self.fields_of_sequence(owner, &expr.first)?,
             });
@@ -491,8 +492,8 @@ impl TypeBuilder {
         owner: &str,
         expr: &ExprWithSuffix<I>,
     ) -> Result<FieldType, CodegenError> {
-        match expr {
-            ExprWithSuffix::Grouped { target, suffix } => match SuffixOp::of(suffix) {
+        match Suffixed::of(expr) {
+            Suffixed::Repeated { target, op } => match op {
                 SuffixOp::Star(_) => self.repeated(target, 0, None, owner, expr),
                 SuffixOp::Question(_) => Ok(FieldType::Opt(Box::new(self.leaf(owner, target)?))),
                 SuffixOp::Plus(_) => self.repeated(target, 1, None, owner, expr),
@@ -506,11 +507,11 @@ impl TypeBuilder {
                     self.counted(target, min, max, owner, &expr.to_span())
                 }
             },
-            ExprWithSuffix::Concat { target, suffix, .. } => Ok(FieldType::Concat {
+            Suffixed::Concat { target, suffix } => Ok(FieldType::Concat {
                 first: Box::new(self.leaf(owner, target)?),
                 second: Box::new(self.ty(owner, suffix)?),
             }),
-            ExprWithSuffix::Followed { target, suffix, .. } => {
+            Suffixed::Followed { target, suffix } => {
                 let item = self.leaf(owner, target)?;
                 let next = self.ty(owner, suffix)?;
 
@@ -522,7 +523,7 @@ impl TypeBuilder {
                     },
                 )))
             }
-            ExprWithSuffix::Except { target, tokens, .. } => {
+            Suffixed::Except { target, tokens } => {
                 let item = self.leaf(owner, target)?;
                 let removed = self.leaf(owner, tokens)?;
 
@@ -615,20 +616,18 @@ impl TypeBuilder {
         owner: &str,
         expr: &ExprWithoutSuffix<I>,
     ) -> Result<FieldType, CodegenError> {
-        match expr {
+        match Operand::of(expr) {
             // A literal is a token of its own, shared between every rule that
             // writes it the same way.
-            ExprWithoutSuffix::Str(lit) => Ok(FieldType::Named(self.literal(lit)?)),
-            ExprWithoutSuffix::Unicode(lit) => Ok(FieldType::Named(self.code_point(lit)?)),
-            ExprWithoutSuffix::Ident(ident) => {
-                self.reference(owner, ident.0.as_str(), &ident.to_span())
-            }
-            ExprWithoutSuffix::Call(angle) => self.call(angle.body.0.as_str(), &angle.to_span()),
-            ExprWithoutSuffix::Set(bracket) => self.set(owner, bracket),
-            ExprWithoutSuffix::Paren(paren) => self.group(owner, &paren.body),
+            Operand::Str(lit) => Ok(FieldType::Named(self.literal(lit)?)),
+            Operand::Unicode(lit) => Ok(FieldType::Named(self.code_point(lit)?)),
+            Operand::Reference(ident) => self.reference(owner, ident.0.as_str(), &ident.to_span()),
+            Operand::External(angle) => self.call(angle.body.0.as_str(), &angle.to_span()),
+            Operand::Set(bracket) => self.set(owner, bracket),
+            Operand::Group(body) => self.group(owner, body),
             // `~` in a rule of nodes asks about text and takes one character of
             // it, so it is a token rather than a pair of fields.
-            ExprWithoutSuffix::Tilde(_, bracket) => self.tilde(owner, bracket),
+            Operand::Complement(bracket) => self.tilde(owner, bracket),
         }
     }
 
@@ -753,16 +752,16 @@ impl TypeBuilder {
         owner: &str,
         expr: &Expr<I>,
     ) -> Result<FieldType, CodegenError> {
-        if expr.rest.is_empty() {
+        if expr.is_single() {
             return self.alternative(owner, &expr.first);
         }
 
         // Several ways of being read, each settled as the sequence it offers. The
         // trivia inside one way belongs to that way alone, which is what the
         // settling of [`FieldType::Alts`] goes back over them for.
-        let mut alts = vec![self.alternative(owner, &expr.first)?];
+        let mut alts = vec![];
 
-        for (_, seq) in &expr.rest {
+        for seq in expr.branches() {
             alts.push(self.alternative(owner, seq)?);
         }
 
@@ -843,9 +842,7 @@ impl TypeBuilder {
         // The alternatives as they were written, because one of them cannot be
         // named before all of them have been read: what a variant is called is
         // whichever operand none of its siblings has at the same place.
-        let mut alts = vec![&expr.first];
-
-        alts.extend(expr.rest.iter().map(|(_, alts)| alts));
+        let alts: Vec<&ExprNoTopAlts<I>> = expr.branches().collect();
 
         let shapes: Vec<Vec<String>> = alts
             .iter()
@@ -1306,61 +1303,57 @@ fn overlaps(a: &[String], b: &[String]) -> bool {
 /// it stands even where the settling folds it away, since it is the rule as it
 /// was written that says which alternative this is.
 fn operand_names<I: UnsynInput>(seq: &ExprNoTopAlts<I>) -> Vec<String> {
-    let mut names = vec![operand_name(&seq.first)];
-
-    names.extend(seq.rest.iter().map(|(_, operand)| operand_name(operand)));
-
-    names
+    seq.elements().map(operand_name).collect()
 }
 
 /// What one operand is called among the operands of its alternative.
+///
+/// The names are the ones the generated file has always carried, so they outlive
+/// the shape they were read off: the view of an operand says `Complement` here
+/// and the type it names is still the one written for a `~`.
 fn operand_name<I: UnsynInput>(expr: &ExprNoTopAlt<I>) -> String {
     match expr {
-        // The word or the token an operand is built on is what it is called.
-        ExprNoTopAlt::WithoutSuffix(ExprWithoutSuffix::Ident(ident))
-            if ident.0.as_str() != WILDCARD =>
-        {
-            keyword_name(ident.0.as_str())
-        }
-        // The wildcard is a token of any one character, which is what it is
-        // named for; the underscore it is written with names no type.
-        ExprNoTopAlt::WithoutSuffix(ExprWithoutSuffix::Ident(_)) => "Any".to_owned(),
-        ExprNoTopAlt::WithoutSuffix(ExprWithoutSuffix::Str(lit)) => {
-            let (text, _) = crate::semantics::str_value(lit);
+        ExprNoTopAlt::WithoutSuffix(expr) => match Operand::of(expr) {
+            // The word or the token an operand is built on is what it is called.
+            Operand::Reference(ident) if ident.0.as_str() != WILDCARD => {
+                keyword_name(ident.0.as_str())
+            }
+            // The wildcard is a token of any one character, which is what it is
+            // named for; the underscore it is written with names no type.
+            Operand::Reference(_) => "Any".to_owned(),
+            Operand::Str(lit) => {
+                let (text, _) = crate::semantics::str_value(lit);
 
-            literal_name(&text)
-        }
-        ExprNoTopAlt::WithoutSuffix(ExprWithoutSuffix::Unicode(lit)) => {
-            match crate::semantics::unicode_value(lit) {
+                literal_name(&text)
+            }
+            Operand::Unicode(lit) => match crate::semantics::unicode_value(lit) {
                 Ok(c) => punct_name(&c.to_string()),
                 // A code point that denotes nothing denotes no character to be
                 // named for, so it is named for what it is written with.
                 Err(_) => "Unicode".to_owned(),
-            }
-        }
-        ExprNoTopAlt::WithoutSuffix(ExprWithoutSuffix::Tilde(..)) => "Tilde".to_owned(),
-        ExprNoTopAlt::WithoutSuffix(ExprWithoutSuffix::Set(..)) => "Set".to_owned(),
-        ExprNoTopAlt::WithoutSuffix(ExprWithoutSuffix::Paren(..)) => "Group".to_owned(),
-        // An external call is named for what it calls, which the rule around
-        // it does not say.
-        ExprNoTopAlt::WithoutSuffix(ExprWithoutSuffix::Call(angle)) => {
-            keyword_name(angle.body.0.as_str())
-        }
-        ExprNoTopAlt::WithSuffix(ExprWithSuffix::Concat { .. }) => "Concat".to_owned(),
-        ExprNoTopAlt::WithSuffix(ExprWithSuffix::Followed { .. }) => "Followed".to_owned(),
-        ExprNoTopAlt::WithSuffix(ExprWithSuffix::Except { .. }) => "Except".to_owned(),
-        // A group of operators is one alternative, but the operator it picked is
-        // what tells two alternatives of a rule apart, so the operand is still
-        // named for the operator rather than for the group.
-        ExprNoTopAlt::WithSuffix(ExprWithSuffix::Grouped { suffix, .. }) => {
-            match SuffixOp::of(suffix) {
+            },
+            Operand::Complement(_) => "Tilde".to_owned(),
+            Operand::Set(_) => "Set".to_owned(),
+            Operand::Group(_) => "Group".to_owned(),
+            // An external call is named for what it calls, which the rule around
+            // it does not say.
+            Operand::External(angle) => keyword_name(angle.body.0.as_str()),
+        },
+        ExprNoTopAlt::WithSuffix(expr) => match Suffixed::of(expr) {
+            Suffixed::Concat { .. } => "Concat".to_owned(),
+            Suffixed::Followed { .. } => "Followed".to_owned(),
+            Suffixed::Except { .. } => "Except".to_owned(),
+            // A group of operators is one alternative, but the operator it picked is
+            // what tells two alternatives of a rule apart, so the operand is still
+            // named for the operator rather than for the group.
+            Suffixed::Repeated { op, .. } => match op {
                 SuffixOp::Star(_) => "Star",
                 SuffixOp::Question(_) => "Question",
                 SuffixOp::Plus(_) => "Plus",
                 SuffixOp::Repeat(_) => "Repeat",
             }
-            .to_owned()
-        }
+            .to_owned(),
+        },
     }
 }
 

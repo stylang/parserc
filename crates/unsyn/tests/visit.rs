@@ -475,6 +475,14 @@ fn node_types() -> BTreeSet<String> {
                 // walk has to enter the braces it stands between, while an alias of a
                 // choice is not, because the walk enters whichever of the choices the
                 // file picked. `Repeat` is the first and `SuffixGroup` the second.
+                //
+                // The rule is a proxy for "the spec writes this on the left of a
+                // production", which is the real reason, and it holds only while no
+                // delimiter-bounded group of the grammar is both unnamed on its left
+                // and named here for convenience: the `[` … `]` of a set is such a
+                // group, so aliasing it in the tree would ask this test for a
+                // `visit_set` the spec gives no node. A module that wants the long
+                // spelling shorter aliases it for itself, as `codegen` does.
                 syn::Item::Type(item)
                     if is_a_node(&item.ident, &item.generics, NOT_A_NODE)
                         && bounds_a_group(&item.ty) =>

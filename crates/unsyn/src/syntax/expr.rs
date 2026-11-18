@@ -99,6 +99,27 @@ where
     pub rest: Vec<(Or<I>, ExprNoTopAlts<I>)>,
 }
 
+impl<I> Expr<I>
+where
+    I: UnsynInput,
+{
+    /// The alternatives of the expression, in the order they were written.
+    ///
+    /// The `|` that introduced an alternative is trivia of the tree rather than
+    /// part of the alternative, so it is dropped here; the pass that has to name
+    /// the operator reads [`Expr::rest`] itself.
+    #[inline]
+    pub fn branches(&self) -> impl Iterator<Item = &ExprNoTopAlts<I>> {
+        std::iter::once(&self.first).chain(self.rest.iter().map(|(_, alts)| alts))
+    }
+
+    /// Whether the expression offers exactly one way of being read.
+    #[inline]
+    pub fn is_single(&self) -> bool {
+        self.rest.is_empty()
+    }
+}
+
 /// Turns an expression that ran into a keyword into the statement that should
 /// have ended before it.
 ///
@@ -174,8 +195,8 @@ where
     #[inline]
     pub fn bare_ref(&self) -> Option<&Ident<I>> {
         match self {
-            ExprNoTopAlt::WithoutSuffix(ExprWithoutSuffix::Ident(ident)) => Some(ident),
-            _ => None,
+            ExprNoTopAlt::WithoutSuffix(expr) => Operand::of(expr).reference(),
+            ExprNoTopAlt::WithSuffix(_) => None,
         }
     }
 }
@@ -304,6 +325,70 @@ where
 /// reads the operator back out for the code that has to know which one it was.
 pub type SuffixGroup<I> = Choice<Star<I>, Choice<Question<I>, Choice<Plus<I>, Repeat<I>>>>;
 
+/// The one form an operand that carries a suffix was written in.
+///
+/// The production puts the four quantity operators behind one alternative, so a
+/// tree stores them as the group they are ([`SuffixGroup`]) inside a single
+/// [`ExprWithSuffix::Grouped`]. This view lifts that group to the outside, which
+/// is the shape the [codegen](crate::codegen) reasons in: a repetition is asked
+/// how many times its operand is taken, and no question about a `concat` or an
+/// `except` is ever asked together with one about a `*`.
+///
+/// This is a *view* of a [`ExprWithSuffix`] and not a node: no tree stores one,
+/// and taking it costs nothing but reading a reference.
+#[derive(Debug)]
+pub enum Suffixed<'a, I>
+where
+    I: UnsynInput,
+{
+    /// The operand is taken a number of times that the operator says.
+    Repeated {
+        /// the operand the operator applies to.
+        target: &'a ExprWithoutSuffix<I>,
+        /// which of `*`, `?`, `+` or `{…}` was written.
+        op: SuffixOp<'a, I>,
+    },
+    /// `concat`, which joins what the two operands matched into one token.
+    Concat {
+        /// the operand before the keyword.
+        target: &'a ExprWithoutSuffix<I>,
+        /// the operand after the keyword.
+        suffix: &'a ExprNoTopAlt<I>,
+    },
+    /// `followed`, which asks that the operand after the keyword come next in the
+    /// source without being part of what matched here.
+    Followed {
+        /// the operand the lookahead follows.
+        target: &'a ExprWithoutSuffix<I>,
+        /// the operand after the keyword.
+        suffix: &'a ExprNoTopAlt<I>,
+    },
+    /// `except`, which removes what the operand after the keyword matches from
+    /// the operand before it.
+    Except {
+        /// the operand the removal is taken out of.
+        target: &'a ExprWithoutSuffix<I>,
+        /// the operand to take out, which cannot itself carry a suffix.
+        tokens: &'a ExprWithoutSuffix<I>,
+    },
+}
+
+impl<'a, I: UnsynInput> Suffixed<'a, I> {
+    /// The form the operand was written in, reading the group of quantity
+    /// operators through [`SuffixOp::of`] so that the four come back as four.
+    pub fn of(expr: &'a ExprWithSuffix<I>) -> Self {
+        match expr {
+            ExprWithSuffix::Grouped { target, suffix } => Self::Repeated {
+                target,
+                op: SuffixOp::of(suffix),
+            },
+            ExprWithSuffix::Concat { target, suffix, .. } => Self::Concat { target, suffix },
+            ExprWithSuffix::Followed { target, suffix, .. } => Self::Followed { target, suffix },
+            ExprWithSuffix::Except { target, tokens, .. } => Self::Except { target, tokens },
+        }
+    }
+}
+
 /// The one operator a [`SuffixGroup`] picked, flattened so that a match can name
 /// the operators instead of walking the nested [`Choice`].
 ///
@@ -376,6 +461,62 @@ where
     Ident(Ident<I>),
 }
 
+/// The one form an operand that stands alone was written in.
+///
+/// [`ExprWithoutSuffix`] keeps the delimiters and the `~` of the form it holds,
+/// which is what a tree must do to be able to give its source text back. A pass
+/// that only wants to know *what the operand is* has no use for a `~` it will
+/// never read, nor for peeling the brackets off a set, nor for reaching through
+/// the parentheses of a group to the expression inside. This view is that second
+/// question, asked once instead of once per pass.
+///
+/// This is a *view* of an [`ExprWithoutSuffix`] and not a node: no tree stores
+/// one, and taking it costs nothing but reading a reference.
+#[derive(Debug)]
+pub enum Operand<'a, I>
+where
+    I: UnsynInput,
+{
+    /// `[…]`, the members of which are the values the set denotes.
+    Set(&'a Bracket<I, Punctuated<SetItem<I>, Comma<I>>>),
+    /// `~ […]`, the members of which are the values refused here.
+    Complement(&'a Bracket<I, Punctuated<SetItem<I>, Comma<I>>>),
+    /// `(<expr>)`, one operand written as several.
+    Group(&'a Expr<I>),
+    /// `<…>`, a call of an external the caller provides.
+    External(&'a Angle<I, Ident<I>>),
+    /// A literal string, as in `'a'`.
+    Str(&'a LitStr<I>),
+    /// A literal code point, as in `U+0009`.
+    Unicode(&'a LitUnicode<I>),
+    /// A reference to another node by name.
+    Reference(&'a Ident<I>),
+}
+
+impl<'a, I: UnsynInput> Operand<'a, I> {
+    /// The form the operand was written in.
+    pub fn of(expr: &'a ExprWithoutSuffix<I>) -> Self {
+        match expr {
+            ExprWithoutSuffix::Set(bracket) => Self::Set(bracket),
+            ExprWithoutSuffix::Tilde(_, bracket) => Self::Complement(bracket),
+            ExprWithoutSuffix::Paren(paren) => Self::Group(&paren.body),
+            ExprWithoutSuffix::Call(angle) => Self::External(angle),
+            ExprWithoutSuffix::Str(lit) => Self::Str(lit),
+            ExprWithoutSuffix::Unicode(lit) => Self::Unicode(lit),
+            ExprWithoutSuffix::Ident(ident) => Self::Reference(ident),
+        }
+    }
+
+    /// The name the operand refers to, where it is nothing but a bare reference
+    /// to it: `A`, but neither `[A]` nor `(A)`.
+    pub fn reference(&self) -> Option<&'a Ident<I>> {
+        match self {
+            Operand::Reference(ident) => Some(ident),
+            _ => None,
+        }
+    }
+}
+
 /// One member of a set.
 ///
 /// The four forms denote values of three kinds: one character (`'a'`, `U+0061`,
@@ -396,6 +537,50 @@ where
     Unicode(LitUnicode<I>),
     /// A reference to another node by name.
     Ident(Ident<I>),
+}
+
+/// The one form a member of a set was written in.
+///
+/// The four forms denote values of three kinds and a name, and every pass that
+/// reads a set reads it member by member rather than as an expression, so this
+/// view asks the question once: it differs from [`Operand`] in that a member may
+/// be a range and an operand may not.
+///
+/// This is a *view* of a [`SetItem`] and not a node: no tree stores one, and
+/// taking it costs nothing but reading a reference.
+#[derive(Debug)]
+pub enum SetMember<'a, I>
+where
+    I: UnsynInput,
+{
+    /// `a-b`, the two ends of which the semantic analysis asks to be characters.
+    Range(&'a Range<I>),
+    /// A literal string.
+    Str(&'a LitStr<I>),
+    /// A literal code point.
+    Unicode(&'a LitUnicode<I>),
+    /// A reference to another node by name.
+    Reference(&'a Ident<I>),
+}
+
+impl<'a, I: UnsynInput> SetMember<'a, I> {
+    /// The form the member was written in.
+    pub fn of(item: &'a SetItem<I>) -> Self {
+        match item {
+            SetItem::Range(range) => Self::Range(range),
+            SetItem::Str(lit) => Self::Str(lit),
+            SetItem::Unicode(lit) => Self::Unicode(lit),
+            SetItem::Ident(ident) => Self::Reference(ident),
+        }
+    }
+
+    /// The name the member refers to, where the member is nothing but that name.
+    pub fn reference(&self) -> Option<&'a Ident<I>> {
+        match self {
+            SetMember::Reference(ident) => Some(ident),
+            _ => None,
+        }
+    }
 }
 
 /// The bounds of a set of characters or strings written with a `-`.

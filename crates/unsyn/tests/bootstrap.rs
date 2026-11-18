@@ -187,7 +187,11 @@ fn the_spec_names_the_types_the_crate_already_has() {
         "InnerBlockDoc",
         "OuterLineDoc",
         "OuterBlockDoc",
-        // The nodes of the tree itself.
+        // The nodes of the tree itself, from the file down to one operand.
+        "Crate",
+        "Item",
+        "InnerDoc",
+        "OuterDoc",
         "Stmt",
         "Expr",
         "ExprNoTopAlt",
@@ -242,9 +246,12 @@ fn every_sum_type_of_the_generated_parser_is_a_production() {
         })
         .collect();
 
-    // The five rules of the spec that are a choice of several ways are exactly
+    // The eight rules of the spec that are a choice of several ways are exactly
     // the types that say which way was read; nothing a rule only holds earns
-    // one, which is why the comment rules and the escapes are not here.
+    // one, which is why the comment rules and the escapes are not here. The last
+    // three are the file itself: which of the two documents and the whitespace it
+    // was written with came first is a thing the file says, and the rule above
+    // them, `Crate`, holds two lists and so earns a struct instead.
     assert_eq!(
         sums,
         [
@@ -252,7 +259,10 @@ fn every_sum_type_of_the_generated_parser_is_a_production() {
             "ExprWithoutSuffix",
             "ExprWithSuffix",
             "Range",
-            "SetItem"
+            "SetItem",
+            "Item",
+            "OuterDoc",
+            "InnerDoc",
         ],
         "{sums:?}"
     );

@@ -50,5 +50,9 @@ name = "generated"
 required-features = ["codegen", "runtime"]
 
 [[test]]
+name = "shape"
+required-features = ["codegen"]
+
+[[test]]
 name = "visit"
 required-features = ["codegen"]

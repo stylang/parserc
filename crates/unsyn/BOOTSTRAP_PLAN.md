@@ -585,26 +585,126 @@ fixture `tests/data/spec.rs` 上同一违规有六个：`NUMBER1`（`DIGIT ( DIG
   - 接口里有两个成员**规范给不出名字**：`LeadingKey`（规范把三种声明关键字写成一条
     `lexer LeadingKeywords`）与 `Repeat`（规范左侧是 `'{' … '}'` 整段）。它们不是漏网，
     是 P6 的活，所以这里不悄悄改名。
-- [ ] **V2 把 `semantics/check.rs`、`value.rs`、`graph.rs` 改成 `impl Visit`**：一个
+- [x] **V2 把 `semantics/check.rs`、`value.rs`、`graph.rs` 改成 `impl Visit`**：一个
       pass 只写它关心的那几个方法，其余靠默认体往下走；
-      `validate_expr(expr, report)` 变成 `expr.visit(&mut Checker { report })` 那个形状。
-      三个文件现有的测试模块是等价证明，迁移时逐字保留。
-- [ ] **V3 把 `src/codegen/*` 改成读接口而不是读类型**：`TypeBuilder`、`FieldType`、
-      `pattern.rs`、`render.rs`、`scan.rs` 一律不再 `match` 手写节点类型。V3 之后
-      `codegen` 才能同时服务手写树与生成树，P6 才有得谈。
+      `validate_expr(expr, report)` 变成 `Checker { report }.visit_expr(expr)` 那个形状。
+      三个文件现有的测试模块**逐字未动**，它们就是等价证明（迁移前后都是 182 lib 全绿，
+      其中 `semantics::check::tests` 13 条、`semantics::value::tests` 6 条、
+      `semantics::graph::tests` 7 条）。
+  - `check.rs`：6 个互相调用的 `validate_*`（`validate_alts`/`validate_alt`/
+    `validate_with_suffix`/`validate_without_suffix` 加入口）塌成 `Checker` 一个
+    `impl Visit` 的 2 个方法（`visit_expr_without_suffix`、`visit_repeat`）+ 一个空的
+    `visit_input`。集合、字面量在 `visit_expr_without_suffix` 里判，重复次数在
+    `visit_repeat` 里判，其余靠 `walk::walk_*` 接力。旧链路只经
+    `SuffixOp::of(suffix) == Repeat` 到达 `Repeat`，新链路只经 `walk_suffix_group` 到达
+    `visit_repeat`，而 `SuffixGroup` 四个分支里只有 `Repeat` 是节点，所以每个 `Repeat`
+    仍恰好报一次（`invalid_repetition_bounds_are_reported`、
+    `the_lower_bound_of_a_repetition_is_evaluated` 两条钉住）。诊断的文字与先后都没变，
+    因为 walk 的顺序就是文件里的顺序，而旧链路也是按 `target` 再 `suffix`/`tokens` 走。
+  - `graph.rs`：三族公共遍历 `walk_refs`/`walk_calls`/`walk_sequences` 各塌成一个
+    `impl Visit`（`Refs`/`Calls`/`Sequences`，各一个方法 + 空的 `visit_input`），
+    945 → 841 行，删掉 15 个纯接力函数。三个 pass 的公共签名（`walk_refs(&Expr, &mut F)`）
+    与调用方一字未改。`Refs` 是三个里唯一必须自己分派变体的：裸名字与集合成员是依赖，
+    而 `<call>` 里的名字不是（它是调用方在 build 时给的外部链接），所以它在
+    `visit_expr_without_suffix` 里判形状，而不是覆盖 `visit_ident` —— 后者会把调用目标
+    也算成引用。`Calls`/`Sequences` 各只需一个方法，是因为它们要找的东西（一个 `Call`、
+    一条 `ExprNoTopAlts`）在树里只有一种位置。
+  - **`value.rs` 只搬了该搬的那一个**：`str_value` 改成 `Decoder`（4 个方法，
+    `#[derive(Default)]`，无泛型字段），`StrSegment` 的 4 路 `match` 交给默认的
+    `visit_str_segment` 去分派，三个 escape 方法**不再往下走**，于是 `visit_input` 只会
+    收到「没有转义的普通文本」。`unicode_char`/`dec_usize` 这类不迁：它们读的是**单个
+    token 的文本**，不是树上的下行，`Visit` 对它们是零收益。
+  - **`graph.rs` 的 `_nullable`/`_first`/`_same_offset` 三族不迁**，这是本轮对原计划的一处
+    收窄。它们不是 walk，是**带回程值的折叠**：`with_suffix_nullable` 要 `bool`，
+    `with_suffix_first` 要在第一个必须非空的操作数处停，`with_suffix_same_offset` 要把
+    `table`/`nullable`/`&mut names` 三份上下文一路传下去。默认体只能往下走、不能往回算，
+    硬套 `Visit` 只会把每个 `bool` 变成 `&mut self` 上的一个累加器加一处"要不要继续"
+    的旗标，读起来比现在差，而且它们 `match` 的 `ExprWithSuffix`/`ExprWithoutSuffix`
+    都是规范里**有名字的左侧**，生成树会给出同名同构的类型，所以留着它们并不挡住 P6。
+    真正会挡 P6 的只有那种自己手搓下行链路的代码，本轮已经把这种代码清光了。
+- [x] **V3 让 `codegen` 与 `semantics` 都不再命名节点的形状**：三个被产生式左侧
+      命名的类型 —— `ExprWithoutSuffix`、`ExprWithSuffix`、`SetItem` —— 的变体名，
+      除了 `src/syntax/`（它们就写在那儿）和 `src/visit/walk.rs`（它要把一个节点拆成
+      token 和 punct，只能问形状），全 crate 不再有任何一处 `match` 或路径写它们。
+      做法不是把折叠改写成 visitor，而是**沿用 `SuffixOp::of`/`RepeatBound::of` 已经在
+      用的视图枚举**：每种形状在哪一个地方回答一次"这是什么形状"，下游就不再有意见。
+      `syntax/expr.rs`（现 **974** 行，比上一个提交净增 185 行）新增三个视图：
+      - `Operand`（7 个：`Set/Complement/Group/External/Str/Unicode/Reference`）——
+        一个操作数在序列里的七种可能，`~[…]` 与 `[…]` 因此第一次有了两个**不同**的
+        名字而不是同一对括号上的两次 `match`；`reference()` 是给"只有名字才是依赖"的
+        那些 pass 的出口，`graph.rs` 里手搓的 `ExprWithSuffix::Concat/Followed` 两处
+        `match` 由此删掉（945 → 841 → **820** 行，`check.rs` 620 → 649 → **650**）。
+      - `Suffixed`（4 个：`Repeated/Concat/Followed/Except`）—— `ExprWithSuffix` 的四
+        种形状；`Grouped` 这个**手写的变体名**（它写的是 `SuffixGroup` 那棵 `Choice`
+        嵌套，规范左侧并不叫它）只活在这一处翻译里，下游一律问 `Repeated{target, op}`。
+      - `SetMember`（4 个：`Range/Str/Unicode/Reference`）—— `SetItem` 的四种形状，
+        `semantics/check.rs` 里那处 `matches!` 现在问它。名字不叫 `Member`：
+        `check.rs` 自己有一个私有 `struct Member`，那是"一个成员 denote 了哪些值"，
+        与形状无关。
+      改的下游：`codegen/pattern.rs`（`expr`/`alts`/`with_suffix`/`operand`/`set_item`）、
+      `codegen/types.rs`（`with_suffix`/`leaf`/`operand_name`/`kind`/`group`/`enum_of`），
+      并且都改用 `Expr::branches()` / `ExprNoTopAlts::elements()` / `Expr::is_single()`
+      这几个 `syntax` 自己的读法，而不是 `match e { Expr { first, rest } }` 去拆字段。
+      `types.rs::operand_name` **发出的名字一个都没变**（`Tilde/Set/Group/Any/Concat/
+      Followed/Except/Star/Question/Plus/Repeat/Unicode`），它们烙在生成类型名和
+      `tests/data/mini.rs` 里。
+  - 门禁：`tests/shape.rs`（**3 条**，`required-features = ["codegen"]`）。它用
+    `proc-macro2` 的词法扫 `src/` 下除 `syntax/`、`visit/` 外的每一个 `.rs`（实测
+    ≥10 个文件），断言没有 `Shape :: 大写名字`。走词法不走 `syn` 的 AST，是因为要找的
+    东西就是一对 token，而 AST 走查既漏 `matches!` 里的模式（那不是表达式）、又要为
+    每个表达式位置写一遍 Visit。两条自证：`the_scan_is_not_blind` 钉住它对 inline 片段
+    恰好报出三处（并放过 `SetItem::parse`、`Option<ExprWithSuffix<I>>`、
+    `<ExprWithoutSuffix<I> as Default>::default()` 这三处合法用法）；
+    `the_two_excused_directories_do_indeed_name_the_shapes` 钉住两个豁免目录**确实**在
+    命名形状（`syntax/expr.rs` 24 处、`visit/walk.rs` 15 处），否则豁免就是白给的。
+    把违规临时写进 `src/` 一个新文件，主测试确实失败（已验后删除）。
 - [ ] **V4 `VisitMut`/`Fold`**：这里没有要改写树的 pass，所以先不做；它们与 `Visit`
       共用同一份"节点清单"，而那份清单现在由 `tests/visit.rs` 从源码里读出来。
+      V3 之后这条更没必要了：三个视图枚举本身就是"与类型无关的形状"，一个要改写树的
+      pass 可以照着它们写。
 
 ## P6 — 自举验收（本计划的终点）
 
-- [ ] **先补规范的洞**：`bootstrap.uns` 里**没有文件级规则**。手写的 `Crate{items: Vec<Item>}`
-      与 `Item = S | Stmt | InnerDoc | OuterDoc` 没有被自描述，因此生成的 parser 无从复现它。
-      建议加：
-      `syntax Item -> S | InnerLineDoc | OuterLineDoc | InnerBlockDoc | OuterBlockDoc | Stmt;`
-      `syntax Crate -> Item*;`
-      注意 `Item -> S | …` 里对 trivia 节点的**裸引用**会被 `fold_separators` 保留
-      （整条序列只有它自己），所以这一条能工作；生成的 `Crate` 会是 `Vec<Item>` 的 newtype
-      而不是命名字段 struct —— 按 P0 的「行为等价」决定，可以接受。
+- [x] **先补规范的洞：文件级规则** —— 已加。`bootstrap.uns` 现在自描述整个文件，从 36 条
+      规则涨到 **40** 条（175 行），末尾追加的四条：
+      ```
+      syntax Stmt -> LeadingKeywords Ident '->' Expr ';';   -- 原有的最后一条
+      syntax Item -> OuterDoc | S | Stmt;
+      syntax OuterDoc -> OuterBlockDoc | OuterLineDoc;
+      syntax InnerDoc -> InnerBlockDoc | InnerLineDoc;
+      syntax Crate -> InnerDoc* Item*;
+      ```
+      形状与手写的 `syntax/item.rs` 逐一对应（`Item` 三个变体、`OuterDoc`/`InnerDoc` 各两个、
+      `Crate` 两个列表），而且**照手写的样子写，不照本计划原先的建议写**：原建议把四个
+      doc 规则直接算进 `Item`（`S | InnerLineDoc | OuterLineDoc | …`），那会多出两个
+      手写树里根本没有的节点类型，而且把“文件级文档”与“属于后面那条语句的外部文档”
+      两种归属弄成一样。名字全部沿用 Rust 侧已有的 `Crate`/`Item`/`InnerDoc`/`OuterDoc`，
+      所以 `tests/visit.rs` 的节点清单（50 个）与 `visit_crate`/`visit_item`/…本来就在，
+      一行也没动。
+  - 与规范一起改的两处测试断言（`tests/bootstrap.rs`）：生成的 sum 类型从 5 个涨到
+      **8** 个（新 `Item`/`OuterDoc`/`InnerDoc`；`Crate` 是两条重复，所以是 struct），
+      `the_spec_names_the_types_the_crate_already_has` 的名字清单补上这四个。两条都是
+      “规范声明了什么”的清单，规范涨了它们就得跟着涨，不是回归。
+  - 语义分析对新规则**没有报模糊**：`analyze` 过、lint 空（`bootstrap_semantics` 钉住）。
+  - **新发现的第三个洞，本轮没堵**：重复一个**节点**时的 trivia 归属。生成器对
+      `Crate -> InnerDoc* Item*` 产出的是
+      `Crate(Vec<(Option<S>, InnerDoc)>, Option<S>, Vec<(Option<S>, Item)>)`，而手写的是
+      `Crate { inner_docs: Vec<InnerDoc>, items: Vec<Item> }` 加 `InnerDoc`/`OuterDoc` 自己
+      带一个前置 `Option<S>` —— 同一个空白串在两边**归属不同的位置**，而生成侧的
+      `Item::S` 变体因为前面的空隙先吃光 trivia 而几乎不可能被选中。
+      在 DSL 里写成 `S? InnerBlockDoc` 试过，反而更差：每个变体拿到**两个** `Option<S>`
+      （一个是写的 `S?`，一个是 `S?` 与终结符之间按“宁可多不可少”规则补的空隙）。
+      也就是说 P1–P3 那四条归属规则只判**终结符**，判不了“一个节点的全部分支是否都
+      已经吃光前导空白”（`eats_leading` 对 `Named` 只查终结符归属表，不下钻）。要堵
+      它得先给 `eats_leading` 加上对节点的递归定义，那是 P6 等价测试真正会碰到的第一件事。
+  - 同样不可表达的：`Crate::parse` 手写的“读到文件末尾，否则 `SyntaxKind::Eof`”那一条
+      （`syntax/item.rs:93-121`）。DSL 里没有任何“必须吃光输入”的算子，`parserc` 也只
+      有 `Input::is_empty`；本轮只记录，不在规范里造伪表达。
+- [ ] **P6.1 — 节点级 `eats_leading`**（上面那个洞的堵法）：把 `eats_leading`/`eats_trailing`
+      从“只查终结符归属表”扩展成对 `Named` 递归（enum 的全部分支都吃 → 吃；struct 看
+      首字段），于是 `Item*` 不再需要空隙，`Item::S` 也重新可达。同时要么给 `Crate`
+      一类“必须读到末尾”的语义找一个 DSL 写法，要么把它定为生成器的入口约定（由
+      调用方在 `parse` 之后检查 `is_empty`），两条路都得先定后做。
 - [x] **第二个规范洞（本轮新发现）：`Stmt` 的关键字** —— 已定：**改手写的一侧**。
       `bootstrap.uns:167` 把三种声明写成**一条**规则
       `syntax Stmt -> LeadingKeywords Ident '->' Expr ';'`，生成的是四元素扁平
@@ -641,7 +741,7 @@ fixture `tests/data/spec.rs` 上同一违规有六个：`NUMBER1`（`DIGIT ( DIG
 
 | # | 命令 | 期望 |
 | --- | --- | --- |
-| 1 | `cargo test -p unsyn --all-features` | 全绿（lib / bootstrap / codegen / dump / generated / visit / doctests） |
+| 1 | `cargo test -p unsyn --all-features` | 全绿（lib / bootstrap / codegen / dump / generated / visit / shape / doctests） |
 | 2 | `cargo test --workspace` | 所有 `test result: ok` |
 | 3 | `cargo test -p unsyn --no-default-features --features runtime` | 全绿 |
 | 4 | `cargo test -p unsyn --features codegen` | 全绿 |
@@ -688,7 +788,51 @@ fixture `tests/data/spec.rs` 上同一违规有六个：`NUMBER1`（`DIGIT ( DIG
 > 条）；6 五组（含 `--document-private-items`）均 0 警告；7 干净。`tests/data/mini.rs`
 > 未动（这一轮没碰 codegen，fixture 的 drift 测试原样通过）。
 >
+> V2 那一轮（`semantics/` 改成走接口，见上面的 V2）跑过全表：1 全绿，数字与上一轮完
+> 全一致（182 lib / 6 bootstrap / 19 codegen / 1 dump / 27 generated / 5 visit /
+> 3 doctests）—— 这是本轮的要点：一条测试都没改，也没新增测试；2 十六行全 `ok`；
+> 3 runtime-only 2 绿；4 `--features codegen` 与 1 同数，`--no-default-features
+> --features codegen` 仍是 180 lib + 6 + 19 + 1 + 5 + 3 全绿；5 三组均在 `crates/unsyn`
+> 里 0 条；6 四组均 0 警告（`--all-features --document-private-items` 这一组一开始揭出
+> 两条本轮新写的冗余显式链接 `[`walk`](crate::visit::walk)`、
+> `[`Visit`](crate::visit::Visit)`，已改成裸链接）；7 干净。行数：`check.rs` 649（迁移前
+> 620，涨的是三个 pass 各自要写的空 `visit_input` 与注释）、`graph.rs` 945 → **841**、
+> `value.rs` 196 → 233。`tests/data/mini.rs` 未动。
+>
+> **一条给 P6 的接口观察**（本轮实测撞到的）：不变量 3「叶子不许跳过任何 token」要求
+> `walk_lit_str` 把两侧引号也当 `visit_input` 报出去，于是**任何想「只要字面量的内容」
+> 的 pass 都不能从 `visit_lit_str` 进入**，必须自己走到 `lit.content` 上去（`Decoder` 就是
+> 这么做的，这也是全 crate 里唯一一处需要知道 `LitStr` 字段名的 pass）。可选的改法是把
+> `StrSegment::CharWithException` 升成一个真节点（那样它就有自己的方法可以覆盖），代价是
+> `tests/visit.rs` 的节点清单从 50 涨到 51、且要为它补一条产生式。本轮没动，因为现状并不
+> 阻塞任何事。
+>
+> V3 那一轮（视图枚举，见上面的 V3）跑过全表：1 全绿（182 lib / 6 bootstrap /
+> 19 codegen / 1 dump / 27 generated / 5 visit / **3 shape** / 3 doctests），2 十七行全
+> `ok`（比 V2 多一行，就是 `shape` 这个测试目标）；3 runtime-only 2 绿；
+> 4 `--no-default-features --features codegen` 是 180 lib + 6 + 19 + 1 + 3 shape + 5
+> visit + 3 全绿（`generated` 要 `runtime`，那一组不跑）；5 均在 `crates/unsyn` 里 0 条
+> （仍只有既有的 `parserc` 4 条）；6 四组 feature 组合（含 `--document-private-items`
+> 那两组）均 0 警告；7 干净。**一条测试都没改**，fixture `tests/data/mini.rs` 也未动。
+> 行数：`syntax/expr.rs` 净增 185（上一个提交以来），`semantics/graph.rs` 841 → 820，
+> `semantics/check.rs` 649 → 650，`tests/shape.rs` 新 242。
+>
+> P6.0 那一轮（文件级规则，见上面的 P6）跑过全表：1 全绿（182 lib / 6 bootstrap /
+> 19 codegen / 1 dump / 27 generated / 3 shape / 5 visit / 3 doctests），2 十七行全 `ok`；
+> 3 runtime-only 2 绿；4 `--no-default-features --features codegen` 是 180 + 6 + 19 + 1 +
+> 3 + 5 + 3 全绿；5 `crates/unsyn` 里 0 条；6 `--all-features --document-private-items`
+> 0 警告；7 干净。`tests/data/mini.rs` 未动（那九条规则里没有文件级规则，新形状的
+> 影响范要到拿 `bootstrap.uns` 自己生成才量得出）。拿 `bootstrap.uns` 生成一次：
+> **105,488** 字节、60 个顶层类型、8 个 sum；`Item` 与手写同构（只是变体名不叫 `OuterDoc`
+> 而叫 `ItemOuterDoc`），`OuterDoc`/`InnerDoc`/`Crate` 则撞到上面那条归属洞。
+>
 > **两处计划本身要更正**：`codegen/matchers.rs` 连同"生成的节点类型不带 matcher"
+> 那一整个问题**已经不存在**（P5 之后 codegen 被重写过，现在是 `types`、`pattern`、
+> `scan`、`render`、`name` 五块），所以本轮原先排在 V 后面的两件小事（把生成的别名
+> 节点类型一般化、把 matcher/shape 这组名字改得一看就懂）已经没有对象，作废；
+> `src/grammar.rs`（那个临时规则头解析器）也已经删掉，`bootstrap.uns` 现在由手写
+> parser 自己读，P1 关于规则头形式的改动只当历史读。
+>
 > 那一整个问题**已经不存在**（P5 之后 codegen 被重写过，现在是 `types`、`pattern`、
 > `scan`、`render`、`name` 五块），所以本轮原先排在 V 后面的两件小事（把生成的别名
 > 节点类型一般化、把 matcher/shape 这组名字改得一看就懂）已经没有对象，作废；
@@ -710,7 +854,9 @@ fixture `tests/data/spec.rs` 上同一违规有六个：`NUMBER1`（`DIGIT ( DIG
 
 - [ ] 删除本文件里已经过时的"实测状态"数字，或把它们移到 `CHANGELOG.md` 的条目里。
 - [ ] `crates/unsyn/CHANGELOG.md` 增补 unsyn 的条目（目前为空）。
-- [ ] 已知的既有杂物（非本任务引入）：`[dev-dependencies] walkdir` 未被使用。
+- [ ] 已知的既有杂物：`[dev-dependencies] walkdir` 从 V3 起由 `tests/shape.rs` 用上了
+      （它要枚举 `src/**/*.rs`），但 `tests/visit.rs` 与 `tests/bootstrap.rs` 仍然自己
+      `fs::read_to_string` 单文件；两边统一成一种读法是 P7 的事。
 
 ---
 

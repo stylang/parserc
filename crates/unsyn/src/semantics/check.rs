@@ -18,22 +18,80 @@ use crate::{
     input::UnsynInput,
     lexical::{delimiter::Bracket, lit::LitDec, punct::Comma},
     semantics::value::{dec_usize, dec_value, str_chars, str_value, unicode_value},
-    syntax::{
-        Expr, ExprNoTopAlt, ExprNoTopAlts, ExprWithSuffix, ExprWithoutSuffix, Range, Repeat,
-        RepeatBound, SetItem, SuffixOp,
-    },
+    syntax::{Expr, ExprWithoutSuffix, Operand, Range, Repeat, RepeatBound, SetItem, SetMember},
+    visit::{Visit, walk},
 };
 
 /// Validates the literals, sets, ranges and repetitions of a node body.
 ///
+/// The descent is the one [`Visit`] gives: this pass names the two kinds of node
+/// it has something to say about and hands every other on to [`walk`], so what a
+/// body holds and in which order is written once for the whole crate rather than
+/// once per pass. Handing on is not decoration either — a set member can be a
+/// name whose range of values only the linker knows, and the ends of a range are
+/// nodes the walk has to reach anyway.
+///
 /// Every problem found is reported to `report`, so one call states all the
 /// value-level diagnostics of one definition.
 pub fn validate_expr<I: UnsynInput>(expr: &Expr<I>, report: &mut Diagnostics) {
-    validate_alts(&expr.first, report);
+    Checker { report }.visit_expr(expr);
+}
 
-    for (_, alts) in expr.rest.iter() {
-        validate_alts(alts, report);
+/// The pass that reads the values a body denotes.
+///
+/// It has no state beyond the report it writes to: what a set means is a question
+/// about one set at a time, and what a repetition counts is a question about one
+/// pair of bounds at a time, so neither needs to know where in the body it stands.
+struct Checker<'a> {
+    report: &'a mut Diagnostics,
+}
+
+impl<'ast, 'a, I: UnsynInput> Visit<'ast, I> for Checker<'a> {
+    /// The two places a set is written: a set itself, and the complement of one.
+    ///
+    /// A set is compared as a whole, because what one member adds to it is a
+    /// question about the members beside it rather than about itself. The walk
+    /// still carries on down through them, since the bounds of a range are tokens
+    /// of the file and a pass that stopped at the set would leave them unvisited.
+    fn visit_expr_without_suffix(&mut self, node: &'ast ExprWithoutSuffix<I>) {
+        match Operand::of(node) {
+            // A set is compared as a whole, because what one member adds to it is
+            // a question about the members beside it rather than about itself.
+            // A complement refuses the members of a set, which is what a set is.
+            Operand::Set(bracket) | Operand::Complement(bracket) => {
+                validate_set(bracket, &mut *self.report);
+            }
+            Operand::Str(lit) => {
+                if let Some(error) = str_value(lit).1 {
+                    self.report.push(error);
+                }
+            }
+            Operand::Unicode(lit) => {
+                if let Err(error) = unicode_value(lit) {
+                    self.report.push(error);
+                }
+            }
+            // A group holds an expression, which the walk reaches; a reference and
+            // a call hold a name, which the linker is the one to answer for.
+            Operand::Group(_) | Operand::External(_) | Operand::Reference(_) => {}
+        }
+
+        walk::walk_expr_without_suffix(self, node);
     }
+
+    /// The bounds of a repetition, which are the only numbers a body counts.
+    ///
+    /// This is entered only where the suffix on an operand *is* a `{…}`: of the
+    /// four the group of them offers, a `Repeat` is the only one that is a node.
+    fn visit_repeat(&mut self, node: &'ast Repeat<I>) {
+        validate_repeat(node, &mut *self.report);
+
+        walk::walk_repeat(self, node);
+    }
+
+    /// A token on its own says nothing about values; only the nodes it belongs to
+    /// do, and they have already had their say.
+    fn visit_input(&mut self, _input: &'ast I) {}
 }
 
 /// Iterates the items of a punctuated sequence.
@@ -43,67 +101,6 @@ pub(crate) fn items<T, P>(punctuated: &Punctuated<T, P>) -> impl Iterator<Item =
         .iter()
         .map(|(item, _)| item)
         .chain(punctuated.tail.iter().map(|tail| &**tail))
-}
-
-fn validate_alts<I: UnsynInput>(alts: &ExprNoTopAlts<I>, report: &mut Diagnostics) {
-    validate_alt(&alts.first, report);
-
-    for (_, expr) in alts.rest.iter() {
-        validate_alt(expr, report);
-    }
-}
-
-fn validate_alt<I: UnsynInput>(expr: &ExprNoTopAlt<I>, report: &mut Diagnostics) {
-    match expr {
-        ExprNoTopAlt::WithSuffix(expr) => validate_with_suffix(expr, report),
-        ExprNoTopAlt::WithoutSuffix(expr) => validate_without_suffix(expr, report),
-    }
-}
-
-fn validate_with_suffix<I: UnsynInput>(expr: &ExprWithSuffix<I>, report: &mut Diagnostics) {
-    match expr {
-        // The bounds of a repetition are part of the group, and are the only
-        // member of it with a value to check.
-        ExprWithSuffix::Grouped { target, suffix } => {
-            validate_without_suffix(target, report);
-
-            if let SuffixOp::Repeat(repeat) = SuffixOp::of(suffix) {
-                validate_repeat(repeat, report);
-            }
-        }
-        ExprWithSuffix::Concat { target, suffix, .. }
-        | ExprWithSuffix::Followed { target, suffix, .. } => {
-            validate_without_suffix(target, report);
-            validate_alt(suffix, report);
-        }
-        ExprWithSuffix::Except { target, tokens, .. } => {
-            validate_without_suffix(target, report);
-            validate_without_suffix(tokens, report);
-        }
-    }
-}
-
-fn validate_without_suffix<I: UnsynInput>(expr: &ExprWithoutSuffix<I>, report: &mut Diagnostics) {
-    match expr {
-        // A complement refuses the members of a set, which is what a set is.
-        ExprWithoutSuffix::Tilde(_, bracket) => validate_set(bracket, report),
-        // The target of a call is resolved by the linker, not here.
-        ExprWithoutSuffix::Call(_) => {}
-        // A reference carries no value to evaluate; see [`crate::semantics::Analyzer`].
-        ExprWithoutSuffix::Ident(_) => {}
-        ExprWithoutSuffix::Paren(paren) => validate_expr(&paren.body, report),
-        ExprWithoutSuffix::Set(bracket) => validate_set(bracket, report),
-        ExprWithoutSuffix::Str(lit) => {
-            if let Some(error) = str_value(lit).1 {
-                report.push(error);
-            }
-        }
-        ExprWithoutSuffix::Unicode(lit) => {
-            if let Err(error) = unicode_value(lit) {
-                report.push(error);
-            }
-        }
-    }
 }
 
 /// Validates the members of a set and reports the ones the set already says.
@@ -133,7 +130,7 @@ fn validate_set<I: UnsynInput>(
         // little of that node one file knows: only whether two *different*
         // names denote values in common is the question the file can not answer
         // (see `validate_set_item`).
-        if let SetItem::Ident(ident) = item {
+        if let Some(ident) = SetMember::of(item).reference() {
             let name = ident.0.as_str();
 
             if names.contains(&name) {
@@ -169,11 +166,11 @@ fn validate_set<I: UnsynInput>(
 /// is a name, which is compared with the names of the set beside it rather than
 /// with the values here: one file can not know what the node it names denotes.
 fn validate_set_item<I: UnsynInput>(item: &SetItem<I>, report: &mut Diagnostics) -> Option<Member> {
-    match item {
-        SetItem::Range(range) => {
+    match SetMember::of(item) {
+        SetMember::Range(range) => {
             validate_range(range, report).map(|(start, end)| Member::of_range(start, end))
         }
-        SetItem::Str(lit) => {
+        SetMember::Str(lit) => {
             // `'…'` is a string as well as a character, and a set is a union of
             // strings, so a member of any length is meaningful here.
             let (value, error) = str_value(lit);
@@ -185,7 +182,7 @@ fn validate_set_item<I: UnsynInput>(item: &SetItem<I>, report: &mut Diagnostics)
 
             Some(Member::of_value(value))
         }
-        SetItem::Unicode(lit) => match unicode_value(lit) {
+        SetMember::Unicode(lit) => match unicode_value(lit) {
             Ok(value) => Some(Member::Char(value)),
             Err(error) => {
                 report.push(error);
@@ -194,7 +191,7 @@ fn validate_set_item<I: UnsynInput>(item: &SetItem<I>, report: &mut Diagnostics)
         },
         // A repeated name is linted by `validate_set`, which is where the names
         // of a set are kept together.
-        SetItem::Ident(_) => None,
+        SetMember::Reference(_) => None,
     }
 }
 

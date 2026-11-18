@@ -4,41 +4,78 @@
 //! invalid — a `\u{…}` escape outside the Unicode range is a well-formed token
 //! but a meaningless pattern. Computing the value of a literal is therefore a
 //! semantic task and lives here.
+//!
+//! Only one of these functions descends a tree, the one that reads a string
+//! literal, and it descends by [`Visit`]. The rest decode
+//! the text of a single token, which is a question about that token's shape
+//! rather than about where it stands: `U+0041` denotes `A` whether it is a set
+//! member or the end of a range, so there is nothing for a walk to add.
 
 use parserc::syntax::Syntax;
 
 use crate::{
     errors::{SemanticsKind, UnsynError},
     input::UnsynInput,
-    lexical::lit::{AsciiEscape, LitDec, LitStr, LitUnicode, StrSegment, UnicodeEscape},
+    lexical::lit::{AsciiEscape, LitDec, LitStr, LitUnicode, QuoteEscape, UnicodeEscape},
+    visit::Visit,
 };
 
 /// Decodes the character content of a string literal.
 ///
 /// The value is always returned; the second element of the tuple reports the
 /// first malformed escape found in it, if any.
+///
+/// The segments are read through [`Visit`], which is what knows the four shapes
+/// a segment takes; the pass enters at them rather than at the whole literal,
+/// because the two quotes are how a literal was written and no character of
+/// what it denotes.
+///
+/// Each of the three escapes stops the descent where it stands, so the only text
+/// this pass ever sees is a run of plain characters.
 pub fn str_value<I: UnsynInput>(lit: &LitStr<I>) -> (String, Option<UnsynError>) {
-    let mut value = String::new();
-    let mut error = None;
+    let mut decoder = Decoder::default();
 
     for segment in &lit.content {
-        match segment {
-            StrSegment::QuoteEscape(_) => value.push('\''),
-            StrSegment::AsciiEscape(escape) => value.push(ascii_escape_value(escape)),
-            StrSegment::UnicodeEscape(escape) => match unicode_escape_value(escape) {
-                Some(c) => value.push(c),
-                None => {
-                    let err =
-                        UnsynError::Semantics(SemanticsKind::InvalidCodePoint, escape.to_span());
-                    error.get_or_insert(err);
-                    value.push(char::REPLACEMENT_CHARACTER);
-                }
-            },
-            StrSegment::CharWithException(chars) => value.push_str(chars.as_str()),
-        }
+        decoder.visit_str_segment(segment);
     }
 
-    (value, error)
+    (decoder.value, decoder.error)
+}
+
+/// The pass that spells out what a string literal denotes.
+#[derive(Default)]
+struct Decoder {
+    value: String,
+    error: Option<UnsynError>,
+}
+
+impl<'ast, I: UnsynInput> Visit<'ast, I> for Decoder {
+    /// Plain text of a literal is the characters it denotes, escape-free.
+    fn visit_input(&mut self, input: &'ast I) {
+        self.value.push_str(input.as_str());
+    }
+
+    /// An escaped quote is a quote, whatever shape the escape was written in.
+    fn visit_quote_escape(&mut self, _node: &'ast QuoteEscape<I>) {
+        self.value.push('\'');
+    }
+
+    fn visit_ascii_escape(&mut self, node: &'ast AsciiEscape<I>) {
+        self.value.push(ascii_escape_value(node));
+    }
+
+    fn visit_unicode_escape(&mut self, node: &'ast UnicodeEscape<I>) {
+        match unicode_escape_value(node) {
+            Some(c) => self.value.push(c),
+            None => {
+                self.error.get_or_insert_with(|| {
+                    UnsynError::Semantics(SemanticsKind::InvalidCodePoint, node.to_span())
+                });
+
+                self.value.push(char::REPLACEMENT_CHARACTER);
+            }
+        }
+    }
 }
 
 /// Decodes a string literal, replacing malformed escapes with `U+FFFD`.

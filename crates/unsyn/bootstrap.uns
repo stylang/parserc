@@ -165,3 +165,11 @@ syntax SetItem ->
     ;
 
 syntax Stmt -> LeadingKeywords Ident '->' Expr ';';
+
+syntax Item -> OuterDoc | S | Stmt;
+
+syntax OuterDoc -> OuterBlockDoc | OuterLineDoc;
+
+syntax InnerDoc -> InnerBlockDoc | InnerLineDoc;
+
+syntax Crate -> InnerDoc* Item*;

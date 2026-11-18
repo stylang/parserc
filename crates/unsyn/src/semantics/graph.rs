@@ -22,8 +22,10 @@ use crate::{
     lexical::{delimiter::Angle, ident::Ident},
     semantics::{NodeKind, SymbolTable, check::items, check::repeat_lower, value::str_chars},
     syntax::{
-        Expr, ExprNoTopAlt, ExprNoTopAlts, ExprWithSuffix, ExprWithoutSuffix, SetItem, SuffixOp,
+        Expr, ExprNoTopAlt, ExprNoTopAlts, ExprWithSuffix, ExprWithoutSuffix, Operand, SetMember,
+        SuffixOp, Suffixed,
     },
+    visit::{Visit, walk},
 };
 
 /// The name of the pattern that matches any single character.
@@ -204,73 +206,48 @@ fn visit_edges<'a>(
 /// Both the reference of a body and the member of a character set are reported;
 /// the `_` wildcard is reported like any other name, so the caller decides what
 /// to make of it.
+///
+/// The descent itself is [`Visit`]'s. This pass answers for one node, because
+/// that is where the meanings of a name diverge: a bare name and a set member
+/// both stand for a node of the same file, while a `<call>` names an external
+/// the file knows nothing about and is no dependency at all. That distinction
+/// belongs to the pass rather than to the walk, which owes every pass the same
+/// descent.
 pub fn walk_refs<'a, I, F>(expr: &'a Expr<I>, f: &mut F)
 where
     I: UnsynInput,
     F: FnMut(&'a Ident<I>),
 {
-    alts_refs(&expr.first, f);
-
-    for (_, alts) in expr.rest.iter() {
-        alts_refs(alts, f);
-    }
+    Refs { f }.visit_expr(expr);
 }
 
-fn alts_refs<'a, I: UnsynInput, F: FnMut(&'a Ident<I>)>(alts: &'a ExprNoTopAlts<I>, f: &mut F) {
-    alt_refs(&alts.first, f);
-
-    for (_, expr) in alts.rest.iter() {
-        alt_refs(expr, f);
-    }
+/// The pass that gathers the names a body refers to.
+struct Refs<'b, F> {
+    f: &'b mut F,
 }
 
-fn alt_refs<'a, I: UnsynInput, F: FnMut(&'a Ident<I>)>(expr: &'a ExprNoTopAlt<I>, f: &mut F) {
-    match expr {
-        ExprNoTopAlt::WithSuffix(expr) => with_suffix_refs(expr, f),
-        ExprNoTopAlt::WithoutSuffix(expr) => without_suffix_refs(expr, f),
-    }
-}
-
-fn with_suffix_refs<'a, I: UnsynInput, F: FnMut(&'a Ident<I>)>(
-    expr: &'a ExprWithSuffix<I>,
-    f: &mut F,
-) {
-    match expr {
-        // A quantity operator leaves the shape of the operand it repeats
-        // untouched, and the bounds in the `{…}` member are decimals, not names.
-        ExprWithSuffix::Grouped { target, .. } => without_suffix_refs(target, f),
-        // Whatever is excepted is still matched, so it is a dependency too.
-        ExprWithSuffix::Except { target, tokens, .. } => {
-            without_suffix_refs(target, f);
-            without_suffix_refs(tokens, f);
-        }
-        ExprWithSuffix::Concat { target, suffix, .. }
-        | ExprWithSuffix::Followed { target, suffix, .. } => {
-            without_suffix_refs(target, f);
-            alt_refs(suffix, f);
-        }
-    }
-}
-
-fn without_suffix_refs<'a, I: UnsynInput, F: FnMut(&'a Ident<I>)>(
-    expr: &'a ExprWithoutSuffix<I>,
-    f: &mut F,
-) {
-    match expr {
-        // A complement names the set it refuses, exactly as a set does.
-        ExprWithoutSuffix::Tilde(_, bracket) | ExprWithoutSuffix::Set(bracket) => {
-            for item in items(&bracket.body) {
-                if let SetItem::Ident(ident) = item {
-                    f(ident);
+impl<'ast, 'b, I: UnsynInput + 'ast, F: FnMut(&'ast Ident<I>)> Visit<'ast, I> for Refs<'b, F> {
+    fn visit_expr_without_suffix(&mut self, node: &'ast ExprWithoutSuffix<I>) {
+        match Operand::of(node) {
+            // A complement refuses the members of a set, so it depends on them
+            // exactly as a set does.
+            Operand::Set(bracket) | Operand::Complement(bracket) => {
+                for item in items(&bracket.body) {
+                    if let Some(ident) = SetMember::of(item).reference() {
+                        (self.f)(ident);
+                    }
                 }
             }
+            Operand::Reference(ident) => (self.f)(ident),
+            // A call names an external the file knows nothing about, so it is no
+            // dependency at all; the rest of the forms hold no name.
+            Operand::External(_) | Operand::Group(_) | Operand::Str(_) | Operand::Unicode(_) => {}
         }
-        // A call names an external from outside the file, so it is not a reference.
-        ExprWithoutSuffix::Call(_) => {}
-        ExprWithoutSuffix::Ident(ident) => f(ident),
-        ExprWithoutSuffix::Paren(paren) => walk_refs(&paren.body, f),
-        ExprWithoutSuffix::Str(_) | ExprWithoutSuffix::Unicode(_) => {}
+
+        walk::walk_expr_without_suffix(self, node);
     }
+
+    fn visit_input(&mut self, _input: &'ast I) {}
 }
 
 /// Calls `f` with every `<call>` of `expr`, in source order.
@@ -279,68 +256,31 @@ where
     I: UnsynInput,
     F: FnMut(&'a Angle<I, Ident<I>>),
 {
-    alts_calls(&expr.first, f);
-
-    for (_, alts) in expr.rest.iter() {
-        alts_calls(alts, f);
-    }
+    Calls { f }.visit_expr(expr);
 }
 
-fn alts_calls<'a, I: UnsynInput, F: FnMut(&'a Angle<I, Ident<I>>)>(
-    alts: &'a ExprNoTopAlts<I>,
-    f: &mut F,
-) {
-    alt_calls(&alts.first, f);
-
-    for (_, expr) in alts.rest.iter() {
-        alt_calls(expr, f);
-    }
+/// The pass that gathers the external calls of a body.
+///
+/// A call is one of the seven shapes a bare operand takes and no other shape
+/// holds one, so reporting it where the operand is read reaches every call of
+/// the body once; the name inside the angle brackets is a token of the call and
+/// not a reference, which is why the walk into it reports nothing here.
+struct Calls<'b, F> {
+    f: &'b mut F,
 }
 
-fn alt_calls<'a, I: UnsynInput, F: FnMut(&'a Angle<I, Ident<I>>)>(
-    expr: &'a ExprNoTopAlt<I>,
-    f: &mut F,
-) {
-    match expr {
-        ExprNoTopAlt::WithSuffix(expr) => with_suffix_calls(expr, f),
-        ExprNoTopAlt::WithoutSuffix(expr) => without_suffix_calls(expr, f),
-    }
-}
-
-fn with_suffix_calls<'a, I: UnsynInput, F: FnMut(&'a Angle<I, Ident<I>>)>(
-    expr: &'a ExprWithSuffix<I>,
-    f: &mut F,
-) {
-    match expr {
-        // The bounds inside the group's `{…}` member are decimals, which call
-        // no external; only the operand can.
-        ExprWithSuffix::Grouped { target, .. } => without_suffix_calls(target, f),
-        ExprWithSuffix::Except { target, tokens, .. } => {
-            without_suffix_calls(target, f);
-            without_suffix_calls(tokens, f);
+impl<'ast, 'b, I: UnsynInput + 'ast, F: FnMut(&'ast Angle<I, Ident<I>>)> Visit<'ast, I>
+    for Calls<'b, F>
+{
+    fn visit_expr_without_suffix(&mut self, node: &'ast ExprWithoutSuffix<I>) {
+        if let Operand::External(call) = Operand::of(node) {
+            (self.f)(call);
         }
-        ExprWithSuffix::Concat { target, suffix, .. }
-        | ExprWithSuffix::Followed { target, suffix, .. } => {
-            without_suffix_calls(target, f);
-            alt_calls(suffix, f);
-        }
-    }
-}
 
-fn without_suffix_calls<'a, I: UnsynInput, F: FnMut(&'a Angle<I, Ident<I>>)>(
-    expr: &'a ExprWithoutSuffix<I>,
-    f: &mut F,
-) {
-    match expr {
-        // A complement refuses a set, and a set holds no external call.
-        ExprWithoutSuffix::Tilde(..)
-        | ExprWithoutSuffix::Set(_)
-        | ExprWithoutSuffix::Str(_)
-        | ExprWithoutSuffix::Unicode(_) => {}
-        ExprWithoutSuffix::Call(call) => f(call),
-        ExprWithoutSuffix::Ident(_) => {}
-        ExprWithoutSuffix::Paren(paren) => walk_calls(&paren.body, f),
+        walk::walk_expr_without_suffix(self, node);
     }
+
+    fn visit_input(&mut self, _input: &'ast I) {}
 }
 
 /// Calls `f` with every sequence of operands of `expr`, in source order.
@@ -360,71 +300,28 @@ where
     I: UnsynInput,
     F: FnMut(&'a ExprNoTopAlts<I>),
 {
-    alts_sequences(&expr.first, f);
-
-    for (_, alts) in expr.rest.iter() {
-        alts_sequences(alts, f);
-    }
+    Sequences { f }.visit_expr(expr);
 }
 
-fn alts_sequences<'a, I: UnsynInput, F: FnMut(&'a ExprNoTopAlts<I>)>(
-    alts: &'a ExprNoTopAlts<I>,
-    f: &mut F,
-) {
-    f(alts);
-
-    for expr in alts.elements() {
-        alt_sequences(expr, f);
-    }
+/// The pass that gathers the operand sequences of a body.
+///
+/// One sequence stands at the head of each alternative and nowhere else, so
+/// reading the alternative is reading its sequence; the operands beneath are
+/// reached by the walk, which is what finds the sequences of nested groups.
+struct Sequences<'b, F> {
+    f: &'b mut F,
 }
 
-fn alt_sequences<'a, I: UnsynInput, F: FnMut(&'a ExprNoTopAlts<I>)>(
-    expr: &'a ExprNoTopAlt<I>,
-    f: &mut F,
-) {
-    match expr {
-        ExprNoTopAlt::WithSuffix(expr) => with_suffix_sequences(expr, f),
-        ExprNoTopAlt::WithoutSuffix(expr) => without_suffix_sequences(expr, f),
-    }
-}
+impl<'ast, 'b, I: UnsynInput + 'ast, F: FnMut(&'ast ExprNoTopAlts<I>)> Visit<'ast, I>
+    for Sequences<'b, F>
+{
+    fn visit_expr_no_top_alts(&mut self, node: &'ast ExprNoTopAlts<I>) {
+        (self.f)(node);
 
-fn with_suffix_sequences<'a, I: UnsynInput, F: FnMut(&'a ExprNoTopAlts<I>)>(
-    expr: &'a ExprWithSuffix<I>,
-    f: &mut F,
-) {
-    match expr {
-        // A group is no sequence of its own, and neither are the bounds in its
-        // `{…}` member, so only the operand is read here.
-        ExprWithSuffix::Grouped { target, .. } => without_suffix_sequences(target, f),
-        // The operand a keyword introduces is an assertion about the text and
-        // no element of the sequence, so only a group written inside it is.
-        ExprWithSuffix::Concat { target, suffix, .. }
-        | ExprWithSuffix::Followed { target, suffix, .. } => {
-            without_suffix_sequences(target, f);
-            alt_sequences(suffix, f);
-        }
-        // Whatever an `except` takes away is still shaped, group and all.
-        ExprWithSuffix::Except { target, tokens, .. } => {
-            without_suffix_sequences(target, f);
-            without_suffix_sequences(tokens, f);
-        }
+        walk::walk_expr_no_top_alts(self, node);
     }
-}
 
-fn without_suffix_sequences<'a, I: UnsynInput, F: FnMut(&'a ExprNoTopAlts<I>)>(
-    expr: &'a ExprWithoutSuffix<I>,
-    f: &mut F,
-) {
-    match expr {
-        ExprWithoutSuffix::Paren(paren) => walk_sequences(&paren.body, f),
-        // A set and a complement are compared with the text as one value, so
-        // the names they hold are not operands of any sequence.
-        ExprWithoutSuffix::Set(_) | ExprWithoutSuffix::Tilde(..) => {}
-        ExprWithoutSuffix::Ident(_)
-        | ExprWithoutSuffix::Call(_)
-        | ExprWithoutSuffix::Str(_)
-        | ExprWithoutSuffix::Unicode(_) => {}
-    }
+    fn visit_input(&mut self, _input: &'ast I) {}
 }
 
 /// Returns the node `ident` refers to, `None` for the wildcard and for a name
@@ -498,11 +395,8 @@ fn expr_nullable<I: UnsynInput>(
     table: &SymbolTable<'_, I>,
     nullable: &HashMap<&str, bool>,
 ) -> bool {
-    alts_nullable(&expr.first, table, nullable)
-        || expr
-            .rest
-            .iter()
-            .any(|(_, alts)| alts_nullable(alts, table, nullable))
+    expr.branches()
+        .any(|alts| alts_nullable(alts, table, nullable))
 }
 
 fn alts_nullable<I: UnsynInput>(
@@ -510,11 +404,8 @@ fn alts_nullable<I: UnsynInput>(
     table: &SymbolTable<'_, I>,
     nullable: &HashMap<&str, bool>,
 ) -> bool {
-    alt_nullable(&alts.first, table, nullable)
-        && alts
-            .rest
-            .iter()
-            .all(|(_, expr)| alt_nullable(expr, table, nullable))
+    alts.elements()
+        .all(|expr| alt_nullable(expr, table, nullable))
 }
 
 fn alt_nullable<I: UnsynInput>(
@@ -533,8 +424,8 @@ fn with_suffix_nullable<I: UnsynInput>(
     table: &SymbolTable<'_, I>,
     nullable: &HashMap<&str, bool>,
 ) -> bool {
-    match expr {
-        ExprWithSuffix::Grouped { target, suffix } => match SuffixOp::of(suffix) {
+    match Suffixed::of(expr) {
+        Suffixed::Repeated { target, op } => match op {
             SuffixOp::Star(_) | SuffixOp::Question(_) => true,
             SuffixOp::Plus(_) => without_suffix_nullable(target, table, nullable),
             // `{0, N}` may match nothing at all, and any other count matches the
@@ -543,7 +434,7 @@ fn with_suffix_nullable<I: UnsynInput>(
                 repeat_lower(repeat) == 0 || without_suffix_nullable(target, table, nullable)
             }
         },
-        ExprWithSuffix::Concat { target, suffix, .. } => {
+        Suffixed::Concat { target, suffix } => {
             // Both operands of `concat` are matched and joined into one token,
             // so the sequence can match nothing only when both of them can.
             // The lookahead of `followed` and the taken-away side of `except`
@@ -553,7 +444,7 @@ fn with_suffix_nullable<I: UnsynInput>(
                 && alt_nullable(suffix, table, nullable)
         }
         // The right side of `followed` is a lookahead that is never consumed.
-        ExprWithSuffix::Followed { target, .. } | ExprWithSuffix::Except { target, .. } => {
+        Suffixed::Followed { target, .. } | Suffixed::Except { target, .. } => {
             without_suffix_nullable(target, table, nullable)
         }
     }
@@ -564,15 +455,14 @@ fn without_suffix_nullable<I: UnsynInput>(
     table: &SymbolTable<'_, I>,
     nullable: &HashMap<&str, bool>,
 ) -> bool {
-    match expr {
+    match Operand::of(expr) {
         // Every operand of a complement is a set, which needs input.
-        ExprWithoutSuffix::Tilde(..)
-        | ExprWithoutSuffix::Call(_)
-        | ExprWithoutSuffix::Set(_)
-        | ExprWithoutSuffix::Unicode(_) => false,
-        ExprWithoutSuffix::Ident(ident) => ref_nullable(ident, table, nullable),
-        ExprWithoutSuffix::Paren(paren) => expr_nullable(&paren.body, table, nullable),
-        ExprWithoutSuffix::Str(lit) => str_chars(lit).is_empty(),
+        Operand::Complement(_) | Operand::External(_) | Operand::Set(_) | Operand::Unicode(_) => {
+            false
+        }
+        Operand::Reference(ident) => ref_nullable(ident, table, nullable),
+        Operand::Group(body) => expr_nullable(body, table, nullable),
+        Operand::Str(lit) => str_chars(lit).is_empty(),
     }
 }
 
@@ -582,9 +472,7 @@ fn expr_first<'a, I: UnsynInput>(
     nullable: &HashMap<&'a str, bool>,
     names: &mut Vec<&'a str>,
 ) {
-    alts_first(&expr.first, table, nullable, names);
-
-    for (_, alts) in expr.rest.iter() {
+    for alts in expr.branches() {
         alts_first(alts, table, nullable, names);
     }
 }
@@ -595,10 +483,7 @@ fn alts_first<'a, I: UnsynInput>(
     nullable: &HashMap<&'a str, bool>,
     names: &mut Vec<&'a str>,
 ) {
-    let mut elements = vec![&alts.first];
-    elements.extend(alts.rest.iter().map(|(_, expr)| expr));
-
-    for expr in elements {
+    for expr in alts.elements() {
         alt_first(expr, table, nullable, names);
 
         // A sequence continues into its next element only when the current one
@@ -627,13 +512,13 @@ fn with_suffix_first<'a, I: UnsynInput>(
     nullable: &HashMap<&'a str, bool>,
     names: &mut Vec<&'a str>,
 ) {
-    match expr {
+    match Suffixed::of(expr) {
         // Every quantity operator asks whether its own operand can begin the
         // match, and the bounds of `{…}` contribute no node at the front.
-        ExprWithSuffix::Grouped { target, .. } => {
+        Suffixed::Repeated { target, .. } => {
             without_suffix_first(target, table, nullable, names);
         }
-        ExprWithSuffix::Concat { target, suffix, .. } => {
+        Suffixed::Concat { target, suffix } => {
             without_suffix_first(target, table, nullable, names);
 
             if without_suffix_nullable(target, table, nullable) {
@@ -644,7 +529,7 @@ fn with_suffix_first<'a, I: UnsynInput>(
         // ever the beginning of the match here, so neither contributes a node to
         // the leftmost position. Both are consulted at this very position all the
         // same, which is the question the same-offset graph asks.
-        ExprWithSuffix::Followed { target, .. } | ExprWithSuffix::Except { target, .. } => {
+        Suffixed::Followed { target, .. } | Suffixed::Except { target, .. } => {
             without_suffix_first(target, table, nullable, names);
         }
     }
@@ -656,20 +541,20 @@ fn without_suffix_first<'a, I: UnsynInput>(
     nullable: &HashMap<&'a str, bool>,
     names: &mut Vec<&'a str>,
 ) {
-    match expr {
+    match Operand::of(expr) {
         // A complement, a call, a set, a string and a code point are terminals:
         // they contribute no node to the leftmost position.
-        ExprWithoutSuffix::Tilde(..)
-        | ExprWithoutSuffix::Call(_)
-        | ExprWithoutSuffix::Set(_)
-        | ExprWithoutSuffix::Str(_)
-        | ExprWithoutSuffix::Unicode(_) => {}
-        ExprWithoutSuffix::Ident(ident) => {
+        Operand::Complement(_)
+        | Operand::External(_)
+        | Operand::Set(_)
+        | Operand::Str(_)
+        | Operand::Unicode(_) => {}
+        Operand::Reference(ident) => {
             if let Some(name) = referenced_node(ident, table) {
                 names.push(name);
             }
         }
-        ExprWithoutSuffix::Paren(paren) => expr_first(&paren.body, table, nullable, names),
+        Operand::Group(body) => expr_first(body, table, nullable, names),
     }
 }
 
@@ -679,10 +564,8 @@ fn expr_same_offset<'a, I: UnsynInput>(
     nullable: &HashMap<&'a str, bool>,
     names: &mut Vec<&'a str>,
 ) {
-    alts_same_offset(&expr.first, table, nullable, names);
-
     // Deciding an alternation means trying every alternative here.
-    for (_, alts) in expr.rest.iter() {
+    for alts in expr.branches() {
         alts_same_offset(alts, table, nullable, names);
     }
 }
@@ -693,10 +576,7 @@ fn alts_same_offset<'a, I: UnsynInput>(
     nullable: &HashMap<&'a str, bool>,
     names: &mut Vec<&'a str>,
 ) {
-    let mut elements = vec![&alts.first];
-    elements.extend(alts.rest.iter().map(|(_, expr)| expr));
-
-    for expr in elements {
+    for expr in alts.elements() {
         alt_same_offset(expr, table, nullable, names);
 
         // A later element is consulted where the sequence has already arrived,
@@ -727,16 +607,15 @@ fn with_suffix_same_offset<'a, I: UnsynInput>(
     nullable: &HashMap<&'a str, bool>,
     names: &mut Vec<&'a str>,
 ) {
-    match expr {
+    match Suffixed::of(expr) {
         // A quantity operator tests nothing at this position beyond the operand
         // it carries, and `{…}` is read off the text, not matched against it.
-        ExprWithSuffix::Grouped { target, .. } => {
+        Suffixed::Repeated { target, .. } => {
             without_suffix_same_offset(target, table, nullable, names);
         }
         // The operand after `concat` and after `followed` starts where the
         // target ended, so it is here too only when the target can be empty.
-        ExprWithSuffix::Concat { target, suffix, .. }
-        | ExprWithSuffix::Followed { target, suffix, .. } => {
+        Suffixed::Concat { target, suffix } | Suffixed::Followed { target, suffix } => {
             without_suffix_same_offset(target, table, nullable, names);
 
             if without_suffix_nullable(target, table, nullable) {
@@ -746,7 +625,7 @@ fn with_suffix_same_offset<'a, I: UnsynInput>(
         // Whatever an `except` takes away is tested against the text of the
         // match itself, so the target has to consume for it to move off here.
         // A set, a string and a code point are compared with the input here.
-        ExprWithSuffix::Except { target, tokens, .. } => {
+        Suffixed::Except { target, tokens } => {
             without_suffix_same_offset(target, table, nullable, names);
             without_suffix_same_offset(tokens, table, nullable, names);
         }
@@ -759,25 +638,22 @@ fn without_suffix_same_offset<'a, I: UnsynInput>(
     nullable: &HashMap<&'a str, bool>,
     names: &mut Vec<&'a str>,
 ) {
-    match expr {
+    match Operand::of(expr) {
         // A complement always takes the one character it asks about, so nothing
         // is reached at the offset it stands at, and the shape of the set it
         // refuses is not asked about here.
-        ExprWithoutSuffix::Tilde(..) => {}
-        ExprWithoutSuffix::Ident(ident) => {
+        Operand::Complement(_) => {}
+        Operand::Reference(ident) => {
             if let Some(name) = referenced_node(ident, table) {
                 names.push(name);
             }
         }
-        ExprWithoutSuffix::Paren(paren) => expr_same_offset(&paren.body, table, nullable, names),
+        Operand::Group(body) => expr_same_offset(body, table, nullable, names),
         // A call and its external are the caller's own affair, a string and a
         // code point are compared to the input directly, and the shape of a
         // referenced set member is deliberately not asked about here (see
         // `validate_set_item` in the `check` pass).
-        ExprWithoutSuffix::Call(_)
-        | ExprWithoutSuffix::Set(_)
-        | ExprWithoutSuffix::Str(_)
-        | ExprWithoutSuffix::Unicode(_) => {}
+        Operand::External(_) | Operand::Set(_) | Operand::Str(_) | Operand::Unicode(_) => {}
     }
 }
 

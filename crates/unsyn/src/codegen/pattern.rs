@@ -25,8 +25,8 @@ use crate::lexical::lit::{LitStr, LitUnicode};
 use crate::semantics::WILDCARD;
 use crate::semantics::{dec_usize, str_value, unicode_value};
 use crate::syntax::{
-    Expr, ExprNoTopAlt, ExprNoTopAlts, ExprWithSuffix, ExprWithoutSuffix, Range, Repeat,
-    RepeatBound, SetItem, SuffixOp,
+    Expr, ExprNoTopAlt, ExprNoTopAlts, ExprWithSuffix, ExprWithoutSuffix, Operand, Range, Repeat,
+    RepeatBound, SetItem, SetMember, SuffixOp, Suffixed,
 };
 
 use super::error::{CodegenError, CodegenKind};
@@ -514,9 +514,9 @@ impl<'a> PatternBuilder<'a> {
 
     /// The pattern of a whole definition body.
     pub(crate) fn expr<I: UnsynInput>(&self, expr: &Expr<I>) -> Result<Step, CodegenError> {
-        let mut branches = vec![self.alts(&expr.first)?];
+        let mut branches = vec![];
 
-        for (_, alts) in expr.rest.iter() {
+        for alts in expr.branches() {
             branches.push(self.alts(alts)?);
         }
 
@@ -524,9 +524,9 @@ impl<'a> PatternBuilder<'a> {
     }
 
     fn alts<I: UnsynInput>(&self, seq: &ExprNoTopAlts<I>) -> Result<Step, CodegenError> {
-        let mut steps = vec![self.alt(&seq.first)?];
+        let mut steps = vec![];
 
-        for (_, expr) in seq.rest.iter() {
+        for expr in seq.elements() {
             steps.push(self.alt(expr)?);
         }
 
@@ -541,8 +541,8 @@ impl<'a> PatternBuilder<'a> {
     }
 
     fn with_suffix<I: UnsynInput>(&self, expr: &ExprWithSuffix<I>) -> Result<Step, CodegenError> {
-        match expr {
-            ExprWithSuffix::Grouped { target, suffix } => match SuffixOp::of(suffix) {
+        match Suffixed::of(expr) {
+            Suffixed::Repeated { target, op } => match op {
                 SuffixOp::Star(_) => self.rep(0, None, target, expr),
                 SuffixOp::Question(_) => self.rep(0, Some(1), target, expr),
                 SuffixOp::Plus(_) => self.rep(1, None, target, expr),
@@ -555,16 +555,16 @@ impl<'a> PatternBuilder<'a> {
                     self.rep(min, max, target, expr)
                 }
             },
-            ExprWithSuffix::Concat { target, suffix, .. } => {
+            Suffixed::Concat { target, suffix } => {
                 // Both operands are taken, the second from where the first
                 // ended, and the two together are one token.
                 Ok(sequence_of(vec![self.operand(target)?, self.alt(suffix)?]))
             }
-            ExprWithSuffix::Followed { target, suffix, .. } => Ok(Step::Followed {
+            Suffixed::Followed { target, suffix } => Ok(Step::Followed {
                 item: Box::new(self.operand(target)?),
                 next: Box::new(self.alt(suffix)?),
             }),
-            ExprWithSuffix::Except { target, tokens, .. } => Ok(Step::Except {
+            Suffixed::Except { target, tokens } => Ok(Step::Except {
                 item: Box::new(self.operand(target)?),
                 removed: Box::new(self.operand(tokens)?),
             }),
@@ -604,17 +604,17 @@ impl<'a> PatternBuilder<'a> {
         &self,
         expr: &ExprWithoutSuffix<I>,
     ) -> Result<Step, CodegenError> {
-        match expr {
-            ExprWithoutSuffix::Str(lit) => literal(lit),
-            ExprWithoutSuffix::Unicode(lit) => one_char(lit).map(Step::Class),
-            ExprWithoutSuffix::Ident(ident) => self.reference(ident.0.as_str(), &ident.to_span()),
-            ExprWithoutSuffix::Call(angle) => Ok(Step::External(
+        match Operand::of(expr) {
+            Operand::Str(lit) => literal(lit),
+            Operand::Unicode(lit) => one_char(lit).map(Step::Class),
+            Operand::Reference(ident) => self.reference(ident.0.as_str(), &ident.to_span()),
+            Operand::External(angle) => Ok(Step::External(
                 angle.body.0.as_str().to_owned(),
                 angle.to_span(),
             )),
-            ExprWithoutSuffix::Paren(paren) => self.expr(&paren.body),
-            ExprWithoutSuffix::Set(bracket) => self.set_of(bracket),
-            ExprWithoutSuffix::Tilde(_, bracket) => Ok(Step::Not(Box::new(self.set_of(bracket)?))),
+            Operand::Group(body) => self.expr(body),
+            Operand::Set(bracket) => self.set_of(bracket),
+            Operand::Complement(bracket) => Ok(Step::Not(Box::new(self.set_of(bracket)?))),
         }
     }
 
@@ -665,17 +665,17 @@ impl<'a> PatternBuilder<'a> {
     /// The pattern of one member of a set, which is a class where the member
     /// reads as one character and a step of its own otherwise.
     fn set_item<I: UnsynInput>(&self, item: &SetItem<I>) -> Result<Step, CodegenError> {
-        match item {
-            SetItem::Str(lit) => literal(lit),
-            SetItem::Unicode(lit) => one_char(lit).map(Step::Class),
-            SetItem::Range(range) => {
+        match SetMember::of(item) {
+            SetMember::Str(lit) => literal(lit),
+            SetMember::Unicode(lit) => one_char(lit).map(Step::Class),
+            SetMember::Range(range) => {
                 let (start, end) = range_ends(range)?;
 
                 Ok(Step::Class(CharClass::of_range(start, end)))
             }
             // A member that names a rule is that rule's pattern, which joins the
             // set's class only when it turns out to be one character.
-            SetItem::Ident(ident) => self.reference(ident.0.as_str(), &ident.to_span()),
+            SetMember::Reference(ident) => self.reference(ident.0.as_str(), &ident.to_span()),
         }
     }
 }
