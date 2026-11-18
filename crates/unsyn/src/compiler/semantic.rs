@@ -1172,7 +1172,7 @@ mod tests {
     use parserc::{Input, syntax::SyntaxInput};
 
     use super::*;
-    use crate::codegen::input::TokenStream;
+    use crate::compiler::input::TokenStream;
 
     /// Reads `source` as a whole file and analyzes it.
     fn report(source: &str) -> Diagnostics {

@@ -34,8 +34,8 @@ use parserc::{
     syntax::{Delimiter, Or as Choice, Punctuated, Syntax, SyntaxInput},
 };
 
-use crate::codegen::lexer::{Ident, LeadingKeywords, LitDec, LitStr, LitUnicode, S, keyword_word};
-use crate::codegen::{
+use crate::compiler::lexer::{Ident, LeadingKeywords, LitDec, LitStr, LitUnicode, S, keyword_word};
+use crate::compiler::{
     errors::{PunctKind, SemanticsKind, SyntaxKind, UnsynError},
     input::UnsynInput,
 };
@@ -65,7 +65,7 @@ macro_rules! syntax_terminal {
             /// The word itself.
             #[parserc(
                 keyword = $value,
-                map_err = crate::codegen::errors::$kind::$variant.map()
+                map_err = crate::compiler::errors::$kind::$variant.map()
             )]
             pub I,
             /// The run of the trivia after the word, which the word keeps.
@@ -159,7 +159,7 @@ macro_rules! syntax_word {
             /// The run of the trivia before the word.
             pub Option<S<I>>,
             /// The word itself, which takes no run of the trivia.
-            #[parserc(parser = keyword_word($value, crate::codegen::errors::$kind::$variant))]
+            #[parserc(parser = keyword_word($value, crate::compiler::errors::$kind::$variant))]
             pub I,
             /// The run of the trivia after the word, which the word keeps.
             pub Option<S<I>>,
@@ -726,7 +726,7 @@ mod tests {
     use parserc::AsStr;
 
     use super::*;
-    use crate::codegen::input::TokenStream;
+    use crate::compiler::input::TokenStream;
 
     /// Parses `source` as the node `T`, refusing whatever is left of it.
     fn whole<'a, T>(source: &'a str) -> Result<T, UnsynError>

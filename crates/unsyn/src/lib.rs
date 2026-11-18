@@ -47,7 +47,7 @@
 //! run is filed away, which is why a rule over nodes names the trivia of its own
 //! language at most once.
 //!
-//! The `codegen` module's own documents say how the rule is decided and what the
+//! The `compiler` module's own documents say how the rule is decided and what the
 //! generated types look like once it has been.
 //!
 //! # Two phases, two features
@@ -63,7 +63,7 @@
 //!   language ends is the spec's business, and unsyn assumes no boundary for it.
 //!   The module knows nothing of the DSL, and needs nothing but a character
 //!   stream.
-//! - `codegen`, the same-named feature, is the DSL itself: the reader, the
+//! - `compiler`, the same-named feature, is the DSL itself: the reader, the
 //!   analyzer and the generator, in the stages its own module document lays
 //!   out, over `quote` and `proc_macro2`.
 //!
@@ -87,8 +87,8 @@
 //! the build changes, only what the documentation can show.
 #![cfg_attr(docsrs, feature(doc_cfg))]
 
-#[cfg(feature = "codegen")]
-pub mod codegen;
+#[cfg(feature = "compiler")]
+pub mod compiler;
 
 #[cfg(feature = "runtimes")]
 pub mod runtimes;

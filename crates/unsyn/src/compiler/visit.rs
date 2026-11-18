@@ -46,9 +46,9 @@
 //!
 //! ```
 //! use parserc::AsStr;
-//! use unsyn::codegen::input::TokenStream;
-//! use unsyn::codegen::syntax::Stmt;
-//! use unsyn::codegen::visit::{Visit, walk};
+//! use unsyn::compiler::input::TokenStream;
+//! use unsyn::compiler::syntax::Stmt;
+//! use unsyn::compiler::visit::{Visit, walk};
 //!
 //! #[derive(Default)]
 //! pub struct Definitions<'ast> {
@@ -70,7 +70,7 @@
 
 use super::lexer;
 use super::syntax;
-use crate::codegen::input::UnsynInput;
+use crate::compiler::input::UnsynInput;
 
 /// The methods a visitor of the CST has, one for every node of it.
 ///
@@ -432,8 +432,8 @@ pub mod walk {
     use parserc::syntax::Or;
 
     use super::{lexer, syntax};
-    use crate::codegen::input::UnsynInput;
-    use crate::codegen::visit::Visit;
+    use crate::compiler::input::UnsynInput;
+    use crate::compiler::visit::Visit;
 
     // -----------------------------------------------------------------------
     // The nodes a `syntax` production names
@@ -854,9 +854,9 @@ mod tests {
     use parserc::{AsStr, Input, Span, syntax::SyntaxInput};
 
     use super::{Visit, walk};
-    use crate::codegen::input::TokenStream;
-    use crate::codegen::lexer;
-    use crate::codegen::syntax::{self, Crate, Stmt};
+    use crate::compiler::input::TokenStream;
+    use crate::compiler::lexer;
+    use crate::compiler::syntax::{self, Crate, Stmt};
 
     /// Parses `source` as a whole file.
     fn file(source: &str) -> Crate<TokenStream<'_>> {

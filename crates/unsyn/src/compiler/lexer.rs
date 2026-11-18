@@ -41,8 +41,8 @@ use parserc::{
 };
 use unicode_ident::{is_xid_continue, is_xid_start};
 
-use crate::codegen::errors::{KeywordKind, PunctKind, SemanticsKind, SyntaxKind, UnsynError};
-use crate::codegen::input::UnsynInput;
+use crate::compiler::errors::{KeywordKind, PunctKind, SemanticsKind, SyntaxKind, UnsynError};
+use crate::compiler::input::UnsynInput;
 
 /// Matches one fixed word of the language, refusing the tail of a longer name.
 ///
@@ -1003,7 +1003,7 @@ mod tests {
     use parserc::{AsStr, Span, syntax::SyntaxInput};
 
     use super::*;
-    use crate::codegen::input::TokenStream;
+    use crate::compiler::input::TokenStream;
 
     /// Parses `source` as the node `T`.
     fn parse<'a, T>(source: &'a str) -> Result<T, UnsynError>

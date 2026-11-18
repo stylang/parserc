@@ -20,7 +20,7 @@ walkdir = "2"
 syn = { version = "^2", features = ["full"] }
 
 # The crate has two phases, and they are the two features that say so:
-# `runtime` is what a generated grammar is compiled against, `codegen` is the
+# `runtime` is what a generated grammar is compiled against, `compiler` is the
 # DSL front end and the generator that writes one. Neither builds on the other:
 # the generator only writes the names of runtime items into the text it emits,
 # so a proc macro that produces a grammar leaves the runtime out of its own
@@ -28,7 +28,7 @@ syn = { version = "^2", features = ["full"] }
 # The defaults carry both because a test here compiles a generated file, which
 # needs a runtime to compile it against.
 [features]
-default = ["serde", "codegen", "runtimes"]
+default = ["serde", "compiler", "runtimes"]
 runtimes = []
-codegen = ["dep:proc-macro2", "dep:quote", "dep:thiserror", "dep:unicode-ident", "parserc/syntax"]
+compiler = ["dep:proc-macro2", "dep:quote", "dep:thiserror", "dep:unicode-ident", "parserc/syntax"]
 serde = ["dep:serde", "parserc/serde"]
