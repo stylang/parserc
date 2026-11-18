@@ -16,7 +16,7 @@
 //! - [`PunctKind`]: a punctuation token, [`KeywordKind`]: a keyword;
 //! - [`SyntaxKind`]: a composite token or node built out of them;
 //! - [`SemanticsKind`]: a token that is well formed but meaningless, and every
-//!   rule the grammar itself cannot state (see [`crate::semantics`]).
+//!   rule the grammar itself cannot state (see [`crate::codegen::semantic`]).
 //!
 //! Everything but [`UnsynError::Semantics`] carries a
 //! [`ControlFlow`]: [`Recovable`](ControlFlow::Recovable) means an enclosing
@@ -109,8 +109,8 @@ impl KeywordKind {
 
 /// Error for a construct made of several tokens.
 ///
-/// This is what [`crate::syntax`] and the composite tokens of
-/// [`crate::lexical`] report: literals, comments, documentation, identifiers and
+/// This is what [`crate::codegen::syntax`] and the composite tokens of
+/// [`crate::codegen::lexer`] report: literals, comments, documentation, identifiers and
 /// the expression forms of a node definition. The one exception is
 /// [`SyntaxKind::Eof`], which a whole file reports when it cannot be read to its
 /// end.
@@ -174,7 +174,7 @@ impl SyntaxKind {
 /// Two groups live here. The first one is produced while *lexing*: a token can
 /// have a legal shape and still denote nothing, as `\x8F` (a two-digit escape
 /// outside the 7-bit range) or `U+D800` (a surrogate). The second one is
-/// produced while [analyzing](crate::semantics) a whole file, where a name, a
+/// produced while [analyzing](crate::codegen::semantic) a whole file, where a name, a
 /// range or a repetition can only be judged against the rest of the program.
 ///
 /// The variants that concern one named node carry its name, so that a report
@@ -238,8 +238,8 @@ impl SemanticsKind {
 /// meant, while the pattern it is part of still matches one language. The
 /// analyzer therefore keeps these apart from its [`UnsynError`]s, and hands them
 /// over with the model of a file it accepted (see
-/// [`Module::lints`](crate::semantics::Module::lints)); a caller that would
-/// rather refuse such a file is free to treat a lint as fatal.
+/// [`Diagnostics::lints`]); a caller that would rather refuse such a file is
+/// free to treat a lint as fatal.
 #[derive(Debug, thiserror::Error, PartialEq, Eq, Clone)]
 pub enum LintKind {
     /// A member of a set whose value an earlier member of the same set already
@@ -277,7 +277,7 @@ pub struct Lint {
 ///
 /// A pass that can find both kinds of problem writes to one of these and leaves
 /// the question of what to do about each of them to its caller, which for the
-/// [analyzer](crate::semantics) is the difference between rejecting a file and
+/// [analyzer](crate::codegen::semantic) is the difference between rejecting a file and
 /// returning the model of it with a note attached.
 #[derive(Debug, Default, PartialEq, Eq)]
 pub struct Diagnostics {
