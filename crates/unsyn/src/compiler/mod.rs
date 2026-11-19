@@ -2,7 +2,6 @@ pub mod codegen;
 pub mod errors;
 pub mod input;
 pub mod lexer;
-mod literal;
 pub mod semantic;
 pub mod syntax;
 pub mod visit;

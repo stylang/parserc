@@ -110,16 +110,13 @@
 
 use std::collections::{HashMap, HashSet};
 
-use parserc::{
-    Span,
-    syntax::{Or as Choice, Syntax},
-};
+use parserc::{Span, syntax::Syntax};
 use proc_macro2::{Ident, Literal, TokenStream};
 use quote::{ToTokens, quote};
 use unicode_ident::{is_xid_continue, is_xid_start};
 
 use super::input::UnsynInput;
-use super::literal;
+
 use super::{lexer, syntax, syntax::Decl};
 
 // ---------------------------------------------------------------------------
@@ -464,14 +461,14 @@ fn denotations<I>(file: &syntax::Crate<I>) -> HashMap<String, Vec<Arm>>
 where
     I: UnsynInput,
 {
-    let mut bodies: Vec<(&str, &syntax::Expr<I>)> = Vec::new();
+    let mut bodies: Vec<(String, &syntax::Expr<I>)> = Vec::new();
 
     for item in &file.items {
         if let syntax::Item::Stmt(stmt) = item {
             // A `syntax` rule is no character to be a member of a set of one, and
             // is only ever asked of a file that is refused before it is read.
             if matches!(stmt.decl(), Decl::Whitespace | Decl::Lexer) {
-                bodies.push((stmt.ident.text().as_str(), &stmt.definition.body));
+                bodies.push((stmt.ident.text(), &stmt.definition.body));
             }
         }
     }
@@ -482,12 +479,12 @@ where
         let mut settled = false;
 
         for (name, body) in &bodies {
-            if known.contains_key(*name) {
+            if known.contains_key(name) {
                 continue;
             }
 
             if let Some(arms) = expr_arms(body, &known) {
-                known.insert((*name).to_owned(), arms);
+                known.insert(name.clone(), arms);
                 settled = true;
             }
         }
@@ -533,11 +530,11 @@ where
     match atom {
         // What a `'…'` spells is one character here and a token of several there,
         // and only one character is a value a class can hold.
-        syntax::ExprWithoutSuffix::Str(lit) => match literal::chars_of(lit).0[..] {
+        syntax::ExprWithoutSuffix::Str(lit) => match lit.chars()[..] {
             [c] => Some(vec![Arm::Char(c)]),
             _ => None,
         },
-        syntax::ExprWithoutSuffix::Unicode(lit) => Some(vec![Arm::Char(literal::code_of(lit)?)]),
+        syntax::ExprWithoutSuffix::Unicode(lit) => Some(vec![Arm::Char(lit.value()?)]),
         syntax::ExprWithoutSuffix::Set(set) => set_arms(set, known),
         syntax::ExprWithoutSuffix::Paren(group) => expr_arms(&group.body, known),
         syntax::ExprWithoutSuffix::Reference(ident) => known.get(ident.text().as_str()).cloned(),
@@ -561,11 +558,11 @@ where
     for item in set_items(set) {
         match item {
             syntax::SetItem::Range(range) => arms.push(range_arm(range)?),
-            syntax::SetItem::Str(lit) => match literal::chars_of(lit).0[..] {
+            syntax::SetItem::Str(lit) => match lit.chars()[..] {
                 [c] => arms.push(Arm::Char(c)),
                 _ => return None,
             },
-            syntax::SetItem::Unicode(lit) => arms.push(Arm::Char(literal::code_of(lit)?)),
+            syntax::SetItem::Unicode(lit) => arms.push(Arm::Char(lit.value()?)),
             syntax::SetItem::Reference(ident) => {
                 arms.extend(known.get(ident.text().as_str())?.iter().copied());
             }
@@ -581,11 +578,8 @@ where
     I: UnsynInput,
 {
     let (from, to) = match range {
-        syntax::Range::Unicode(from, _, to) => (literal::code_of(from)?, literal::code_of(to)?),
-        syntax::Range::Str(from, _, to) => (
-            one_char(literal::chars_of(from).0)?,
-            one_char(literal::chars_of(to).0)?,
-        ),
+        syntax::Range::Unicode(from, _, to) => (from.value()?, to.value()?),
+        syntax::Range::Str(from, _, to) => (one_char(from.chars())?, one_char(to.chars())?),
     };
 
     Some(Arm::Range(from, to))
@@ -711,7 +705,7 @@ where
     /// The code of one definition: the functions its pattern asked for, and the
     /// node its name declares.
     fn stmt(&mut self, stmt: &syntax::Stmt<I>) -> Result<Vec<TokenStream>, BuildError> {
-        let text = stmt.ident.text().as_str().to_owned();
+        let text = stmt.ident.text();
         let span = stmt.ident.to_span();
         let name = item_name(&text, span.clone())?;
         let mut allow = wants_allow(&text);
@@ -731,9 +725,9 @@ where
             let mut variants = Vec::new();
 
             for ident in names {
-                let name = ident.text().as_str();
-                let variant = item_name(name, ident.to_span())?;
-                allow |= wants_allow(name);
+                let name = ident.text();
+                let variant = item_name(&name, ident.to_span())?;
+                allow |= wants_allow(&name);
                 variants.push(variant);
             }
 
@@ -902,10 +896,10 @@ where
             }
             syntax::ExprWithoutSuffix::Reference(ident) => Ok(Code::Expr(self.reference(ident)?)),
             syntax::ExprWithoutSuffix::Call(call) => {
-                let name = call.body.text().as_str();
+                let name = call.body.text();
 
-                let parser = self.external.get(&external_key(name)).ok_or_else(|| {
-                    BuildError::External(self.rule.clone(), name.to_owned(), call.body.to_span())
+                let parser = self.external.get(&external_key(&name)).ok_or_else(|| {
+                    BuildError::External(self.rule.clone(), name.clone(), call.body.to_span())
                 })?;
 
                 Ok(Code::Expr(parser.clone()))
@@ -998,7 +992,7 @@ where
     /// One character is one item of the input, and more than one is a word of it,
     /// which the two combinators of `parserc` are asked apart.
     fn code_of_str(&self, lit: &lexer::LitStr<I>) -> Result<Code, BuildError> {
-        let (chars, _) = literal::chars_of(lit);
+        let chars = lit.chars();
 
         let parser = match chars[..] {
             [c] => quote! { ::parserc::next(#c) },
@@ -1019,10 +1013,10 @@ where
     /// they were handed. A rule that is itself a choice of names is a node of the
     /// tree and owns no single extent, so the node it read is what stands for it.
     fn reference(&self, ident: &lexer::Ident<I>) -> Result<TokenStream, BuildError> {
-        let text = ident.text().as_str();
-        let ty = item_name(text, ident.to_span())?;
+        let text = ident.text();
+        let ty = item_name(&text, ident.to_span())?;
 
-        if self.named_choices.contains(&external_key(text)) {
+        if self.named_choices.contains(&external_key(&text)) {
             return Ok(quote! {
                 <#ty<I> as ::parserc::syntax::Syntax<I>>::into_parser()
             });
@@ -1038,12 +1032,10 @@ where
         match suffix {
             syntax::ExprWithSuffix::Grouped { target, suffix } => {
                 let (at_least, at_most) = match suffix {
-                    Choice::First(_) => (0, None),
-                    Choice::Second(Choice::First(_)) => (0, Some(1)),
-                    Choice::Second(Choice::Second(Choice::First(_))) => (1, None),
-                    Choice::Second(Choice::Second(Choice::Second(repeat))) => {
-                        self.bounds(&repeat.0.body)?
-                    }
+                    syntax::Suffix::Star(_) => (0, None),
+                    syntax::Suffix::Question(_) => (0, Some(1)),
+                    syntax::Suffix::Plus(_) => (1, None),
+                    syntax::Suffix::Repeat(repeat) => self.bounds(&repeat.0.body)?,
                 };
 
                 self.code_of_repetition(target, at_least, at_most)
@@ -1194,12 +1186,13 @@ where
 
     /// The character a `U+…` of the file spells.
     fn code_of(&self, lit: &lexer::LitUnicode<I>) -> Result<char, BuildError> {
-        literal::code_of(lit).ok_or_else(|| BuildError::Literal(self.rule.clone(), lit.to_span()))
+        lit.value()
+            .ok_or_else(|| BuildError::Literal(self.rule.clone(), lit.to_span()))
     }
 
     /// The number of times a bound of the file repeats.
     fn count_of(&self, lit: &lexer::LitDec<I>) -> Result<usize, BuildError> {
-        literal::count_of(lit)
+        lit.count()
             .map(|count| count as usize)
             .ok_or_else(|| BuildError::Literal(self.rule.clone(), lit.to_span()))
     }

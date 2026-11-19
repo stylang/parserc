@@ -261,6 +261,16 @@ pub enum LintKind {
     /// with, which its generated separator takes whether it is named or not.
     #[error("`{0}` is the natural separator of the language, which a rule of nodes takes anyway")]
     RedundantSeparator(String),
+    /// A choice written inside a group rather than as the whole of a right side.
+    ///
+    /// The root of a right side turns an `|` into the alternatives of a named
+    /// node; inside a group the choice belongs to no left side, so its
+    /// alternatives name nothing, and whatever reads the tree can only tell them
+    /// apart by their shape.
+    #[error(
+        "this `|` names no node of the tree; write the choice as a whole definition or as a rule of its own"
+    )]
+    UnnamedAlternative,
 }
 
 /// One [`LintKind`] and the place in the file that says it.

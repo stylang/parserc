@@ -51,14 +51,14 @@
 //! use unsyn::compiler::visit::{Visit, walk};
 //!
 //! #[derive(Default)]
-//! pub struct Definitions<'ast> {
+//! pub struct Definitions {
 //!     /// The name of every rule the file defines, in the order it defined them.
-//!     pub names: Vec<&'ast str>,
+//!     pub names: Vec<String>,
 //! }
 //!
-//! impl<'ast> Visit<'ast, TokenStream<'ast>> for Definitions<'ast> {
+//! impl<'ast> Visit<'ast, TokenStream<'ast>> for Definitions {
 //!     fn visit_stmt(&mut self, node: &'ast Stmt<TokenStream<'ast>>) {
-//!         self.names.push(node.ident.text().as_str());
+//!         self.names.push(node.ident.text());
 //!         walk::walk_stmt(self, node);
 //!     }
 //! }
@@ -141,6 +141,12 @@ where
     /// `syntax ExprWithSuffix -> ExprWithoutSuffix ( '*' | … ) | …`
     fn visit_expr_with_suffix(&mut self, node: &'ast syntax::ExprWithSuffix<I>) {
         walk::walk_expr_with_suffix(self, node);
+    }
+
+    /// The `('*' | '?' | '+' | Repeat)` of [`ExprWithSuffix`](syntax::ExprWithSuffix),
+    /// a group the spec leaves unnamed and the hand tree names for it.
+    fn visit_suffix(&mut self, node: &'ast syntax::Suffix<I>) {
+        walk::walk_suffix(self, node);
     }
 
     /// `syntax Repeat -> '{' ( ',' LitDec | LitDec ',' LitDec? | LitDec ) '}';`
@@ -303,6 +309,12 @@ where
         walk::walk_ident_or_keyword(self, node);
     }
 
+    /// The `( XID_Start | '_' )` of [`IdentOrKeyword`](lexer::IdentOrKeyword),
+    /// a group the spec leaves unnamed and the hand tree names for it.
+    fn visit_ident_start(&mut self, node: &'ast lexer::IdentStart<I>) {
+        walk::walk_ident_start(self, node);
+    }
+
     /// `lexer XID_Start -> <XID_Start>;`
     ///
     /// The text of an external is whatever the caller's function took, which is
@@ -351,19 +363,32 @@ where
         walk::walk_lit_str(self, node);
     }
 
+    /// The `( ~['"','\\',CR] | QuoteEscape | AsciiEscape | UnicodeEscape )` of
+    /// [`LitStr`](lexer::LitStr), a group the spec leaves unnamed and the hand
+    /// tree names for it.
+    fn visit_lit_str_content(&mut self, node: &'ast lexer::LitStrContent<I>) {
+        walk::walk_lit_str_content(self, node);
+    }
+
     /// `lexer QuoteEscape -> '\\'';`
     fn visit_quote_escape(&mut self, node: &'ast lexer::QuoteEscape<I>) {
         walk::walk_quote_escape(self, node);
     }
 
-    /// `lexer AsciiEscape -> '\\x' OctDigit HexDigit | …`
+    /// `lexer AsciiEscape -> '\\x' OctDigit HexDigit | '\\n' | …;`
     fn visit_ascii_escape(&mut self, node: &'ast lexer::AsciiEscape<I>) {
         walk::walk_ascii_escape(self, node);
     }
 
-    /// `lexer UnicodeEscape -> '\\u{' ( HexDigit '_'* ){1, 6} '}';`
+    /// `lexer UnicodeEscape -> '\\u{' … '}';`
     fn visit_unicode_escape(&mut self, node: &'ast lexer::UnicodeEscape<I>) {
         walk::walk_unicode_escape(self, node);
+    }
+
+    /// The `( HexDigit '_'* )` of [`UnicodeEscape`](lexer::UnicodeEscape), a
+    /// group the spec leaves unnamed and the hand tree names for it.
+    fn visit_escape_digit(&mut self, node: &'ast lexer::EscapeDigit<I>) {
+        walk::walk_escape_digit(self, node);
     }
 
     /// `lexer OctDigit -> ['0'-'7'];`
@@ -386,6 +411,12 @@ where
         walk::walk_lit_dec(self, node);
     }
 
+    /// The `( DecDigit | '_' )` of [`LitDec`](lexer::LitDec), a group the spec
+    /// leaves unnamed and the hand tree names for it.
+    fn visit_digit_or_underscore(&mut self, node: &'ast lexer::DigitOrUnderscore<I>) {
+        walk::walk_digit_or_underscore(self, node);
+    }
+
     /// `lexer LitUnicode -> 'U+' concat HexDigit{4};`
     fn visit_lit_unicode(&mut self, node: &'ast lexer::LitUnicode<I>) {
         walk::walk_lit_unicode(self, node);
@@ -394,6 +425,26 @@ where
     /// `lexer BlockComment -> '/*' … '*/' | '/**/' | '/***/';`
     fn visit_block_comment(&mut self, node: &'ast lexer::BlockComment<I>) {
         walk::walk_block_comment(self, node);
+    }
+
+    /// The `( ~['*','!','/*'] | '**' | BlockCommentOrDoc )` that opens a
+    /// [`BlockComment`](lexer::BlockComment) body, named by the hand tree for
+    /// the group the spec leaves unnamed.
+    fn visit_block_comment_head(&mut self, node: &'ast lexer::BlockCommentHead<I>) {
+        walk::walk_block_comment_head(self, node);
+    }
+
+    /// The `( BlockCommentOrDoc | ~['/*','*/'] )` that fills the body of all
+    /// three block rules, named once for the three by the hand tree.
+    fn visit_block_comment_tail(&mut self, node: &'ast lexer::BlockCommentTail<I>) {
+        walk::walk_block_comment_tail(self, node);
+    }
+
+    /// The `( ~['*','/*'] | BlockCommentOrDoc )` that opens an
+    /// [`OuterBlockDoc`](lexer::OuterBlockDoc) body, named by the hand tree for
+    /// the group the spec leaves unnamed.
+    fn visit_outer_block_doc_head(&mut self, node: &'ast lexer::OuterBlockDocHead<I>) {
+        walk::walk_outer_block_doc_head(self, node);
     }
 
     /// `lexer BlockCommentOrDoc -> BlockComment | OuterBlockDoc | InnerBlockDoc;`
@@ -416,6 +467,12 @@ where
         walk::walk_outer_line_doc(self, node);
     }
 
+    /// The `( ~['/'] ~[LF,CR]* )` of [`OuterLineDoc`](lexer::OuterLineDoc), a
+    /// group the spec leaves unnamed and the hand tree names for it.
+    fn visit_line_doc_body(&mut self, node: &'ast lexer::LineDocBody<I>) {
+        walk::walk_line_doc_body(self, node);
+    }
+
     /// `lexer OuterBlockDoc -> '/**' … '*/';`
     fn visit_outer_block_doc(&mut self, node: &'ast lexer::OuterBlockDoc<I>) {
         walk::walk_outer_block_doc(self, node);
@@ -429,8 +486,6 @@ where
 ///
 /// [`syn`]: https://docs.rs/syn/latest/syn/visit/index.html
 pub mod walk {
-    use parserc::syntax::Or;
-
     use super::{lexer, syntax};
     use crate::compiler::input::UnsynInput;
     use crate::compiler::visit::Visit;
@@ -560,7 +615,7 @@ pub mod walk {
         match node {
             syntax::ExprWithSuffix::Grouped { target, suffix } => {
                 v.visit_expr_without_suffix(target);
-                walk_suffix_group(v, suffix);
+                v.visit_suffix(suffix);
             }
             syntax::ExprWithSuffix::Concat {
                 target,
@@ -702,15 +757,15 @@ pub mod walk {
 
     /// `('*' | '?' | '+' | Repeat)`, the four quantity operators the production
     /// writes as one group.
-    fn walk_suffix_group<'ast, I: UnsynInput, V: ?Sized + Visit<'ast, I>>(
+    pub fn walk_suffix<'ast, I: UnsynInput, V: ?Sized + Visit<'ast, I>>(
         v: &mut V,
-        node: &'ast syntax::SuffixGroup<I>,
+        node: &'ast syntax::Suffix<I>,
     ) {
         match node {
-            Or::First(star) => v.visit_star(star),
-            Or::Second(Or::First(question)) => v.visit_question(question),
-            Or::Second(Or::Second(Or::First(plus))) => v.visit_plus(plus),
-            Or::Second(Or::Second(Or::Second(repeat))) => v.visit_repeat(repeat),
+            syntax::Suffix::Star(star) => v.visit_star(star),
+            syntax::Suffix::Question(question) => v.visit_question(question),
+            syntax::Suffix::Plus(plus) => v.visit_plus(plus),
+            syntax::Suffix::Repeat(repeat) => v.visit_repeat(repeat),
         }
     }
 
@@ -791,27 +846,289 @@ pub mod walk {
         walk_s, S;
         walk_lf, LF;
         walk_cr, CR;
-        walk_ident_or_keyword, IdentOrKeyword;
         walk_xid_start, XID_Start;
         walk_xid_continue, XID_Continue;
-        walk_raw_ident, RawIdent;
-        walk_non_keyword_ident, NonKeywordIdent;
-        walk_leading_keywords, LeadingKeywords;
-        walk_following_keywords, FollowingKeywords;
-        walk_lit_str, LitStr;
         walk_quote_escape, QuoteEscape;
-        walk_ascii_escape, AsciiEscape;
-        walk_unicode_escape, UnicodeEscape;
         walk_oct_digit, OctDigit;
         walk_dec_digit, DecDigit;
         walk_hex_digit, HexDigit;
-        walk_lit_dec, LitDec;
-        walk_lit_unicode, LitUnicode;
-        walk_block_comment, BlockComment;
-        walk_inner_line_doc, InnerLineDoc;
-        walk_inner_block_doc, InnerBlockDoc;
-        walk_outer_line_doc, OuterLineDoc;
-        walk_outer_block_doc, OuterBlockDoc;
+    }
+
+    // The block rules are modelled as the shapes their right sides write, down
+    // to the nested group each of them may hold.
+
+    pub fn walk_block_comment<'ast, I: UnsynInput, V: ?Sized + Visit<'ast, I>>(
+        v: &mut V,
+        node: &'ast lexer::BlockComment<I>,
+    ) {
+        match node {
+            lexer::BlockComment::Group {
+                open,
+                head,
+                tail,
+                close,
+            } => {
+                v.visit_text(open);
+                v.visit_block_comment_head(head);
+
+                for part in tail {
+                    v.visit_block_comment_tail(part);
+                }
+
+                v.visit_text(close);
+            }
+            lexer::BlockComment::Star(token) | lexer::BlockComment::Empty(token) => {
+                v.visit_text(token)
+            }
+        }
+    }
+
+    pub fn walk_block_comment_head<'ast, I: UnsynInput, V: ?Sized + Visit<'ast, I>>(
+        v: &mut V,
+        node: &'ast lexer::BlockCommentHead<I>,
+    ) {
+        match node {
+            lexer::BlockCommentHead::Plain(text) => v.visit_text(text),
+            lexer::BlockCommentHead::StarStar(text) => v.visit_text(text),
+            lexer::BlockCommentHead::Nested(group) => v.visit_block_comment_or_doc(group),
+        }
+    }
+
+    pub fn walk_block_comment_tail<'ast, I: UnsynInput, V: ?Sized + Visit<'ast, I>>(
+        v: &mut V,
+        node: &'ast lexer::BlockCommentTail<I>,
+    ) {
+        match node {
+            lexer::BlockCommentTail::Nested(group) => v.visit_block_comment_or_doc(group),
+            lexer::BlockCommentTail::Plain(text) => v.visit_text(text),
+        }
+    }
+
+    pub fn walk_inner_block_doc<'ast, I: UnsynInput, V: ?Sized + Visit<'ast, I>>(
+        v: &mut V,
+        node: &'ast lexer::InnerBlockDoc<I>,
+    ) {
+        v.visit_text(&node.open);
+
+        for part in &node.tail {
+            v.visit_block_comment_tail(part);
+        }
+
+        v.visit_text(&node.close);
+    }
+
+    pub fn walk_outer_block_doc<'ast, I: UnsynInput, V: ?Sized + Visit<'ast, I>>(
+        v: &mut V,
+        node: &'ast lexer::OuterBlockDoc<I>,
+    ) {
+        v.visit_text(&node.open);
+        v.visit_outer_block_doc_head(&node.head);
+
+        for part in &node.tail {
+            v.visit_block_comment_tail(part);
+        }
+
+        v.visit_text(&node.close);
+    }
+
+    pub fn walk_outer_block_doc_head<'ast, I: UnsynInput, V: ?Sized + Visit<'ast, I>>(
+        v: &mut V,
+        node: &'ast lexer::OuterBlockDocHead<I>,
+    ) {
+        match node {
+            lexer::OuterBlockDocHead::Plain(text) => v.visit_text(text),
+            lexer::OuterBlockDocHead::Nested(group) => v.visit_block_comment_or_doc(group),
+        }
+    }
+
+    pub fn walk_inner_line_doc<'ast, I: UnsynInput, V: ?Sized + Visit<'ast, I>>(
+        v: &mut V,
+        node: &'ast lexer::InnerLineDoc<I>,
+    ) {
+        v.visit_text(&node.open);
+        v.visit_text(&node.body);
+    }
+
+    pub fn walk_outer_line_doc<'ast, I: UnsynInput, V: ?Sized + Visit<'ast, I>>(
+        v: &mut V,
+        node: &'ast lexer::OuterLineDoc<I>,
+    ) {
+        v.visit_text(&node.open);
+
+        if let Some(body) = &node.body {
+            v.visit_line_doc_body(body);
+        }
+    }
+
+    pub fn walk_line_doc_body<'ast, I: UnsynInput, V: ?Sized + Visit<'ast, I>>(
+        v: &mut V,
+        node: &'ast lexer::LineDocBody<I>,
+    ) {
+        v.visit_text(&node.first);
+        v.visit_text(&node.rest);
+    }
+
+    // The rules that are modelled as the shapes their right sides write are
+    // walked as those shapes, down to the text each part read.
+
+    pub fn walk_ident_or_keyword<'ast, I: UnsynInput, V: ?Sized + Visit<'ast, I>>(
+        v: &mut V,
+        node: &'ast lexer::IdentOrKeyword<I>,
+    ) {
+        v.visit_ident_start(&node.start);
+
+        for continue_ in &node.tail {
+            v.visit_xid_continue(continue_);
+        }
+    }
+
+    pub fn walk_ident_start<'ast, I: UnsynInput, V: ?Sized + Visit<'ast, I>>(
+        v: &mut V,
+        node: &'ast lexer::IdentStart<I>,
+    ) {
+        match node {
+            lexer::IdentStart::Xid(start) => v.visit_xid_start(start),
+            lexer::IdentStart::Underscore(underscore) => v.visit_text(&underscore.0),
+        }
+    }
+
+    pub fn walk_raw_ident<'ast, I: UnsynInput, V: ?Sized + Visit<'ast, I>>(
+        v: &mut V,
+        node: &'ast lexer::RawIdent<I>,
+    ) {
+        v.visit_text(&node.sigil);
+        v.visit_ident_or_keyword(&node.name);
+    }
+
+    pub fn walk_non_keyword_ident<'ast, I: UnsynInput, V: ?Sized + Visit<'ast, I>>(
+        v: &mut V,
+        node: &'ast lexer::NonKeywordIdent<I>,
+    ) {
+        v.visit_ident_or_keyword(&node.name);
+    }
+
+    pub fn walk_leading_keywords<'ast, I: UnsynInput, V: ?Sized + Visit<'ast, I>>(
+        v: &mut V,
+        node: &'ast lexer::LeadingKeywords<I>,
+    ) {
+        match node {
+            lexer::LeadingKeywords::Lexer(word)
+            | lexer::LeadingKeywords::Syntax(word)
+            | lexer::LeadingKeywords::Whitespace(word) => v.visit_text(word),
+        }
+    }
+
+    pub fn walk_following_keywords<'ast, I: UnsynInput, V: ?Sized + Visit<'ast, I>>(
+        v: &mut V,
+        node: &'ast lexer::FollowingKeywords<I>,
+    ) {
+        match node {
+            lexer::FollowingKeywords::Concat(word)
+            | lexer::FollowingKeywords::Except(word)
+            | lexer::FollowingKeywords::Followed(word) => v.visit_text(word),
+        }
+    }
+
+    // The literals are modelled as the shapes their right sides write, down to
+    // the character and the escape each of them holds.
+
+    pub fn walk_lit_str<'ast, I: UnsynInput, V: ?Sized + Visit<'ast, I>>(
+        v: &mut V,
+        node: &'ast lexer::LitStr<I>,
+    ) {
+        v.visit_text(&node.open);
+
+        for piece in &node.body {
+            v.visit_lit_str_content(piece);
+        }
+
+        v.visit_text(&node.close);
+    }
+
+    pub fn walk_lit_str_content<'ast, I: UnsynInput, V: ?Sized + Visit<'ast, I>>(
+        v: &mut V,
+        node: &'ast lexer::LitStrContent<I>,
+    ) {
+        match node {
+            lexer::LitStrContent::Plain(text) => v.visit_text(text),
+            lexer::LitStrContent::Quote(quote) => v.visit_quote_escape(quote),
+            lexer::LitStrContent::Ascii(escape) => v.visit_ascii_escape(escape),
+            lexer::LitStrContent::Unicode(escape) => v.visit_unicode_escape(escape),
+        }
+    }
+
+    pub fn walk_ascii_escape<'ast, I: UnsynInput, V: ?Sized + Visit<'ast, I>>(
+        v: &mut V,
+        node: &'ast lexer::AsciiEscape<I>,
+    ) {
+        match node {
+            lexer::AsciiEscape::Hex { marker, oct, hex } => {
+                v.visit_text(marker);
+                v.visit_oct_digit(oct);
+                v.visit_hex_digit(hex);
+            }
+            lexer::AsciiEscape::N(word)
+            | lexer::AsciiEscape::R(word)
+            | lexer::AsciiEscape::T(word)
+            | lexer::AsciiEscape::Backslash(word)
+            | lexer::AsciiEscape::Zero(word) => v.visit_text(word),
+        }
+    }
+
+    pub fn walk_unicode_escape<'ast, I: UnsynInput, V: ?Sized + Visit<'ast, I>>(
+        v: &mut V,
+        node: &'ast lexer::UnicodeEscape<I>,
+    ) {
+        v.visit_text(&node.marker);
+
+        for digit in &node.digits {
+            v.visit_escape_digit(digit);
+        }
+
+        v.visit_text(&node.close);
+    }
+
+    pub fn walk_escape_digit<'ast, I: UnsynInput, V: ?Sized + Visit<'ast, I>>(
+        v: &mut V,
+        node: &'ast lexer::EscapeDigit<I>,
+    ) {
+        v.visit_hex_digit(&node.digit);
+
+        for separator in &node.sep {
+            v.visit_text(&separator.0);
+        }
+    }
+
+    pub fn walk_lit_dec<'ast, I: UnsynInput, V: ?Sized + Visit<'ast, I>>(
+        v: &mut V,
+        node: &'ast lexer::LitDec<I>,
+    ) {
+        v.visit_dec_digit(&node.head);
+
+        for part in &node.tail {
+            v.visit_digit_or_underscore(part);
+        }
+    }
+
+    pub fn walk_digit_or_underscore<'ast, I: UnsynInput, V: ?Sized + Visit<'ast, I>>(
+        v: &mut V,
+        node: &'ast lexer::DigitOrUnderscore<I>,
+    ) {
+        match node {
+            lexer::DigitOrUnderscore::Dec(digit) => v.visit_dec_digit(digit),
+            lexer::DigitOrUnderscore::Underscore(underscore) => v.visit_text(&underscore.0),
+        }
+    }
+
+    pub fn walk_lit_unicode<'ast, I: UnsynInput, V: ?Sized + Visit<'ast, I>>(
+        v: &mut V,
+        node: &'ast lexer::LitUnicode<I>,
+    ) {
+        v.visit_text(&node.prefix);
+
+        for digit in &node.digits {
+            v.visit_hex_digit(digit);
+        }
     }
 
     // The three rules that are nothing but a choice of other rules keep the rules
@@ -915,16 +1232,16 @@ mod tests {
     #[test]
     fn a_visitor_reaches_every_definition_of_a_file() {
         #[derive(Default)]
-        struct Definitions<'ast> {
-            keywords: Vec<&'ast str>,
-            names: Vec<&'ast str>,
+        struct Definitions {
+            keywords: Vec<&'static str>,
+            names: Vec<String>,
             patterns: usize,
         }
 
-        impl<'ast> Visit<'ast, TokenStream<'ast>> for Definitions<'ast> {
+        impl<'ast> Visit<'ast, TokenStream<'ast>> for Definitions {
             fn visit_stmt(&mut self, node: &'ast Stmt<TokenStream<'ast>>) {
-                self.keywords.push(node.keyword.0.as_str());
-                self.names.push(node.ident.text().as_str());
+                self.keywords.push(node.keyword.word());
+                self.names.push(node.ident.text());
                 walk::walk_stmt(self, node);
             }
 
@@ -964,11 +1281,17 @@ mod tests {
         assert_eq!(
             tokens.0,
             [
-                "syntax", " ", "Repeat", " ", "->", " ", "'{'", " ", "','", " ", "concat", " ",
-                "LitDec", " ", "'}'", ";",
+                "syntax", " ", "R", "e", "p", "e", "a", "t", " ", "->", " ", "'", "{", "'", " ",
+                "'", ",", "'", " ", "concat", " ", "L", "i", "t", "D", "e", "c", " ", "'", "}",
+                "'", ";",
             ],
             "the words of a definition, in the order a walk hands them over"
         );
+        // The two names are read as the rule that names them writes them: one
+        // start and then the run of continuing characters, each of which is a
+        // token of the tree on its own; and a literal string is now read as its
+        // two quotes and its body, the `'{'` of the spec being three tokens of
+        // the walk.
     }
 
     /// Every walk hands a child to the visitor's *method* for it, and never to the

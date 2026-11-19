@@ -31,10 +31,10 @@
 
 use parserc::{
     ControlFlow, Input, Kind, Span,
-    syntax::{Delimiter, Or as Choice, Punctuated, Syntax, SyntaxInput},
+    syntax::{Delimiter, Punctuated, Syntax, SyntaxInput},
 };
 
-use crate::compiler::lexer::{Ident, LeadingKeywords, LitDec, LitStr, LitUnicode, S, keyword_word};
+use crate::compiler::lexer::{Ident, LeadingKeywords, LitDec, LitStr, LitUnicode, S};
 use crate::compiler::{
     errors::{PunctKind, SemanticsKind, SyntaxKind, UnsynError},
     input::UnsynInput,
@@ -143,10 +143,9 @@ syntax_terminal!(
 );
 /// Declares one terminal of the syntax level that is a word rather than a sign.
 ///
-/// A word of the pattern level is read by [`keyword_word`], which refuses the
-/// head of a longer name: `exceptKeywords` is one name, not the word `except`
-/// and the start of another, since a name of the described language is read as
-/// long as it can be.
+/// The word is the text the spec writes and nothing more: `exceptKeywords` is
+/// read as the word `except` and the name `Keywords`, since it is the file,
+/// not the reader, that says where a word of the pattern ends.
 macro_rules! syntax_word {
     (
         $(#[$meta:meta])*
@@ -159,7 +158,10 @@ macro_rules! syntax_word {
             /// The run of the trivia before the word.
             pub Option<S<I>>,
             /// The word itself, which takes no run of the trivia.
-            #[parserc(parser = keyword_word($value, crate::compiler::errors::$kind::$variant))]
+            #[parserc(
+                keyword = $value,
+                map_err = crate::compiler::errors::$kind::$variant.map()
+            )]
             pub I,
             /// The run of the trivia after the word, which the word keeps.
             pub Option<S<I>>,
@@ -391,19 +393,34 @@ where
 // `    | ExprWithoutSuffix 'except' ExprWithoutSuffix ;`
 // ---------------------------------------------------------------------------
 
-/// The group `('*' | '?' | '+' | Repeat)`, in the shape the production writes it:
-/// a choice of four, and no name of its own.
+/// The group `('*' | '?' | '+' | Repeat)`, the four quantity operators.
 ///
-/// The nested [`Choice`] is the combinator for a choice, so the group is stored as
-/// the group it is rather than as a type declared for it.
-pub type SuffixGroup<I> = Choice<Star<I>, Choice<Question<I>, Choice<Plus<I>, Repeat<I>>>>;
+/// The group names no rule of the spec, which is what the analyzer's
+/// [`UnnamedAlternative`](super::errors::LintKind::UnnamedAlternative) lint says
+/// of a file that writes one; the hand tree names it here, because a reader of
+/// an operand with a suffix has to tell the four operators apart anyway.
+#[derive(Debug, PartialEq, Eq, PartialOrd, Ord, Clone, Syntax)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+pub enum Suffix<I>
+where
+    I: UnsynInput,
+{
+    /// `*`, the operand any number of times.
+    Star(Star<I>),
+    /// `?`, the operand at most once.
+    Question(Question<I>),
+    /// `+`, the operand one or more times.
+    Plus(Plus<I>),
+    /// `{…}`, the operand a bounded number of times.
+    Repeat(Repeat<I>),
+}
 
 /// An operand carrying one suffix.
 ///
 /// The four quantity operators are the one alternative the production writes them
 /// as, and not one alternative apiece: a node is named for the left side of a
-/// production, and the group on this right side is denoted by [`SuffixGroup`],
-/// which names nothing of its own.
+/// production, and the group on this right side is named [`Suffix`], which the
+/// hand tree gives the unnamed choice of the spec.
 #[derive(Debug, PartialEq, Eq, PartialOrd, Ord, Clone, Syntax)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub enum ExprWithSuffix<I>
@@ -415,7 +432,7 @@ where
         /// The operand the operator applies to.
         target: ExprWithoutSuffix<I>,
         /// The operator the group picked.
-        suffix: SuffixGroup<I>,
+        suffix: Suffix<I>,
     },
     /// `concat`, which asks that what the two operands matched be joined into one
     /// token. Both operands are matched, the second one from where the first one
@@ -479,12 +496,12 @@ where
 
 /// The group `(',' LitDec | LitDec ',' LitDec? | LitDec)` of the [`Repeat`] rule.
 ///
-/// A group on the right side of a production is usually no node of its own, since
-/// nothing names it and its shape is not worth walking past. This one is the
-/// exception because it is exactly the choice a reader has to make: whatever
-/// counts the repetitions has to tell the three forms apart, and spelling them as
-/// one flat match is the alternative to reaching through a [`Choice`] of tuples
-/// and a nested [`Choice`] at every reader of the form.
+/// A group on the right side of a production names no rule of the spec, which is
+/// what the analyzer's
+/// [`UnnamedAlternative`](super::errors::LintKind::UnnamedAlternative) lint says
+/// of a file that writes one; the hand tree names it here because it is exactly
+/// the choice a reader has to make: whatever counts the repetitions has to tell
+/// the three forms apart, and this enum is the flat match for it.
 ///
 /// The variants are tried in the order they are written, and that order carries
 /// the weight: the comma form comes before the bare count, which is what lets
@@ -612,12 +629,15 @@ impl<I: UnsynInput> Stmt<I> {
     /// The kind of node this definition declares.
     ///
     /// The word the definition opens with is the only thing that says so, and it
-    /// is read from its text: a [`lexer::LeadingKeywords`](crate::compiler::lexer::LeadingKeywords)
-    /// holds one of the three words of the spec and nothing else, since it is
-    /// read from them.
+    /// is the variant of [`LeadingKeywords`] that was read — the three words of
+    /// the spec are the three alternatives of that rule.
     #[inline]
     pub fn decl(&self) -> Decl {
-        Decl::from_word(self.keyword.0.as_str())
+        match self.keyword {
+            LeadingKeywords::Lexer(_) => Decl::Lexer,
+            LeadingKeywords::Syntax(_) => Decl::Syntax,
+            LeadingKeywords::Whitespace(_) => Decl::Whitespace,
+        }
     }
 }
 
@@ -626,7 +646,7 @@ impl<I: UnsynInput> Stmt<I> {
 /// Which of the three words means which is a fact about the DSL rather than
 /// about the language a file of it describes, in the same way that the shapes of
 /// [`Expr`] and [`Stmt`] are: the nodes of the tree name the constructs, and the
-/// pass that reads them asks this question of the text.
+/// variant of [`LeadingKeywords`] the definition opens with picks this one.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Decl {
     /// `whitespace`: the trivia the language separates its nodes with.
@@ -635,21 +655,6 @@ pub enum Decl {
     Lexer,
     /// `syntax`: a node of the tree, a pattern over other nodes.
     Syntax,
-}
-
-impl Decl {
-    /// The kind the word declares.
-    ///
-    /// The last arm is `syntax` rather than a refusal, since a word the reader
-    /// would have handed over can only be one of the three.
-    #[inline]
-    pub fn from_word(word: &str) -> Self {
-        match word {
-            "whitespace" => Self::Whitespace,
-            "lexer" => Self::Lexer,
-            _ => Self::Syntax,
-        }
-    }
 }
 
 // ---------------------------------------------------------------------------
@@ -967,13 +972,16 @@ mod tests {
         let source = "syntax Expr -> ExprNoTopAlt+ ( '|' ExprNoTopAlt+ )*;";
         let stmt = whole::<Stmt<_>>(source).unwrap();
 
-        assert_eq!(stmt.keyword.0.as_str(), "syntax");
-        assert_eq!(stmt.ident.text().as_str(), "Expr");
+        assert_eq!(stmt.keyword.word(), "syntax");
+        assert_eq!(stmt.ident.text(), "Expr");
         assert_eq!(stmt.to_span(), Span::Range(0..source.len()));
 
         // The name is read after the word, and neither owns the run between them.
         assert_eq!(stmt.s.unwrap().0.as_str(), " ");
-        assert!(whole::<Stmt<_>>("syntaxExpr -> 'a';").is_err());
+        // A word and a name run together is what the spec writes, not what it
+        // refuses: `syntaxExpr` is the word `syntax` and then the name `Expr`,
+        // and the space between them is trivia that belongs to no rule.
+        assert!(whole::<Stmt<_>>("syntaxExpr -> 'a';").is_ok());
         assert!(whole::<Stmt<_>>("syntax Expr -> 'a'").is_err());
     }
 
@@ -1027,7 +1035,7 @@ mod tests {
             .items
             .iter()
             .filter_map(|item| match item {
-                Item::Stmt(stmt) => Some(stmt.keyword.0.as_str().to_string()),
+                Item::Stmt(stmt) => Some(stmt.keyword.word().to_string()),
                 _ => None,
             })
             .collect::<Vec<_>>();
@@ -1044,7 +1052,7 @@ mod tests {
             .items
             .iter()
             .filter_map(|item| match item {
-                Item::Stmt(stmt) => Some(stmt.ident.text().as_str().to_string()),
+                Item::Stmt(stmt) => Some(stmt.ident.text()),
                 _ => None,
             })
             .collect::<Vec<_>>();

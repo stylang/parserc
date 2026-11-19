@@ -42,19 +42,18 @@
 //! the grammar writes without naming is `X+`, the sequence: no production has it
 //! on its left side, so no method is called for it, and the operands of an
 //! alternative can only be counted from the alternative. Everything else the pass
-//! reads of a node is its own text — a literal to decode, the word that says
-//! `lexer` or `syntax` — which no walk carries to a visitor either.
+//! reads of a node is a value the node holds in its parts — a literal decoded
+//! from its digits and escapes — which no walk carries to a visitor either.
 
 use std::{
     collections::{BTreeMap, BTreeSet},
     marker::PhantomData,
 };
 
-use parserc::{Span, syntax::Or as Choice, syntax::Syntax};
+use parserc::{Span, syntax::Syntax};
 
 use super::errors::{Diagnostics, LintKind, SemanticsKind, UnsynError};
 use super::input::UnsynInput;
-use super::literal;
 use super::visit::{Visit, walk};
 use super::{lexer, syntax, syntax::Decl};
 
@@ -87,14 +86,14 @@ where
 
 /// What one part of a definition's pattern can do, which is all this pass needs
 /// of it.
-struct Pattern<'ast> {
+struct Pattern {
     /// The nodes a match of this part can begin with.
     ///
     /// Only a mention of a node by name begins with that node: a literal, a set,
     /// a call of an external and a range all begin with a character, which is no
     /// name of the file. What a part can begin with is what says whether reaching
     /// it asks the same question again.
-    heads: BTreeSet<&'ast str>,
+    heads: BTreeSet<String>,
     /// Whether the part can match nothing at all.
     nullable: bool,
     /// Whether the part is exactly one name mentioned once.
@@ -105,15 +104,15 @@ struct Pattern<'ast> {
     /// says alongside something else.
     bare: bool,
     /// The names the part mentions, each where it was written.
-    uses: Vec<Use<'ast>>,
+    uses: Vec<Use>,
 }
 
-impl<'ast> Pattern<'ast> {
+impl Pattern {
     /// A part written as nothing but one name, which is what a mention of a node
     /// in a pattern always is.
-    fn bare(name: &'ast str, span: Span) -> Self {
+    fn bare(name: String, span: Span) -> Self {
         let mut heads = BTreeSet::new();
-        heads.insert(name);
+        heads.insert(name.clone());
 
         Self {
             heads,
@@ -247,9 +246,9 @@ impl<'ast> Pattern<'ast> {
 }
 
 /// One mention of a name in a pattern.
-struct Use<'ast> {
-    /// The name as it was written.
-    name: &'ast str,
+struct Use {
+    /// The name as it was written, assembled from the characters the name read.
+    name: String,
     /// Where it was written.
     span: Span,
     /// Whether the name is the whole of the alternative that offers it, which for
@@ -262,18 +261,18 @@ struct Use<'ast> {
 // ---------------------------------------------------------------------------
 
 /// One member of a set, read to the values it denotes.
-struct Member<'ast> {
+struct Member {
     /// The member as it was written, for the report about it.
     text: String,
     /// Where it was written.
     span: Span,
     /// What it denotes.
-    value: Value<'ast>,
+    value: Value,
 }
 
 /// What a member of a set denotes, as far as this pass can tell without reading
 /// the definitions of the other members.
-enum Value<'ast> {
+enum Value {
     /// The characters it denotes, as intervals of code points.
     Chars(Vec<(u32, u32)>),
     /// The strings of more than one character it denotes, which no character is
@@ -284,7 +283,7 @@ enum Value<'ast> {
     /// Only the name can be compared here. What the rule denotes is settled by
     /// the pass that reads the definitions together, which comes after this one,
     /// and a member of a set is worth as much as what it adds to it.
-    Name(&'ast str),
+    Name(String),
     /// Nothing is known, because the member was already refused.
     Unknown,
 }
@@ -319,15 +318,15 @@ impl Bound {
 // ---------------------------------------------------------------------------
 
 /// One definition the file wrote, and what its pattern came to.
-struct Rule<'ast> {
-    /// The name the definition gives its node.
-    name: &'ast str,
+struct Rule {
+    /// The name the definition gives its node, assembled from what the name read.
+    name: String,
     /// Which kind of node it declares.
     kind: Decl,
     /// Where the name was written.
     span: Span,
     /// The pattern written after the `->`.
-    body: Pattern<'ast>,
+    body: Pattern,
 }
 
 // ---------------------------------------------------------------------------
@@ -339,17 +338,23 @@ struct Checker<'ast, I> {
     /// What the file has been found to do wrong.
     diagnostics: Diagnostics,
     /// The definitions the file has finished, in the order it wrote them.
-    rules: Vec<Rule<'ast>>,
+    rules: Vec<Rule>,
     /// The name the `whitespace` declaration gave the trivia, when there is one.
-    trivia: Option<&'ast str>,
+    trivia: Option<String>,
     /// The patterns of the operands read but not yet joined into a larger one.
-    stack: Vec<Pattern<'ast>>,
+    stack: Vec<Pattern>,
     /// The members of a set read but not yet taken as an operand.
-    members: Vec<Member<'ast>>,
+    members: Vec<Member>,
     /// The ends of a range read but not yet taken as a member.
     ranges: Vec<Ends>,
     /// The bounds of a repetition read but not yet applied to an operand.
     bounds: Vec<Bound>,
+    /// How deep into the pattern of the definition being visited the pass stands.
+    ///
+    /// A pattern begins at depth `0`, which is the one depth at which an `|`
+    /// names the node the definition declares; every deeper `|` is written
+    /// inside a group and names nothing.
+    expr_depth: usize,
     /// The input the tree was read from, a piece of which every node holds.
     _input: PhantomData<&'ast I>,
 }
@@ -365,6 +370,7 @@ impl<'ast, I: UnsynInput> Checker<'ast, I> {
             members: Vec::new(),
             ranges: Vec::new(),
             bounds: Vec::new(),
+            expr_depth: 0,
             _input: PhantomData,
         }
     }
@@ -375,7 +381,7 @@ impl<'ast, I: UnsynInput> Checker<'ast, I> {
 
     /// The `count` patterns the operands of the node being visited left, in the
     /// order they were written.
-    fn take(&mut self, count: usize) -> Vec<Pattern<'ast>> {
+    fn take(&mut self, count: usize) -> Vec<Pattern> {
         debug_assert!(
             self.stack.len() >= count,
             "a node took more patterns than it has operands"
@@ -386,13 +392,13 @@ impl<'ast, I: UnsynInput> Checker<'ast, I> {
     }
 
     /// The pattern of the one operand of the node being visited.
-    fn take_one(&mut self) -> Pattern<'ast> {
+    fn take_one(&mut self) -> Pattern {
         self.take(1).pop().unwrap_or_else(Pattern::nothing)
     }
 
     /// The `count` members of the set being visited, in the order they were
     /// written.
-    fn take_members(&mut self, count: usize) -> Vec<Member<'ast>> {
+    fn take_members(&mut self, count: usize) -> Vec<Member> {
         debug_assert!(
             self.members.len() >= count,
             "a set took more members than it was written with"
@@ -419,21 +425,23 @@ impl<'ast, I: UnsynInput> Checker<'ast, I> {
     /// piece of the literal's own span, since the literal is the only node that
     /// reaches it.
     fn chars_of(&mut self, lit: &'ast lexer::LitStr<I>) -> Vec<char> {
-        let Some(base) = start_of(&lit.to_span()) else {
-            return Vec::new();
-        };
+        let mut chars = Vec::new();
 
-        let (chars, escapes) = literal::chars_of(lit);
+        for piece in &lit.body {
+            if let lexer::LitStrContent::Unicode(escape) = piece
+                && escape.value().is_none()
+            {
+                // The escape was read whole and well; only the number it
+                // spells is no character, and its own span is where to say so.
+                self.diagnostics.push(UnsynError::Semantics(
+                    SemanticsKind::InvalidCodePoint,
+                    escape.to_span(),
+                ));
 
-        for escape in escapes {
-            // The content begins one byte after the token does, where the quote
-            // that opens the literal was written.
-            let from = base + 1 + escape.offset;
+                continue;
+            }
 
-            self.diagnostics.push(UnsynError::Semantics(
-                SemanticsKind::InvalidCodePoint,
-                Span::Range(from..from + escape.len),
-            ));
+            chars.extend(piece.chars());
         }
 
         chars
@@ -445,7 +453,7 @@ impl<'ast, I: UnsynInput> Checker<'ast, I> {
     /// the only thing left for this pass to say is that `D800` and its like are
     /// no character, which no count of digits can tell.
     fn code_of(&mut self, lit: &'ast lexer::LitUnicode<I>) -> Option<u32> {
-        match literal::code_of(lit) {
+        match lit.value() {
             Some(c) => Some(c as u32),
             None => {
                 self.diagnostics.push(UnsynError::Semantics(
@@ -478,7 +486,7 @@ impl<'ast, I: UnsynInput> Checker<'ast, I> {
     /// The count a [`lexer::LitDec`] spells, with the underscores the rule allows
     /// between its digits dropped.
     fn count_of(&mut self, lit: &'ast lexer::LitDec<I>) -> u32 {
-        match literal::count_of(lit) {
+        match lit.count() {
             Some(count) => count,
             // A bound past what a count of repetitions can be kept to is no
             // bound, whatever the digits of it say.
@@ -505,7 +513,7 @@ impl<'ast, I: UnsynInput> Checker<'ast, I> {
     /// something the file would have written differently had it known. A set with
     /// no members at all denotes nothing, which is not a set but a mistake about
     /// where the brackets end.
-    fn set(&mut self, set: &'ast syntax::Set<I>) -> Pattern<'ast> {
+    fn set(&mut self, set: &'ast syntax::Set<I>) -> Pattern {
         let members = self.take_members(set.body.len());
         let span = set.to_span();
 
@@ -540,7 +548,7 @@ impl<'ast, I: UnsynInput> Checker<'ast, I> {
 
     /// Reports the members of one set whose values conflict with a member before
     /// them, naming the earlier member as the one the later says twice.
-    fn compare(&mut self, members: &[Member<'ast>]) {
+    fn compare(&mut self, members: &[Member]) {
         for (index, member) in members.iter().enumerate() {
             for earlier in &members[..index] {
                 let kind = match conflict(&member.value, &earlier.value) {
@@ -573,11 +581,11 @@ impl<'ast, I: UnsynInput> Checker<'ast, I> {
     /// Both are said where the second definition stands, since the first is the
     /// one the rest of the file means, and which definition of a name a name means
     /// has to be settled before anything is asked of it.
-    fn collisions(&mut self, rules: &[Rule<'ast>]) {
-        let mut seen: BTreeMap<&'ast str, Span> = BTreeMap::new();
+    fn collisions(&mut self, rules: &[Rule]) {
+        let mut seen: BTreeMap<String, Span> = BTreeMap::new();
 
         for rule in rules {
-            if let Some(previous) = seen.insert(rule.name, rule.span.clone()) {
+            if let Some(previous) = seen.insert(rule.name.clone(), rule.span.clone()) {
                 self.diagnostics.push(UnsynError::Semantics(
                     SemanticsKind::NameCollision(previous),
                     rule.span.clone(),
@@ -585,7 +593,7 @@ impl<'ast, I: UnsynInput> Checker<'ast, I> {
             }
 
             if rule.kind == Decl::Whitespace && self.trivia.is_none() {
-                self.trivia = Some(rule.name);
+                self.trivia = Some(rule.name.clone());
             }
         }
 
@@ -601,22 +609,22 @@ impl<'ast, I: UnsynInput> Checker<'ast, I> {
 
     /// Reports the names that mean nothing here, the nodes a terminal reaches by
     /// name, and the separator a rule of nodes names without needing to.
-    fn resolve(&mut self, rules: &[Rule<'ast>]) {
-        let trivia = self.trivia;
+    fn resolve(&mut self, rules: &[Rule]) {
+        let trivia = self.trivia.clone();
 
         // The first definition of a name is the one the rest of the file means by
         // it, which is what a name defined twice was already told.
-        let mut first: BTreeMap<&'ast str, &Rule<'ast>> = BTreeMap::new();
+        let mut first: BTreeMap<String, &Rule> = BTreeMap::new();
 
         for rule in rules {
-            first.entry(rule.name).or_insert(rule);
+            first.entry(rule.name.clone()).or_insert(rule);
         }
 
         for rule in rules {
             for mention in &rule.body.uses {
-                let Some(defined) = first.get(mention.name) else {
+                let Some(defined) = first.get(&mention.name) else {
                     self.diagnostics.push(UnsynError::Semantics(
-                        SemanticsKind::UndefinedSymbol(mention.name.to_string()),
+                        SemanticsKind::UndefinedSymbol(mention.name.clone()),
                         mention.span.clone(),
                     ));
 
@@ -627,7 +635,7 @@ impl<'ast, I: UnsynInput> Checker<'ast, I> {
                 // other terminals: the node of a tree is nothing to match.
                 if rule.kind != Decl::Syntax && defined.kind == Decl::Syntax {
                     self.diagnostics.push(UnsynError::Semantics(
-                        SemanticsKind::UnexpectedSyntax(mention.name.to_string()),
+                        SemanticsKind::UnexpectedSyntax(mention.name.clone()),
                         mention.span.clone(),
                     ));
                 }
@@ -636,9 +644,12 @@ impl<'ast, I: UnsynInput> Checker<'ast, I> {
                 // whether the rule names it or not, so naming it says it twice —
                 // unless naming it is the whole of what the rule offers there,
                 // which is then the tree's own field and not a separator.
-                if rule.kind == Decl::Syntax && !mention.alone && Some(mention.name) == trivia {
+                if rule.kind == Decl::Syntax
+                    && !mention.alone
+                    && Some(mention.name.as_str()) == trivia.as_deref()
+                {
                     self.diagnostics.lint(
-                        LintKind::RedundantSeparator(mention.name.to_string()),
+                        LintKind::RedundantSeparator(mention.name.clone()),
                         mention.span.clone(),
                     );
                 }
@@ -657,28 +668,28 @@ impl<'ast, I: UnsynInput> Checker<'ast, I> {
     /// A name that is no definition of the file stops the walk, since nothing past
     /// it is known, and a definition reached only after anything that consumes is
     /// not reached at all, because what consumes stands between it and itself.
-    fn recursion(&mut self, rules: &[Rule<'ast>]) {
-        let mut first: BTreeMap<&'ast str, &Rule<'ast>> = BTreeMap::new();
+    fn recursion(&mut self, rules: &[Rule]) {
+        let mut first: BTreeMap<String, &Rule> = BTreeMap::new();
 
         for rule in rules {
-            first.entry(rule.name).or_insert(rule);
+            first.entry(rule.name.clone()).or_insert(rule);
         }
 
         for (name, definition) in &first {
-            let mut reached = BTreeSet::new();
-            let mut to_visit: Vec<&'ast str> = definition.body.heads.iter().cloned().collect();
+            let mut reached: BTreeSet<String> = BTreeSet::new();
+            let mut to_visit: Vec<String> = definition.body.heads.iter().cloned().collect();
 
             while let Some(current) = to_visit.pop() {
-                if !reached.insert(current) {
+                if !reached.insert(current.clone()) {
                     continue;
                 }
 
-                if let Some(next) = first.get(current) {
+                if let Some(next) = first.get(&current) {
                     to_visit.extend(next.body.heads.iter().cloned());
                 }
             }
 
-            if !reached.contains(name) {
+            if !reached.contains(name.as_str()) {
                 continue;
             }
 
@@ -715,7 +726,7 @@ impl<'ast, I: UnsynInput> Visit<'ast, I> for Checker<'ast, I> {
         let body = self.take_one();
 
         self.rules.push(Rule {
-            name: node.ident.text().as_str(),
+            name: node.ident.text(),
             kind: node.decl(),
             span: node.ident.to_span(),
             body,
@@ -723,7 +734,18 @@ impl<'ast, I: UnsynInput> Visit<'ast, I> for Checker<'ast, I> {
     }
 
     fn visit_expr(&mut self, node: &'ast syntax::Expr<I>) {
+        // An `|` says which of the node's alternatives was read only where the
+        // alternatives are the whole of a right side; a choice written inside a
+        // group belongs to no left side and names nothing, which is worth
+        // telling the author of a file before the tree is read by anyone.
+        if self.expr_depth > 0 && !node.is_single() {
+            self.diagnostics
+                .lint(LintKind::UnnamedAlternative, node.to_span());
+        }
+
+        self.expr_depth += 1;
         walk::walk_expr(self, node);
+        self.expr_depth -= 1;
 
         // `X+` names no node of the grammar, so the number of operands an
         // alternative was written with, and so the number of patterns it left, is
@@ -789,7 +811,7 @@ impl<'ast, I: UnsynInput> Visit<'ast, I> for Checker<'ast, I> {
                 Pattern::terminal()
             }
             syntax::ExprWithoutSuffix::Reference(ident) => {
-                Pattern::bare(ident.text().as_str(), ident.to_span())
+                Pattern::bare(ident.text(), ident.to_span())
             }
         };
 
@@ -806,9 +828,9 @@ impl<'ast, I: UnsynInput> Visit<'ast, I> for Checker<'ast, I> {
                 match suffix {
                     // `X*` and `X?` are both satisfied by matching nothing, and
                     // `X+` is only where `X` is.
-                    Choice::First(_) | Choice::Second(Choice::First(_)) => target.nullable = true,
-                    Choice::Second(Choice::Second(Choice::First(_))) => {}
-                    Choice::Second(Choice::Second(Choice::Second(_))) => {
+                    syntax::Suffix::Star(_) | syntax::Suffix::Question(_) => target.nullable = true,
+                    syntax::Suffix::Plus(_) => {}
+                    syntax::Suffix::Repeat(_) => {
                         if let Some(bound) = self.take_bound() {
                             target.nullable |= bound.may_match_nothing();
                         }
@@ -895,11 +917,11 @@ impl<'ast, I: UnsynInput> Visit<'ast, I> for Checker<'ast, I> {
 
         let (text, ends) = match node {
             syntax::Range::Unicode(from, _, to) => (
-                format!("{}-{}", from.0.as_str(), to.0.as_str()),
+                format!("{}-{}", from.text(), to.text()),
                 [self.code_of(from), self.code_of(to)],
             ),
             syntax::Range::Str(from, dash, to) => (
-                format!("{}{}{}", from.0.as_str(), dash.as_str(), to.0.as_str()),
+                format!("{}{}{}", from.text(), dash.as_str(), to.text()),
                 [self.end_of_range(from), self.end_of_range(to)],
             ),
         };
@@ -947,7 +969,7 @@ impl<'ast, I: UnsynInput> Visit<'ast, I> for Checker<'ast, I> {
             // is a string, which no character is ever the same value as, and which
             // is only the same as another member when the two are the same string.
             syntax::SetItem::Str(lit) => {
-                let text = lit.0.as_str().to_owned();
+                let text = lit.text();
                 let chars = self.chars_of(lit);
 
                 let value = match chars.len() {
@@ -959,7 +981,7 @@ impl<'ast, I: UnsynInput> Visit<'ast, I> for Checker<'ast, I> {
                 Member { text, span, value }
             }
             syntax::SetItem::Unicode(lit) => {
-                let text = lit.0.as_str().to_owned();
+                let text = lit.text();
 
                 Member {
                     span,
@@ -971,10 +993,10 @@ impl<'ast, I: UnsynInput> Visit<'ast, I> for Checker<'ast, I> {
                 }
             }
             syntax::SetItem::Reference(ident) => {
-                let name = ident.text().as_str();
+                let name = ident.text();
 
                 Member {
-                    text: name.to_owned(),
+                    text: name.clone(),
                     span,
                     value: Value::Name(name),
                 }
@@ -1044,14 +1066,6 @@ fn intersects(one: &[(u32, u32)], other: &[(u32, u32)]) -> bool {
         .any(|(from, to)| other.iter().any(|(low, high)| from <= high && low <= to))
 }
 
-/// Where a span begins, which is where the text of the node that holds it begins.
-fn start_of(span: &Span) -> Option<usize> {
-    match span {
-        Span::Range(range) => Some(range.start),
-        _ => None,
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use parserc::{Input, syntax::SyntaxInput};
@@ -1099,12 +1113,30 @@ mod tests {
     #[test]
     fn the_spec_of_the_language_denotes_a_model_of_itself() {
         // The spec is the largest file this pass has to take, and the only one
-        // whose every name, range, set and repetition is written on purpose: a
-        // report about any of it is a fault of this pass and not of the file.
+        // whose every name, range, set and repetition is written on purpose: an
+        // error about any of it is a fault of this pass and not of the file.
+        // What the file does earn is the lints of the choices it writes inside
+        // its groups, which no rule of its own names.
         assert_eq!(
-            report(include_str!("../../unsyn.us")),
-            Diagnostics::default()
+            report(include_str!("../../unsyn.us")).errors,
+            Vec::new(),
+            "the spec denotes something"
         );
+    }
+
+    #[test]
+    fn the_choices_the_spec_writes_inside_its_groups_are_the_ones_it_names_nowhere() {
+        // Every group of a right side that offers more than one way of being
+        // read is a choice that names no node, and the spec is written with
+        // exactly this many of them. The count is pinned so that a group added
+        // to the spec shows up here rather than only in whoever reads the file.
+        let unnamed = report(include_str!("../../unsyn.us"))
+            .lints
+            .into_iter()
+            .filter(|lint| lint.kind == LintKind::UnnamedAlternative)
+            .count();
+
+        assert_eq!(unnamed, 10, "the choices of unsyn.us that name no node");
     }
 
     #[test]
@@ -1284,15 +1316,17 @@ mod tests {
     fn a_definition_guarded_by_what_consumes_is_not_recursive() {
         // The shape the spec writes for a nest of comments: the definition is
         // reached only after `/*` has been taken, so a matcher for it is never
-        // asked the same question twice at one position.
+        // asked the same question twice at one position. The choice inside the
+        // group is named nowhere, which is a lint of its own and no recursion.
         assert_eq!(
             report(
                 "
 lexer A -> '/*' ( B | ~['*','/'] )* '*/';
 lexer B -> A | '/*' A;
 "
-            ),
-            Diagnostics::default()
+            )
+            .errors,
+            Vec::new()
         );
 
         // The `except` of a terminal is tested against text its target read, and
@@ -1446,6 +1480,34 @@ lexer B -> A | '/*' A;
         assert_eq!(
             errors("syntax A -> 'x' followed MISSING;"),
             [SemanticsKind::UndefinedSymbol("MISSING".into())]
+        );
+    }
+
+    #[test]
+    fn a_choice_inside_a_group_names_no_node_and_says_so() {
+        // The whole of a right side is where an `|` becomes the alternatives of
+        // the node the definition declares, and a choice written deeper is the
+        // one thing the tree will not have a name for.
+        assert_eq!(lints("syntax A -> 'a' | 'b';"), Vec::<LintKind>::new());
+        assert_eq!(
+            lints("syntax A -> ( 'a' | 'b' ) 'c';"),
+            [LintKind::UnnamedAlternative]
+        );
+
+        // A group with only one way of being read is a grouping and not a
+        // choice, and each of the nested groups of a real choice is judged on
+        // its own, the enclosing one first.
+        assert_eq!(lints("syntax A -> ( 'a' ) 'b';"), Vec::<LintKind>::new());
+        assert_eq!(
+            lints("syntax A -> ( 'a' | ( 'b' | 'c' ) );"),
+            [LintKind::UnnamedAlternative, LintKind::UnnamedAlternative]
+        );
+
+        // The level of the rule says nothing about the judgment: what a lexer
+        // writes inside its groups is as unnamed as what a node writes.
+        assert_eq!(
+            lints("lexer A -> 'x' ( 'a' | 'b' )* ;"),
+            [LintKind::UnnamedAlternative]
         );
     }
 

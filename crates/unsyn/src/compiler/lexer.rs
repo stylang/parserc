@@ -4,144 +4,38 @@
 //! One production, one type: every type here is named for the left side of its
 //! production, and its right side is spelled out with the nodes and combinators
 //! of [`parserc`], so that the declaration of a type is the declaration of the
-//! rule. Where a right side is a sequence of other rules, the type reads them in
-//! that order and keeps their extent rather than their parts.
+//! rule. A sequence of the right side is a field apiece of the struct; a choice
+//! that is the whole of the right side is an enum whose variants are the
+//! alternatives.
 //!
-//! # A lexer node is the text it read
-//!
-//! A `lexer` rule denotes a set of strings rather than a region of the tree, so
-//! its node keeps the whole text as one [`UnsynInput`] stream and none of the
-//! parts that read it: `IdentOrKeyword` holds the name, and the digits inside
-//! [`UnicodeEscape`] hold no list of their own. What those parts are worth is
-//! their extent, which the text already records.
-//!
-//! The exception is a rule whose whole right side is a choice of other rules by
-//! name — [`Ident`], [`Keywords`] and [`BlockCommentOrDoc`] — where keeping the
-//! choice says *which* rule was read, and the text alone does not.
+//! A choice written inside a group — `( XID_Start | '_' )` within
+//! [`IdentOrKeyword`], the body of [`LitStr`] — belongs to no left side, and the
+//! [analyzer](super::semantic) says so of every file that writes one. The hand
+//! tree cannot leave such a choice unmodelled either, so it names these groups
+//! on the pass's behalf — [`IdentStart`] and its like — and models each of them
+//! as an enum, the same shape a named rule would have earned.
 //!
 //! # Where the trivia goes
 //!
 //! No node of this module owns a run of the trivia. A `lexer` token is read out
-//! of the text it is handed, and a run taken there would end up inside that text;
-//! the whitespace on each side of a token belongs to the `syntax` rule that
-//! reaches it, which is why the terminals a `syntax` rule is written with — the
-//! puncts and the fixed words — live in [`super::syntax`] instead. See the [crate
-//! documentation](crate) for how a run is divided between two neighbours.
+//! of the text it is handed, and a run taken there would end up inside that
+//! text; the whitespace on each side of a token belongs to the `syntax` rule
+//! that reaches it, which is why the terminals a `syntax` rule is written with —
+//! the puncts and the fixed words — live in [`super::syntax`] instead. See the
+//! [crate documentation](crate) for how a run is divided between two neighbours.
 //!
 //! The one consequence worth stating is the order of the alternatives of
-//! [`Ident`]. A semantics error is [`ControlFlow::Fatal`], so once a rule has
-//! refused text for meaning nothing no enclosing choice may try another way
-//! `NonKeywordIdent` reads `r#foo` as the name `r`, which is a name and is not
-//! fatal; [`RawIdent`] therefore comes first, and takes the word whole.
+//! [`Ident`]. A semantics error is fatal, so once a rule has refused text for
+//! meaning nothing no enclosing choice may try another way — and `NonKeywordIdent`
+//! reads `r#foo` as the name `r`, which is a name and is not fatal; [`RawIdent`]
+//! therefore comes first, and takes the word whole.
 
-use parserc::{
-    ControlFlow, Parser, keyword, next, next_if,
-    syntax::{Char, Or, Syntax},
-    take_while,
-};
+use parserc::syntax::{Char, Syntax};
+use parserc::{ControlFlow, Input, Kind, Parser, Span, keyword, next, next_if};
 use unicode_ident::{is_xid_continue, is_xid_start};
 
 use crate::compiler::errors::{KeywordKind, PunctKind, SemanticsKind, SyntaxKind, UnsynError};
 use crate::compiler::input::UnsynInput;
-
-/// Matches one fixed word of the language, refusing the tail of a longer name.
-///
-/// A keyword is matched as a literal prefix, which is not enough on its own:
-/// `lexerX` is one name, not the keyword `lexer` and an `X`. A word that leaves
-/// characters behind did not take the word, so the match is refused and the
-/// caller reads the text as a name instead.
-pub(crate) fn keyword_word<'a, I>(
-    word: &'static str,
-    kind: KeywordKind,
-) -> impl Parser<I, Output = I> + 'a
-where
-    I: UnsynInput + 'a,
-{
-    move |input: &mut I| {
-        let whole = input.clone();
-        let text = keyword(word).parse(input).map_err(kind.map())?;
-
-        if let Some(c) = input.iter().next()
-            && continues_a_name(c)
-        {
-            // The word is only the head of the name written here, and a name is
-            // one token, so the report reaches over the whole of it.
-            let tail = take_while(continues_a_name)
-                .parse(&mut input.clone())?
-                .len();
-
-            return Err(UnsynError::Keyword(
-                kind,
-                ControlFlow::Recovable,
-                whole.to_span_at(text.len() + tail),
-            ));
-        }
-
-        Ok(text)
-    }
-}
-
-/// The words a definition opens with, in the order the rule lists them.
-const LEADING_WORDS: [(&str, KeywordKind); 3] = [
-    ("lexer", KeywordKind::Lexer),
-    ("syntax", KeywordKind::Syntax),
-    ("whitespace", KeywordKind::Whitespace),
-];
-
-/// The words that join two operands of a pattern, in the order listed.
-const FOLLOWING_WORDS: [(&str, KeywordKind); 3] = [
-    ("concat", KeywordKind::Concat),
-    ("except", KeywordKind::Except),
-    ("followed", KeywordKind::Followed),
-];
-
-/// Reads one of the words of a set, in the order the rule lists them.
-///
-/// The whole of the name written here decides which word of the set it can be,
-/// since no word of a set begins another one: a name that only begins with a
-/// word is that name and not the word, and the refusal is the word's own rather
-/// than the last word the set happened to try. Where no word of the set begins
-/// at all, it is the set that the position is missing.
-fn keyword_set<I>(
-    input: &mut I,
-    words: &[(&str, KeywordKind)],
-    missing: SyntaxKind,
-) -> Result<I, UnsynError>
-where
-    I: UnsynInput,
-{
-    let mut rest = input.clone();
-    let name = take_while(continues_a_name).parse(&mut rest)?;
-    let reached = name.len();
-    let text = name.as_str();
-
-    for (word, kind) in words {
-        if *word == text {
-            return Ok(input.split_to(word.len()));
-        }
-
-        if text.starts_with(word) {
-            return Err(UnsynError::Keyword(
-                *kind,
-                ControlFlow::Recovable,
-                input.to_span_at(reached),
-            ));
-        }
-    }
-
-    Err(UnsynError::Syntax(
-        missing,
-        ControlFlow::Recovable,
-        input.to_span_at(reached),
-    ))
-}
-
-/// Whether `c` is what an identifier continues with, which is also what makes a
-/// keyword only the head of a longer word.
-#[inline]
-fn continues_a_name(c: char) -> bool {
-    is_xid_continue(c) || c == '#'
-}
 
 // ---------------------------------------------------------------------------
 // `whitespace S -> [ U+0009-U+000D, U+0020, U+0085, U+00A0, U+1680,`
@@ -231,85 +125,123 @@ pub struct XID_Continue<I>(#[parserc(parser = next_if(|c: char| is_xid_continue(
 where
     I: UnsynInput;
 
+/// The `( XID_Start | '_' )` that begins a name.
+///
+/// The group names no rule of the spec, which is what the analyzer's
+/// [`UnnamedAlternative`](super::errors::LintKind::UnnamedAlternative) lint says
+/// of a file that writes one: the hand tree cannot leave the choice unmodelled,
+/// so it names the group here and gives it the enum the choice deserves.
+#[derive(Debug, PartialEq, Eq, PartialOrd, Ord, Clone, Syntax)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+pub enum IdentStart<I>
+where
+    I: UnsynInput,
+{
+    /// A start the external of the same name answers for.
+    Xid(XID_Start<I>),
+    /// The `_` that may also begin a name.
+    Underscore(Char<I, '_'>),
+}
+
 /// A name before it is known whether it is a keyword: a start, then any run of
 /// continuing characters.
 #[derive(Debug, PartialEq, Eq, PartialOrd, Ord, Clone, Syntax)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
-pub struct IdentOrKeyword<I>(#[parserc(parser = read_ident_or_keyword)] pub I)
-where
-    I: UnsynInput;
-
-/// Reads the `( XID_Start | '_' ) XID_Continue*` of [`IdentOrKeyword`].
-///
-/// The repetition of a rule that keeps only its text is read through that rule,
-/// so that the character class of the spec is stated once; what the run is worth
-/// here is how far it reached, which is the length of the text it took.
-fn read_ident_or_keyword<I>(input: &mut I) -> Result<I, UnsynError>
+pub struct IdentOrKeyword<I>
 where
     I: UnsynInput,
 {
-    let mut whole = input.clone();
-    let before = input.len();
+    /// The character the name begins with, of either of the two shapes.
+    pub start: IdentStart<I>,
+    /// The characters the name continues with, each of the external's own shape.
+    pub tail: Vec<XID_Continue<I>>,
+}
 
-    Or::<XID_Start<I>, Char<I, '_'>>::into_parser().parse(input)?;
+impl<I: UnsynInput> IdentStart<I> {
+    /// The text of the one character the start read.
+    #[inline]
+    pub fn text(&self) -> &str {
+        match self {
+            IdentStart::Xid(start) => start.0.as_str(),
+            IdentStart::Underscore(underscore) => underscore.0.as_str(),
+        }
+    }
+}
 
-    while XID_Continue::into_parser().ok().parse(input)?.is_some() {}
+impl<I: UnsynInput> IdentOrKeyword<I> {
+    /// The whole of the name, its start and its run together.
+    pub fn text(&self) -> String {
+        let mut text = String::from(self.start.text());
 
-    Ok(whole.split_to(before - input.len()))
+        for continue_ in &self.tail {
+            text.push_str(continue_.0.as_str());
+        }
+
+        text
+    }
 }
 
 // ---------------------------------------------------------------------------
 // `lexer RawIdent -> 'r#' IdentOrKeyword;`
 // `lexer NonKeywordIdent -> IdentOrKeyword except Keywords;`
-// `lexer Ident -> RawIdent | NonKeywordIdent;`
+// `lexer Ident -> NonKeywordIdent | RawIdent;` — the hand tree reads the raw
+// form first, which is what the order of a choice decides and not what the
+// spec means to say about either form.
 // ---------------------------------------------------------------------------
 
 /// A name written out of the keywords of the language, as `r#where` is.
 #[derive(Debug, PartialEq, Eq, PartialOrd, Ord, Clone, Syntax)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
-pub struct RawIdent<I>(#[parserc(parser = read_raw_ident)] pub I)
-where
-    I: UnsynInput;
-
-/// Reads the `'r#' IdentOrKeyword` of [`RawIdent`].
-///
-/// The name after the sigil is read by [`IdentOrKeyword`] and not by
-/// [`NonKeywordIdent`], which is what lets a raw name be a word of the language.
-fn read_raw_ident<I>(input: &mut I) -> Result<I, UnsynError>
+pub struct RawIdent<I>
 where
     I: UnsynInput,
 {
-    let mut whole = input.clone();
-    let before = input.len();
+    /// The `r#` that opens the name.
+    #[parserc(keyword = "r#", map_err = SyntaxKind::Ident.map())]
+    pub sigil: I,
+    /// The name the sigil marks, read as a name and not as a word, which is what
+    /// lets a raw name be a word of the language.
+    pub name: IdentOrKeyword<I>,
+}
 
-    keyword("r#")
-        .parse(input)
-        .map_err(SyntaxKind::Ident.map())?;
-    IdentOrKeyword::into_parser().parse(input)?;
-
-    Ok(whole.split_to(before - input.len()))
+impl<I: UnsynInput> RawIdent<I> {
+    /// The whole of the name, sigil and all.
+    #[inline]
+    pub fn text(&self) -> String {
+        self.sigil.as_str().to_owned() + &self.name.text()
+    }
 }
 
 /// A name that is not a word of the language.
 #[derive(Debug, PartialEq, Eq, PartialOrd, Ord, Clone, Syntax)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
-pub struct NonKeywordIdent<I>(#[parserc(parser = read_non_keyword_ident)] pub I)
-where
-    I: UnsynInput;
-
-/// Reads the `IdentOrKeyword except Keywords` of [`NonKeywordIdent`].
-///
-/// `except` asks its question of the text the operand to its left read and of
-/// nothing else: the removal runs over that text on its own, and only a removal
-/// that takes all of it refuses the name. `lexerX` is therefore a name of its
-/// own, although `lexer` fits the head of it.
-fn read_non_keyword_ident<I>(input: &mut I) -> Result<I, UnsynError>
+pub struct NonKeywordIdent<I>
 where
     I: UnsynInput,
 {
+    /// The name the `except` leaves standing, which is all the node keeps of it.
+    ///
+    /// What the removal asks is not a part of the name, and nothing beyond the
+    /// refusal it makes can say more than the node of [`IdentOrKeyword`] already
+    /// says.
+    #[parserc(parser = read_non_keyword_ident)]
+    pub name: IdentOrKeyword<I>,
+}
+
+/// Reads the `IdentOrKeyword except Keywords` of [`NonKeywordIdent`].
+///
+/// `except` asks its question of the text the name read and of nothing else: the
+/// removal runs over that text on its own, and only a removal that takes all of
+/// it refuses the name. `lexerX` is therefore a name of its own, although
+/// `lexer` fits the head of it.
+fn read_non_keyword_ident<I>(input: &mut I) -> Result<IdentOrKeyword<I>, UnsynError>
+where
+    I: UnsynInput,
+{
+    let mut whole = input.clone();
     let name = IdentOrKeyword::into_parser().parse(input)?;
 
-    let mut rest = name.0.clone();
+    let mut rest = whole.split_to(whole.len() - input.len());
 
     if Keywords::into_parser().ok().parse(&mut rest)?.is_some() && rest.is_empty() {
         return Err(UnsynError::Semantics(
@@ -318,7 +250,7 @@ where
         ));
     }
 
-    Ok(name.0)
+    Ok(name)
 }
 
 /// A name of a node: either a word of the language written raw, or one that is
@@ -342,10 +274,10 @@ where
 impl<I: UnsynInput> Ident<I> {
     /// The text of the name, sigil and all.
     #[inline]
-    pub fn text(&self) -> &I {
+    pub fn text(&self) -> String {
         match self {
-            Ident::Raw(raw) => &raw.0,
-            Ident::NonKeyword(ident) => &ident.0,
+            Ident::Raw(raw) => raw.text(),
+            Ident::NonKeyword(ident) => ident.name.text(),
         }
     }
 }
@@ -372,36 +304,88 @@ where
 /// The word a definition opens with.
 ///
 /// Which of the three it was is the only thing that tells a `whitespace`
-/// declaration from a `lexer` one and from a `syntax` one, and it is read from
-/// the text of this node, since the three words are literals of the spec rather
-/// than rules of it.
+/// declaration from a `lexer` one and from a `syntax` one, and the enum says it
+/// as a variant rather than as text to be read: the words are the alternatives
+/// the rule writes, and the variant is the one that was read.
 #[derive(Debug, PartialEq, Eq, PartialOrd, Ord, Clone, Syntax)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
-pub struct LeadingKeywords<I>(#[parserc(parser = read_leading_keywords)] pub I)
-where
-    I: UnsynInput;
-
-/// Reads the three words [`LeadingKeywords`] is written out of.
-fn read_leading_keywords<I>(input: &mut I) -> Result<I, UnsynError>
+#[parserc(map_err = map_leading_keywords_err)]
+pub enum LeadingKeywords<I>
 where
     I: UnsynInput,
 {
-    keyword_set(input, &LEADING_WORDS, SyntaxKind::LeadingKeywords)
+    /// `lexer`, which defines a terminal.
+    Lexer(#[parserc(keyword = "lexer", map_err = KeywordKind::Lexer.map())] I),
+    /// `syntax`, which defines a node of the tree.
+    Syntax(#[parserc(keyword = "syntax", map_err = KeywordKind::Syntax.map())] I),
+    /// `whitespace`, which declares the trivia of the language.
+    Whitespace(#[parserc(keyword = "whitespace", map_err = KeywordKind::Whitespace.map())] I),
+}
+
+/// Names the set the word belongs to, which is more than the bare combinator
+/// error of the enum says.
+///
+/// The three words are mutually exclusive heads, so a position that begins none
+/// of them can only be told as the set that is missing here.
+#[inline]
+fn map_leading_keywords_err(err: UnsynError) -> UnsynError {
+    match err {
+        UnsynError::Kind(Kind::Syntax("LeadingKeywords", control_flow, span)) => {
+            UnsynError::Syntax(SyntaxKind::LeadingKeywords, control_flow, span)
+        }
+        err => err,
+    }
+}
+
+impl<I: UnsynInput> LeadingKeywords<I> {
+    /// The word that was read.
+    #[inline]
+    pub fn word(&self) -> &'static str {
+        match self {
+            LeadingKeywords::Lexer(_) => "lexer",
+            LeadingKeywords::Syntax(_) => "syntax",
+            LeadingKeywords::Whitespace(_) => "whitespace",
+        }
+    }
 }
 
 /// The word that joins two operands of a pattern into one construct.
 #[derive(Debug, PartialEq, Eq, PartialOrd, Ord, Clone, Syntax)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
-pub struct FollowingKeywords<I>(#[parserc(parser = read_following_keywords)] pub I)
-where
-    I: UnsynInput;
-
-/// Reads the three words [`FollowingKeywords`] is written out of.
-fn read_following_keywords<I>(input: &mut I) -> Result<I, UnsynError>
+#[parserc(map_err = map_following_keywords_err)]
+pub enum FollowingKeywords<I>
 where
     I: UnsynInput,
 {
-    keyword_set(input, &FOLLOWING_WORDS, SyntaxKind::FollowingKeywords)
+    /// `concat`, which joins what two operands matched into one token.
+    Concat(#[parserc(keyword = "concat", map_err = KeywordKind::Concat.map())] I),
+    /// `except`, which removes what one operand matches from another.
+    Except(#[parserc(keyword = "except", map_err = KeywordKind::Except.map())] I),
+    /// `followed`, which asks that an operand come next without being taken.
+    Followed(#[parserc(keyword = "followed", map_err = KeywordKind::Followed.map())] I),
+}
+
+/// Names the set the word belongs to, as the leading words are named.
+#[inline]
+fn map_following_keywords_err(err: UnsynError) -> UnsynError {
+    match err {
+        UnsynError::Kind(Kind::Syntax("FollowingKeywords", control_flow, span)) => {
+            UnsynError::Syntax(SyntaxKind::FollowingKeywords, control_flow, span)
+        }
+        err => err,
+    }
+}
+
+impl<I: UnsynInput> FollowingKeywords<I> {
+    /// The word that was read.
+    #[inline]
+    pub fn word(&self) -> &'static str {
+        match self {
+            FollowingKeywords::Concat(_) => "concat",
+            FollowingKeywords::Except(_) => "except",
+            FollowingKeywords::Followed(_) => "followed",
+        }
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -435,33 +419,72 @@ where
 // `lexer LitDec -> DecDigit ( DecDigit | '_' )*;`
 // ---------------------------------------------------------------------------
 
-/// A decimal number, which is how the bound of a repetition is written.
+/// The `( DecDigit | '_' )` that continues a decimal literal.
 ///
-/// An underscore is part of the token and carries no value; the pass that reads
-/// the number drops them.
+/// The group names no rule of the spec, which is what the analyzer's
+/// [`UnnamedAlternative`](super::errors::LintKind::UnnamedAlternative) lint says
+/// of a file that writes one; the hand tree names it here.
 #[derive(Debug, PartialEq, Eq, PartialOrd, Ord, Clone, Syntax)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
-pub struct LitDec<I>(#[parserc(parser = read_lit_dec)] pub I)
-where
-    I: UnsynInput;
-
-/// Reads the `DecDigit ( DecDigit | '_' )*` of [`LitDec`].
-fn read_lit_dec<I>(input: &mut I) -> Result<I, UnsynError>
+pub enum DigitOrUnderscore<I>
 where
     I: UnsynInput,
 {
-    let mut whole = input.clone();
-    let before = input.len();
+    /// A digit of the number.
+    Dec(DecDigit<I>),
+    /// The `_` that separates digits and carries no value.
+    Underscore(Char<I, '_'>),
+}
 
-    DecDigit::into_parser().parse(input)?;
+/// A decimal number, which is how the bound of a repetition is written.
+///
+/// An underscore is part of the token and carries no value; the count of the
+/// literal is read from its digits, which the tree holds one by one.
+#[derive(Debug, PartialEq, Eq, PartialOrd, Ord, Clone, Syntax)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+pub struct LitDec<I>
+where
+    I: UnsynInput,
+{
+    /// The digit the number begins with.
+    pub head: DecDigit<I>,
+    /// Every digit and separator after it.
+    pub tail: Vec<DigitOrUnderscore<I>>,
+}
 
-    while Or::<DecDigit<I>, Char<I, '_'>>::into_parser()
-        .ok()
-        .parse(input)?
-        .is_some()
-    {}
+impl<I: UnsynInput> LitDec<I> {
+    /// The number the digits spell, with the underscores the rule allows
+    /// between them dropped.
+    ///
+    /// `None` says the number is past what a count of repetitions can be kept
+    /// to, which no reading of the digits can turn into a count.
+    pub fn count(&self) -> Option<u32> {
+        let mut digits = String::new();
 
-    Ok(whole.split_to(before - input.len()))
+        digits.push_str(self.head.0.as_str());
+
+        for part in &self.tail {
+            if let DigitOrUnderscore::Dec(digit) = part {
+                digits.push_str(digit.0.as_str());
+            }
+        }
+
+        digits.parse::<u32>().ok()
+    }
+
+    /// The text of the literal, underscores and all.
+    pub fn text(&self) -> String {
+        let mut text = String::from(self.head.0.as_str());
+
+        for part in &self.tail {
+            text.push_str(match part {
+                DigitOrUnderscore::Dec(digit) => digit.0.as_str(),
+                DigitOrUnderscore::Underscore(underscore) => underscore.0.as_str(),
+            });
+        }
+
+        text
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -471,38 +494,87 @@ where
 /// A code point written in a string, as `U+0009` is.
 ///
 /// unsyn asks for exactly four hex digits after `U+`, where Rust allows four to
-/// six, because the token it returns is always six characters long.
-#[derive(Debug, PartialEq, Eq, PartialOrd, Ord, Clone, Syntax)]
+/// six, because the token it returns is always six characters long. The count
+/// is a thing the grammar cannot say in fields, so the reading of the digits
+/// keeps the check the rule asks for; what the node holds once it has passed
+/// is the digits themselves.
+#[derive(Debug, PartialEq, Eq, PartialOrd, Ord, Clone)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
-pub struct LitUnicode<I>(#[parserc(parser = read_lit_unicode)] pub I)
-where
-    I: UnsynInput;
-
-/// Reads the `'U+' concat HexDigit{4}` of [`LitUnicode`].
-///
-/// `concat` joins the two operands with nothing between them, so a fifth digit
-/// cannot be the start of the next token: it is a bound written wrong, and the
-/// literal is refused.
-fn read_lit_unicode<I>(input: &mut I) -> Result<I, UnsynError>
+pub struct LitUnicode<I>
 where
     I: UnsynInput,
 {
-    let mut whole = input.clone();
+    /// The `U+` that opens the literal.
+    pub prefix: I,
+    /// The four digits that spell the code point.
+    pub digits: Vec<HexDigit<I>>,
+}
 
-    let prefix = keyword("U+")
-        .parse(input)
-        .map_err(SyntaxKind::Unicode.map())?;
+impl<I: UnsynInput> LitUnicode<I> {
+    /// The code point the digits spell, when they spell a character.
+    ///
+    /// Four hex digits is the shape the reader counted, so the only thing left
+    /// to answer is whether the number of them is a character, which `D800`
+    /// through `DFFF` are not.
+    pub fn value(&self) -> Option<char> {
+        let mut digits = String::new();
 
-    let digits = Vec::<HexDigit<I>>::into_parser().parse(input)?;
+        for digit in &self.digits {
+            digits.push_str(digit.0.as_str());
+        }
 
-    if digits.len() != 4 {
-        return Err(UnsynError::Semantics(
-            SemanticsKind::Unicode,
-            prefix.to_span().union(&digits.to_span()),
-        ));
+        u32::from_str_radix(&digits, 16)
+            .ok()
+            .and_then(char::from_u32)
     }
 
-    Ok(whole.split_to(prefix.len() + digits.len()))
+    /// The text of the literal, `U+` and all.
+    pub fn text(&self) -> String {
+        let mut text = String::from(self.prefix.as_str());
+
+        for digit in &self.digits {
+            text.push_str(digit.0.as_str());
+        }
+
+        text
+    }
+}
+
+impl<I> Syntax<I> for LitUnicode<I>
+where
+    I: UnsynInput,
+{
+    /// Reads the `'U+' concat HexDigit{4}` of [`LitUnicode`].
+    ///
+    /// `concat` joins the two operands with nothing between them, so a fifth
+    /// digit cannot be the start of the next token: it is a bound written
+    /// wrong, and the literal is refused.
+    #[inline]
+    fn parse(input: &mut I) -> Result<Self, <I as Input>::Error> {
+        let mut whole = input.clone();
+
+        let prefix = keyword("U+")
+            .parse(input)
+            .map_err(SyntaxKind::Unicode.map())?;
+
+        let digits = Vec::<HexDigit<I>>::into_parser().parse(input)?;
+
+        if digits.len() != 4 {
+            return Err(UnsynError::Semantics(
+                SemanticsKind::Unicode,
+                prefix.to_span().union(&digits.to_span()),
+            ));
+        }
+
+        _ = whole.split_to(prefix.len() + digits.len());
+
+        Ok(Self { prefix, digits })
+    }
+
+    #[inline]
+    fn to_span(&self) -> Span {
+        self.prefix.to_span().union(&self.digits.to_span())
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -522,121 +594,239 @@ where
     I: UnsynInput;
 
 /// An escape for one of the characters ASCII writes with a backslash.
+///
+/// The rule is a choice, and the first of its alternatives is a sequence — the
+/// marker of `\x` and the two digits of the seven-bit code it spells — which is
+/// what the named fields of that variant hold.
 #[derive(Debug, PartialEq, Eq, PartialOrd, Ord, Clone, Syntax)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
-pub struct AsciiEscape<I>(
-    #[parserc(
-        parser = read_ascii_7bit_escape
-            .or(keyword("\\n"))
-            .or(keyword("\\r"))
-            .or(keyword("\\t"))
-            .or(keyword("\\\\"))
-            .or(keyword("\\0"))
-    )]
-    pub I,
-)
-where
-    I: UnsynInput;
-
-/// Reads the `'\\x' OctDigit HexDigit` alternative: a code of seven bits, which
-/// is why the first digit is refused above `7`.
-fn read_ascii_7bit_escape<I>(input: &mut I) -> Result<I, UnsynError>
+pub enum AsciiEscape<I>
 where
     I: UnsynInput,
 {
-    let mut whole = input.clone();
+    /// `\x` and the two digits of a code of seven bits, which is why the first
+    /// of them is refused above `7`.
+    Hex {
+        /// The `\x` that opens the escape.
+        ///
+        /// What is read past this marker is a written escape going wrong, and
+        /// no enclosing choice can put it right.
+        #[parserc(crucial, keyword = "\\x", map_err = SyntaxKind::AsciiEscape.map())]
+        marker: I,
+        /// The leading digit, bounded by [`OctDigit`].
+        oct: OctDigit<I>,
+        /// The second digit of the pair.
+        hex: HexDigit<I>,
+    },
+    /// `\n`, a line feed.
+    N(#[parserc(keyword = "\\n")] I),
+    /// `\r`, a carriage return.
+    R(#[parserc(keyword = "\\r")] I),
+    /// `\t`, a tab.
+    T(#[parserc(keyword = "\\t")] I),
+    /// `\\`, the backslash itself.
+    Backslash(#[parserc(keyword = "\\\\")] I),
+    /// `\0`, the nul character.
+    Zero(#[parserc(keyword = "\\0")] I),
+}
 
-    keyword("\\x")
-        .parse(input)
-        .map_err(SyntaxKind::AsciiEscape.map())?;
+impl<I: UnsynInput> AsciiEscape<I> {
+    /// The character the escape spells.
+    ///
+    /// Every shape the enum holds spells exactly one character, and the
+    /// seven-bit pair of the first variant is two hex digits by the rule of
+    /// [`HexDigit`], so there is nothing left for a refusal to say.
+    pub fn value(&self) -> char {
+        match self {
+            AsciiEscape::Hex { oct, hex, .. } => {
+                let digits = format!("{}{}", oct.0.as_str(), hex.0.as_str());
 
-    for i in 0..2 {
-        let Some(c) = input.iter().next() else {
-            return Err(UnsynError::Semantics(
-                SemanticsKind::Char7BitEscapeTooShort,
-                input.to_span(),
-            ));
-        };
-
-        if !c.is_ascii_hexdigit() {
-            return Err(UnsynError::Semantics(
-                SemanticsKind::HexDigit,
-                input.to_span_at(1),
-            ));
+                u32::from_str_radix(&digits, 16)
+                    .ok()
+                    .and_then(char::from_u32)
+                    .expect("a pair of hex digits whose leader is below `8` is a character")
+            }
+            AsciiEscape::N(_) => '\n',
+            AsciiEscape::R(_) => '\r',
+            AsciiEscape::T(_) => '\t',
+            AsciiEscape::Backslash(_) => '\\',
+            AsciiEscape::Zero(_) => '\0',
         }
-
-        // The pair of digits is `OctDigit HexDigit`, so only the first of them
-        // is bounded: `0x80` and above is not a character ASCII writes.
-        if i == 0 && c > '7' {
-            return Err(UnsynError::Semantics(
-                SemanticsKind::Char7BitEscapeOutOfRange,
-                input.to_span_at(1),
-            ));
-        }
-
-        next(c).parse(input)?;
     }
 
-    Ok(whole.split_to(4))
+    /// The text of the escape, as it was written.
+    pub fn text(&self) -> String {
+        match self {
+            AsciiEscape::Hex { marker, oct, hex } => {
+                format!("{}{}{}", marker.as_str(), oct.0.as_str(), hex.0.as_str())
+            }
+            AsciiEscape::N(word)
+            | AsciiEscape::R(word)
+            | AsciiEscape::T(word)
+            | AsciiEscape::Backslash(word)
+            | AsciiEscape::Zero(word) => word.as_str().to_owned(),
+        }
+    }
+}
+
+/// One digit of a code point escape, with the separators that follow it.
+///
+/// The group `( HexDigit '_'* )` names no rule of the spec, which is what the
+/// analyzer's [`UnnamedAlternative`](super::errors::LintKind::UnnamedAlternative)
+/// lint says of a file that writes one; the hand tree names it here, because
+/// `{1, 6}` counts these and nothing else.
+#[derive(Debug, PartialEq, Eq, PartialOrd, Ord, Clone, Syntax)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+pub struct EscapeDigit<I>
+where
+    I: UnsynInput,
+{
+    /// The digit itself.
+    pub digit: HexDigit<I>,
+    /// The separators of the digit, which belong to the digit they follow.
+    pub sep: Vec<Char<I, '_'>>,
 }
 
 /// An escape of a code point, as `\u{1F600}` is.
 #[derive(Debug, PartialEq, Eq, PartialOrd, Ord, Clone, Syntax)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
-pub struct UnicodeEscape<I>(#[parserc(parser = read_unicode_escape)] pub I)
-where
-    I: UnsynInput;
-
-/// Reads the `'\\u{' ( HexDigit '_'* ){1, 6} '}'` of [`UnicodeEscape`].
-///
-/// The bound is of the digits and not of the text, since an underscore may
-/// separate them; it is counted here rather than read as a repetition because
-/// `{1,6}` bounds the number of digits, which is what says how long the escape
-/// may be.
-fn read_unicode_escape<I>(input: &mut I) -> Result<I, UnsynError>
+pub struct UnicodeEscape<I>
 where
     I: UnsynInput,
 {
-    let mut whole = input.clone();
-    let before = input.len();
+    /// The `\u{` that opens the escape.
+    #[parserc(keyword = "\\u{", map_err = SyntaxKind::UnicodeEscape.map())]
+    pub marker: I,
+    /// The one to six digits the braces hold.
+    #[parserc(parser = read_escape_digits)]
+    pub digits: Vec<EscapeDigit<I>>,
+    /// The `}` that closes the escape.
+    #[parserc(keyword = "}", map_err = PunctKind::BraceEnd.map())]
+    pub close: I,
+}
 
-    keyword("\\u{")
-        .parse(input)
-        .map_err(SyntaxKind::UnicodeEscape.map())?;
+/// Reads the `{1, 6}` digits of [`UnicodeEscape`].
+///
+/// The bound is of the digits and not of the text, since an underscore may
+/// separate them; it is counted here rather than left to the grammar because
+/// `{1, 6}` bounds the number of digits, which is what says how long the escape
+/// may be. What a seventh asks is not the bound but the `}` after it, and the
+/// closing of the escape is the one to say that it did not arrive.
+fn read_escape_digits<I>(input: &mut I) -> Result<Vec<EscapeDigit<I>>, UnsynError>
+where
+    I: UnsynInput,
+{
+    let mut digits = Vec::new();
 
-    let mut digits = 0;
-
-    while digits < 6 {
-        if HexDigit::into_parser().ok().parse(input)?.is_none() {
+    while digits.len() < 6 {
+        let Some(digit) = EscapeDigit::into_parser().ok().parse(input)? else {
             break;
-        }
+        };
 
-        digits += 1;
-
-        // `'_'*`: the separators of a digit belong to the digit they follow.
-        Vec::<Char<I, '_'>>::into_parser().parse(input)?;
+        digits.push(digit);
     }
 
-    // Either no digit at all, which the bound refuses, or a seventh, which no
-    // code point needs.
-    if digits == 0 || matches!(input.iter().next(), Some(c) if c.is_ascii_hexdigit()) {
+    // No digit at all, which the lower bound of `{1, 6}` refuses.
+    if digits.is_empty() {
         return Err(UnsynError::Semantics(
             SemanticsKind::UnicodeEscape,
             input.to_span_at(1),
         ));
     }
 
-    keyword("}")
-        .parse(input)
-        .map_err(PunctKind::BraceEnd.map())?;
+    Ok(digits)
+}
 
-    Ok(whole.split_to(before - input.len()))
+impl<I: UnsynInput> UnicodeEscape<I> {
+    /// The code point the digits spell, when they spell a character.
+    ///
+    /// Four to six hex digits is a number, and a number past `DFFF` or short
+    /// of `D800`'s refusal is no character; the pass that reads a value is the
+    /// one that says so, from the span of the escape it was reading.
+    pub fn value(&self) -> Option<char> {
+        let mut digits = String::new();
+
+        for group in &self.digits {
+            digits.push_str(group.digit.0.as_str());
+        }
+
+        u32::from_str_radix(&digits, 16)
+            .ok()
+            .and_then(char::from_u32)
+    }
+
+    /// The text of the escape, as it was written.
+    pub fn text(&self) -> String {
+        let mut text = String::from(self.marker.as_str());
+
+        for group in &self.digits {
+            text.push_str(group.digit.0.as_str());
+
+            for _ in &group.sep {
+                text.push('_');
+            }
+        }
+
+        text.push_str(self.close.as_str());
+        text
+    }
 }
 
 // ---------------------------------------------------------------------------
 // `lexer LitStr -> '\'' ( ~['"','\\',CR] | QuoteEscape | AsciiEscape`
 // `                   | UnicodeEscape )* '\'';`
 // ---------------------------------------------------------------------------
+
+/// The `( ~['"','\\',CR] | QuoteEscape | AsciiEscape | UnicodeEscape )` that
+/// fills a string.
+///
+/// The group names no rule of the spec, which is what the analyzer's
+/// [`UnnamedAlternative`](super::errors::LintKind::UnnamedAlternative) lint says
+/// of a file that writes one; the hand tree names it here, because the reading
+/// of a string is a reading of its pieces one by one.
+#[derive(Debug, PartialEq, Eq, PartialOrd, Ord, Clone, Syntax)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+pub enum LitStrContent<I>
+where
+    I: UnsynInput,
+{
+    /// One character of the plain text of the body, which is none of the three
+    /// the set refuses: the quote that would close the literal, the backslash
+    /// that opens an escape, and the `CR` no escape writes.
+    Plain(#[parserc(parser = next_if(|c: char| c != '\'' && c != '\\' && c != '\r'))] I),
+    /// An escaped quote.
+    Quote(QuoteEscape<I>),
+    /// One of the escapes ASCII writes with a backslash.
+    Ascii(AsciiEscape<I>),
+    /// An escape of a code point.
+    Unicode(UnicodeEscape<I>),
+}
+
+impl<I: UnsynInput> LitStrContent<I> {
+    /// The characters the piece spells.
+    ///
+    /// An escape of no character — `\u{D800}` and its like, a shape the reader
+    /// accepts because four to six hex digits is a number — spells none, and
+    /// the pass that reads a value is the one to refuse it.
+    pub fn chars(&self) -> Vec<char> {
+        match self {
+            LitStrContent::Plain(text) => text.as_str().chars().collect(),
+            LitStrContent::Quote(_) => vec!['\''],
+            LitStrContent::Ascii(escape) => vec![escape.value()],
+            LitStrContent::Unicode(escape) => escape.value().into_iter().collect(),
+        }
+    }
+
+    /// The text of the piece, as it was written.
+    pub fn text(&self) -> String {
+        match self {
+            LitStrContent::Plain(text) => text.as_str().to_owned(),
+            LitStrContent::Quote(quote) => quote.0.as_str().to_owned(),
+            LitStrContent::Ascii(escape) => escape.text(),
+            LitStrContent::Unicode(escape) => escape.text(),
+        }
+    }
+}
 
 /// A string literal: any run of characters between two `'`, in which a `'`, a
 /// `\` and a `CR` can only be written by an escape.
@@ -645,66 +835,46 @@ where
 /// literal can never hold a bare apostrophe.
 #[derive(Debug, PartialEq, Eq, PartialOrd, Ord, Clone, Syntax)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
-pub struct LitStr<I>(#[parserc(parser = read_lit_str)] pub I)
-where
-    I: UnsynInput;
-
-/// Reads the `'\''. ( ~[…]|QuoteEscape|AsciiEscape|UnicodeEscape )* '\''` of
-/// [`LitStr`].
-fn read_lit_str<I>(input: &mut I) -> Result<I, UnsynError>
+pub struct LitStr<I>
 where
     I: UnsynInput,
 {
-    let mut whole = input.clone();
-    let before = input.len();
+    /// The quote that opens the literal.
+    #[parserc(keyword = "'", map_err = PunctKind::SingleQuote.map())]
+    pub open: I,
+    /// The pieces of the body, each one character of plain text or one escape.
+    ///
+    /// The repetition ends where no piece begins, which is the closing quote
+    /// wherever one stands and whatever the text after the pieces otherwise
+    /// is; the quote that has to come next says what was expected there.
+    pub body: Vec<LitStrContent<I>>,
+    /// The quote that closes the literal.
+    #[parserc(keyword = "'", map_err = PunctKind::SingleQuote.map())]
+    pub close: I,
+}
 
-    keyword("'")
-        .parse(input)
-        .map_err(PunctKind::SingleQuote.map())?;
-
-    loop {
-        // `~['\'','\\',CR]`: the plain text of the body, taken in one piece up
-        // to the first character that carries a meaning of its own.
-        _ = take_while(|c: char| c != '\'' && c != '\\' && c != '\r').parse(input)?;
-
-        match input.iter().next() {
-            // The body ends where the closing quote begins.
-            Some('\'') => break,
-            // A `CR` is refused by the set, and no escape writes it either.
-            Some('\r') => {
-                return Err(UnsynError::Semantics(
-                    SemanticsKind::StrContent,
-                    input.to_span_at(1),
-                ));
-            }
-            Some('\\') => {
-                if Or::<QuoteEscape<I>, Or<AsciiEscape<I>, UnicodeEscape<I>>>::into_parser()
-                    .ok()
-                    .parse(input)?
-                    .is_none()
-                {
-                    // A `\` that opens none of the three escapes belongs to no
-                    // operand of the body; the missing quote is reported there.
-                    break;
-                }
-            }
-            // Nothing is left to read, and no quote closed the literal.
-            None => {
-                return Err(UnsynError::Syntax(
-                    SyntaxKind::StrContent,
-                    ControlFlow::Recovable,
-                    input.to_span(),
-                ));
-            }
-            Some(_) => unreachable!("the plain text of a body is taken greedily"),
-        }
+impl<I: UnsynInput> LitStr<I> {
+    /// The characters the literal spells.
+    ///
+    /// The two quotes bound the literal and carry no value, so only the body
+    /// is read. An escape of no character yields no character: the refusal it
+    /// is worth belongs to the pass that reads a value, which reaches the
+    /// escape itself and says so from its span.
+    pub fn chars(&self) -> Vec<char> {
+        self.body.iter().flat_map(LitStrContent::chars).collect()
     }
 
-    keyword("'")
-        .parse(input)
-        .map_err(PunctKind::SingleQuote.map())?;
+    /// The text of the literal, both quotes and all, as it was written.
+    pub fn text(&self) -> String {
+        let mut text = String::from(self.open.as_str());
 
-    Ok(whole.split_to(before - input.len()))
+        for piece in &self.body {
+            text.push_str(&piece.text());
+        }
+
+        text.push_str(self.close.as_str());
+        text
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -712,62 +882,83 @@ where
 // `lexer OuterLineDoc -> '///' ( ~['/'] ~[LF,CR]* )?;`
 // ---------------------------------------------------------------------------
 
+/// Whether a character leaves the line a document is written on.
+#[inline]
+fn stays_on_the_line(c: char) -> bool {
+    c != '\n' && c != '\r'
+}
+
 /// A line document that describes the file it is written in.
 #[derive(Debug, PartialEq, Eq, PartialOrd, Ord, Clone, Syntax)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
-pub struct InnerLineDoc<I>(#[parserc(parser = read_inner_line_doc)] pub I)
-where
-    I: UnsynInput;
-
-/// Reads the `'//!' ~[LF,CR]*` of [`InnerLineDoc`].
-fn read_inner_line_doc<I>(input: &mut I) -> Result<I, UnsynError>
+pub struct InnerLineDoc<I>
 where
     I: UnsynInput,
 {
-    let mut whole = input.clone();
+    /// The `//!` that opens the document.
+    #[parserc(keyword = "//!", map_err = SyntaxKind::InnerLineDoc.map())]
+    pub open: I,
+    /// The text to the end of the line, which the set of the rule refuses to
+    /// cross. The run is taken in one piece: that is what a repetition of one
+    /// refused character arrives at, and nothing below it says more.
+    #[parserc(take_while = stays_on_the_line)]
+    pub body: I,
+}
 
-    keyword("//!")
-        .parse(input)
-        .map_err(SyntaxKind::InnerLineDoc.map())?;
+impl<I: UnsynInput> InnerLineDoc<I> {
+    /// The text of the document, as it was written.
+    #[inline]
+    pub fn text(&self) -> String {
+        self.open.as_str().to_owned() + self.body.as_str()
+    }
+}
 
-    let body = take_while(|c: char| c != '\n' && c != '\r').parse(input)?;
-
-    Ok(whole.split_to(3 + body.len()))
+/// The body of an [`OuterLineDoc`]: the one character its group asks for first
+/// and the run that follows it, named by the hand tree for the group the spec
+/// leaves unnamed.
+#[derive(Debug, PartialEq, Eq, PartialOrd, Ord, Clone, Syntax)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+pub struct LineDocBody<I>
+where
+    I: UnsynInput,
+{
+    /// The `~['/']`: one character that is no slash.
+    #[parserc(parser = next_if(|c: char| c != '/'))]
+    pub first: I,
+    /// The `~[LF,CR]*` after it, taken in one piece as the inner document's is.
+    #[parserc(take_while = stays_on_the_line)]
+    pub rest: I,
 }
 
 /// A line document that describes the definition after it.
 #[derive(Debug, PartialEq, Eq, PartialOrd, Ord, Clone, Syntax)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
-pub struct OuterLineDoc<I>(#[parserc(parser = read_outer_line_doc)] pub I)
-where
-    I: UnsynInput;
-
-/// Reads the `'///' ( ~['/'] ~[LF,CR]* )?` of [`OuterLineDoc`].
-///
-/// The body is optional, so `////` is a comment rather than an empty document, as
-/// in Rust: the fourth `/` is refused by `~['/']`, which leaves the option
-/// unfilled only when there is nothing to fill it with.
-fn read_outer_line_doc<I>(input: &mut I) -> Result<I, UnsynError>
+pub struct OuterLineDoc<I>
 where
     I: UnsynInput,
 {
-    let mut whole = input.clone();
+    /// The `///` that opens the document.
+    #[parserc(keyword = "///", map_err = SyntaxKind::OuterLineDoc.map())]
+    pub open: I,
+    /// The body, optional as the rule writes it: the fourth `/` is refused by
+    /// `~['/']`, which leaves the option unfilled, and what stands after the
+    /// document is for the file to say.
+    pub body: Option<LineDocBody<I>>,
+}
 
-    keyword("///")
-        .parse(input)
-        .map_err(SyntaxKind::OuterLineDoc.map())?;
+impl<I: UnsynInput> OuterLineDoc<I> {
+    /// The text of the document, as it was written.
+    #[inline]
+    pub fn text(&self) -> String {
+        let mut text = String::from(self.open.as_str());
 
-    if let Some('/') = input.iter().next() {
-        return Err(UnsynError::Syntax(
-            SyntaxKind::OuterLineDoc,
-            ControlFlow::Recovable,
-            whole.to_span_at(4),
-        ));
+        if let Some(body) = &self.body {
+            text.push_str(body.first.as_str());
+            text.push_str(body.rest.as_str());
+        }
+
+        text
     }
-
-    let body = take_while(|c: char| c != '\n' && c != '\r').parse(input)?;
-
-    Ok(whole.split_to(3 + body.len()))
 }
 
 // ---------------------------------------------------------------------------
@@ -780,201 +971,280 @@ where
 // `lexer BlockCommentOrDoc -> BlockComment | OuterBlockDoc | InnerBlockDoc;`
 // ---------------------------------------------------------------------------
 
-/// Scans the body of a block group whose opening was already taken.
+/// Takes one character when it is none of `singles` and opens none of the two
+/// character `pairs`.
 ///
-/// The three rules that need it say the same thing their own way: a `/*` in the
-/// text of a body can only be read by the recursive alternative of the rule, so
-/// every opening needs a closing of its own. An opening whose closing never
-/// arrives leaves the whole group unterminated even when a `*/` comes later, so
-/// `/*/*/ */` is a broken comment rather than one that ends at that `* /`, which
-/// is how Rust reads them. A `/` that is not part of an opening is only text, so
-/// `/*/ */` does close.
-///
-/// `opened` is the length of the prefix already taken, which is also where the
-/// count starts, and the result is the length of the whole group, its closing
-/// `*/` included. `unterminated` builds the report for a group that ran out of
-/// input, over the text it had to swallow to find nothing.
-fn scan_block<I, F>(input: &mut I, opened: usize, unterminated: F) -> Result<usize, UnsynError>
+/// This is what the negated set of a block rule asks of a character: the members
+/// of the set are read as much from a `/*` as from a `*`, so the window of two
+/// characters is what a plain character of a body is refused by. The refusal is
+/// [`Recovable`](ControlFlow::Recovable): what stands where a plain character is
+/// asked for is the alternative after it, or the end of the body.
+fn plain_refusing<I>(
+    input: &mut I,
+    singles: &[char],
+    pairs: &[&'static str],
+) -> Result<I, UnsynError>
 where
     I: UnsynInput,
-    F: FnOnce(usize) -> UnsynError,
 {
-    let mut offset = opened;
-    let mut depth = 1usize;
+    let refused =
+        |input: &mut I| UnsynError::Kind(Kind::NextIf(ControlFlow::Recovable, input.to_span_at(1)));
 
-    loop {
-        // Anything that is neither pair is text, and skipping it in one piece is
-        // what leaves the interesting decisions to the three branches below.
-        offset += take_while(|c: char| c != '*' && c != '/')
-            .parse(input)?
-            .len();
+    let Some(c) = input.iter().next() else {
+        return Err(UnsynError::Kind(Kind::NextIf(
+            ControlFlow::Incomplete,
+            input.to_span_at(1),
+        )));
+    };
 
-        let Some(current) = input.iter().next() else {
-            return Err(unterminated(offset));
-        };
+    if singles.contains(&c) || pairs.iter().any(|pair| input.starts_with(*pair).is_some()) {
+        return Err(refused(input));
+    }
 
-        if keyword("*/").ok().parse(input)?.is_some() {
-            offset += 2;
-            depth -= 1;
+    next(c).parse(input)
+}
 
-            if depth == 0 {
-                return Ok(offset);
-            }
-        } else if keyword("/*").ok().parse(input)?.is_some() {
-            // A group opened here has to close before this one does: nothing
-            // else in this loop takes a `/*`, so an opening is a commitment
-            // rather than one alternative among several.
-            offset += 2;
-            depth += 1;
-        } else {
-            // A lone `*` or `/` is text. It is also the only progress this
-            // position can make, which is why taking it matters. Both are one
-            // byte long, which is what lets the offset count by one.
-            next(current).parse(input)?;
-            offset += 1;
+/// The one character of the text of a [`BlockComment`] body, which is none of
+/// `*` and `!` and opens no nested group.
+fn head_plain<I>(input: &mut I) -> Result<I, UnsynError>
+where
+    I: UnsynInput,
+{
+    plain_refusing(input, &['*', '!'], &["/*"])
+}
+
+/// The one character of the text of an [`OuterBlockDoc`] body, which is no `*`
+/// and opens no nested group.
+fn outer_head_plain<I>(input: &mut I) -> Result<I, UnsynError>
+where
+    I: UnsynInput,
+{
+    plain_refusing(input, &['*'], &["/*"])
+}
+
+/// The one character of the text of a body that is only text, which opens no
+/// nested group and closes no group either.
+fn tail_plain<I>(input: &mut I) -> Result<I, UnsynError>
+where
+    I: UnsynInput,
+{
+    plain_refusing(input, &[], &["/*", "*/"])
+}
+
+/// The `( ~['*','!','/*'] | '**' | BlockCommentOrDoc )` that opens the body of a
+/// [`BlockComment`].
+///
+/// The group names no rule of the spec, which is what the analyzer's
+/// [`UnnamedAlternative`](super::errors::LintKind::UnnamedAlternative) lint says
+/// of a file that writes one; the hand tree names it here.
+#[derive(Debug, PartialEq, Eq, PartialOrd, Ord, Clone, Syntax)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+pub enum BlockCommentHead<I>
+where
+    I: UnsynInput,
+{
+    /// One character of the text of the body.
+    Plain(#[parserc(parser = head_plain)] I),
+    /// `'**'`, which is the empty comment's second star and the nesting
+    /// document's, taken as text of the comment because neither of the two
+    /// other arms of the group can begin with a `*`.
+    StarStar(#[parserc(keyword = "**", map_err = SyntaxKind::BlockComment.map())] I),
+    /// A group nested here, which needs a closing of its own.
+    Nested(Box<BlockCommentOrDoc<I>>),
+}
+
+/// The `( ~['*','/*'] | BlockCommentOrDoc )` that opens the body of an
+/// [`OuterBlockDoc`], named by the hand tree as the comment's head is.
+#[derive(Debug, PartialEq, Eq, PartialOrd, Ord, Clone, Syntax)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+pub enum OuterBlockDocHead<I>
+where
+    I: UnsynInput,
+{
+    /// One character of the text of the body.
+    Plain(#[parserc(parser = outer_head_plain)] I),
+    /// A group nested here.
+    Nested(Box<BlockCommentOrDoc<I>>),
+}
+
+/// The `( BlockCommentOrDoc | ~['/*','*/'] )` that fills the body of all three
+/// block rules, named once for the three because the three write it the same.
+#[derive(Debug, PartialEq, Eq, PartialOrd, Ord, Clone, Syntax)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+pub enum BlockCommentTail<I>
+where
+    I: UnsynInput,
+{
+    /// A group nested here.
+    Nested(Box<BlockCommentOrDoc<I>>),
+    /// One character of the text of the body.
+    Plain(#[parserc(parser = tail_plain)] I),
+}
+
+impl<I: UnsynInput> BlockCommentHead<I> {
+    /// The text the head read.
+    pub fn text(&self) -> String {
+        match self {
+            BlockCommentHead::Plain(text) => text.as_str().to_owned(),
+            BlockCommentHead::StarStar(text) => text.as_str().to_owned(),
+            BlockCommentHead::Nested(group) => group.text(),
+        }
+    }
+}
+
+impl<I: UnsynInput> OuterBlockDocHead<I> {
+    /// The text the head read.
+    pub fn text(&self) -> String {
+        match self {
+            OuterBlockDocHead::Plain(text) => text.as_str().to_owned(),
+            OuterBlockDocHead::Nested(group) => group.text(),
+        }
+    }
+}
+
+impl<I: UnsynInput> BlockCommentTail<I> {
+    /// The text the part of the body read.
+    pub fn text(&self) -> String {
+        match self {
+            BlockCommentTail::Nested(group) => group.text(),
+            BlockCommentTail::Plain(text) => text.as_str().to_owned(),
         }
     }
 }
 
 /// A block comment, which nests and is closed by the `*/` of its own opening.
+///
+/// The alternatives are tried in the order they are written, and the two closed
+/// forms come in the order the reading needs rather than the order the spec
+/// writes them: `/***/` opens as the body of two stars that never finds a
+/// closing, so the five-character form has to be answered before the four of
+/// `/**/`, which is its own head. The three write the same text at the front,
+/// and the longest reading is the one that was meant.
 #[derive(Debug, PartialEq, Eq, PartialOrd, Ord, Clone, Syntax)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
-pub struct BlockComment<I>(#[parserc(parser = read_block_comment)] pub I)
-where
-    I: UnsynInput;
-
-/// Reads the three alternatives of [`BlockComment`].
-///
-/// `/**/` and `/***/` are written out by the rule because the body it asks for
-/// cannot be empty, and both are the whole of their own token: the empty comment
-/// is the second character of the opening closing the first, and the second `*`
-/// of the four is text.
-fn read_block_comment<I>(input: &mut I) -> Result<I, UnsynError>
+#[parserc(map_err = SyntaxKind::BlockComment.map())]
+pub enum BlockComment<I>
 where
     I: UnsynInput,
 {
-    let mut whole = input.clone();
+    /// The whole of the rule's first alternative: the body, its head and its
+    /// closing, between the `/*` and the `*/`.
+    Group {
+        /// The `/*` that opens the comment.
+        #[parserc(keyword = "/*", map_err = SyntaxKind::BlockComment.map())]
+        open: I,
+        /// What opens the body, of one of the three shapes the rule writes.
+        head: BlockCommentHead<I>,
+        /// The body after its head, every part of it a nested group or one
+        /// character of text.
+        tail: Vec<BlockCommentTail<I>>,
+        /// The `*/` that closes the comment, which is asked for exactly where
+        /// the body ends and says itself what was missing there.
+        #[parserc(keyword = "*/", map_err = SyntaxKind::BlockComment.map())]
+        close: I,
+    },
+    /// `'/***/'`, which the rule writes third.
+    Star(#[parserc(keyword = "/***/", map_err = SyntaxKind::BlockComment.map())] I),
+    /// `'/**/'`, which the rule writes second.
+    Empty(#[parserc(keyword = "/**/", map_err = SyntaxKind::BlockComment.map())] I),
+}
 
-    keyword("/*")
-        .parse(input)
-        .map_err(SyntaxKind::BlockComment.map())?;
+impl<I: UnsynInput> BlockComment<I> {
+    /// The text of the comment, as it was written.
+    pub fn text(&self) -> String {
+        match self {
+            BlockComment::Group {
+                open,
+                head,
+                tail,
+                close,
+            } => {
+                let mut text = String::from(open.as_str());
 
-    let rest = input.clone();
+                text.push_str(&head.text());
 
-    match rest.iter().next() {
-        // `/*!` opens an inner document, which the first set of the rule keeps
-        // out of a comment.
-        Some('!') => {
-            return Err(UnsynError::Syntax(
-                SyntaxKind::BlockComment,
-                ControlFlow::Recovable,
-                whole.to_span_at(3),
-            ));
-        }
-        Some('*') => {
-            let mut after = input.clone();
-            _ = next_if(|c: char| c == '*').parse(&mut after)?;
-
-            match after.iter().next() {
-                // `/***/` is the third alternative of the rule, whose body is the
-                // single `*` the opening cannot take.
-                Some('*') => {}
-                // `/**/` is the second: the empty body closes on the very `*` of
-                // the opening, so the token is four characters and no more.
-                Some('/') => return Ok(whole.split_to(4)),
-                _ => {
-                    return Err(UnsynError::Syntax(
-                        SyntaxKind::BlockComment,
-                        ControlFlow::Recovable,
-                        whole.to_span_at(3),
-                    ));
+                for part in tail {
+                    text.push_str(&part.text());
                 }
+
+                text.push_str(close.as_str());
+                text
             }
+            BlockComment::Star(token) | BlockComment::Empty(token) => token.as_str().to_owned(),
         }
-        _ => {}
     }
-
-    let offset = scan_block(input, 2, |offset| {
-        UnsynError::Syntax(
-            SyntaxKind::BlockComment,
-            ControlFlow::Recovable,
-            whole.to_span_at(offset),
-        )
-    })?;
-
-    Ok(whole.split_to(offset))
 }
 
 /// A block document that describes the file it is written in.
 #[derive(Debug, PartialEq, Eq, PartialOrd, Ord, Clone, Syntax)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
-pub struct InnerBlockDoc<I>(#[parserc(parser = read_inner_block_doc)] pub I)
-where
-    I: UnsynInput;
-
-/// Reads the `'/*!' ( BlockCommentOrDoc | ~['/*','*/'] )* '*/'` of
-/// [`InnerBlockDoc`].
-fn read_inner_block_doc<I>(input: &mut I) -> Result<I, UnsynError>
+pub struct InnerBlockDoc<I>
 where
     I: UnsynInput,
 {
-    let mut whole = input.clone();
+    /// The `/*!` that opens the document.
+    #[parserc(keyword = "/*!", map_err = SyntaxKind::InnerBlockDoc.map())]
+    pub open: I,
+    /// The body: nested groups and text, until the closing arrives.
+    pub tail: Vec<BlockCommentTail<I>>,
+    /// The `*/` that closes the document.
+    #[parserc(keyword = "*/", map_err = SyntaxKind::InnerBlockDoc.map())]
+    pub close: I,
+}
 
-    keyword("/*!")
-        .parse(input)
-        .map_err(SyntaxKind::InnerBlockDoc.map())?;
+impl<I: UnsynInput> InnerBlockDoc<I> {
+    /// The text of the document, as it was written.
+    pub fn text(&self) -> String {
+        let mut text = String::from(self.open.as_str());
 
-    let offset = scan_block(input, 3, |offset| {
-        UnsynError::Syntax(
-            SyntaxKind::InnerBlockDoc,
-            ControlFlow::Recovable,
-            whole.to_span_at(offset),
-        )
-    })?;
+        for part in &self.tail {
+            text.push_str(&part.text());
+        }
 
-    Ok(whole.split_to(offset))
+        text.push_str(self.close.as_str());
+        text
+    }
 }
 
 /// A block document that describes the definition after it.
+///
+/// The opening of three refuses what the head set keeps out of the body, which
+/// is what leaves `/**/` and `/***/` to the block comment: an opening of three
+/// is a comment that closes at once, and not an empty document. The same set is
+/// what keeps `/** a */` out of the comment, whose head can only open with a
+/// text that is no star, two stars, or a group of its own.
 #[derive(Debug, PartialEq, Eq, PartialOrd, Ord, Clone, Syntax)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
-pub struct OuterBlockDoc<I>(#[parserc(parser = read_outer_block_doc)] pub I)
-where
-    I: UnsynInput;
-
-/// Reads the `'/**' ( ~['*','/*'] | BlockCommentOrDoc ) … '*/'` of
-/// [`OuterBlockDoc`].
-///
-/// The first operand of the body refuses a third `*`, which is what leaves
-/// `/**/` and `/***/` to the block comment: an opening of three is a comment that
-/// closes at once, and not an empty document.
-fn read_outer_block_doc<I>(input: &mut I) -> Result<I, UnsynError>
+pub struct OuterBlockDoc<I>
 where
     I: UnsynInput,
 {
-    let mut whole = input.clone();
+    /// The `/**` that opens the document.
+    #[parserc(keyword = "/**", map_err = SyntaxKind::OuterBlockDoc.map())]
+    pub open: I,
+    /// What opens the body, which is never a third star.
+    pub head: OuterBlockDocHead<I>,
+    /// The body after its head.
+    pub tail: Vec<BlockCommentTail<I>>,
+    /// The `*/` that closes the document.
+    #[parserc(keyword = "*/", map_err = SyntaxKind::OuterBlockDoc.map())]
+    pub close: I,
+}
 
-    keyword("/**")
-        .parse(input)
-        .map_err(SyntaxKind::OuterBlockDoc.map())?;
+impl<I: UnsynInput> OuterBlockDoc<I> {
+    /// The text of the document, as it was written.
+    pub fn text(&self) -> String {
+        let mut text = String::from(self.open.as_str());
 
-    if let Some('*') = input.iter().next() {
-        return Err(UnsynError::Syntax(
-            SyntaxKind::OuterBlockDoc,
-            ControlFlow::Recovable,
-            whole.to_span_at(3),
-        ));
+        text.push_str(&self.head.text());
+
+        for part in &self.tail {
+            text.push_str(&part.text());
+        }
+
+        text.push_str(self.close.as_str());
+        text
     }
-
-    let offset = scan_block(input, 3, |offset| {
-        UnsynError::Syntax(
-            SyntaxKind::OuterBlockDoc,
-            ControlFlow::Recovable,
-            whole.to_span_at(offset),
-        )
-    })?;
-
-    Ok(whole.split_to(offset))
 }
 
 /// A block group, which is the one rule that nests: a comment may hold a
@@ -998,6 +1268,17 @@ where
     Inner(InnerBlockDoc<I>),
 }
 
+impl<I: UnsynInput> BlockCommentOrDoc<I> {
+    /// The text of the group, as it was written.
+    pub fn text(&self) -> String {
+        match self {
+            BlockCommentOrDoc::Block(comment) => comment.text(),
+            BlockCommentOrDoc::Outer(doc) => doc.text(),
+            BlockCommentOrDoc::Inner(doc) => doc.text(),
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use parserc::{AsStr, Span, syntax::SyntaxInput};
@@ -1013,26 +1294,26 @@ mod tests {
         TokenStream::from(source).parse::<T>()
     }
 
-    /// The text a node of this module read, which is all it keeps.
+    /// The text a node of this module read.
     fn text<T>(node: &T) -> String
     where
         T: ToText,
     {
-        node.text().to_string()
+        node.text()
     }
 
     trait ToText {
-        fn text(&self) -> &str;
+        fn text(&self) -> String;
     }
 
-    /// Pins the text of every node this module hands back to a `syntax` rule.
+    /// Pins the text of every node that is one run of text of its own.
     macro_rules! holds_its_own_text {
         ($($name:ident),* $(,)?) => {
             $(
                 impl ToText for $name<TokenStream<'_>> {
                     #[inline]
-                    fn text(&self) -> &str {
-                        self.0.as_str()
+                    fn text(&self) -> String {
+                        self.0.as_str().to_owned()
                     }
                 }
             )*
@@ -1043,28 +1324,121 @@ mod tests {
         S,
         LF,
         CR,
-        IdentOrKeyword,
         XID_Start,
         XID_Continue,
-        RawIdent,
-        NonKeywordIdent,
-        LeadingKeywords,
-        FollowingKeywords,
         OctDigit,
         DecDigit,
         HexDigit,
-        LitDec,
-        LitUnicode,
         QuoteEscape,
-        AsciiEscape,
-        UnicodeEscape,
-        LitStr,
-        InnerLineDoc,
-        OuterLineDoc,
-        BlockComment,
-        InnerBlockDoc,
-        OuterBlockDoc,
     );
+
+    // The nodes that are modelled as the shapes their right sides write answer
+    // for their text from those shapes.
+
+    impl ToText for IdentOrKeyword<TokenStream<'_>> {
+        #[inline]
+        fn text(&self) -> String {
+            self.text()
+        }
+    }
+
+    impl ToText for RawIdent<TokenStream<'_>> {
+        #[inline]
+        fn text(&self) -> String {
+            self.text()
+        }
+    }
+
+    impl ToText for NonKeywordIdent<TokenStream<'_>> {
+        #[inline]
+        fn text(&self) -> String {
+            self.name.text()
+        }
+    }
+
+    impl ToText for LeadingKeywords<TokenStream<'_>> {
+        #[inline]
+        fn text(&self) -> String {
+            self.word().to_owned()
+        }
+    }
+
+    impl ToText for FollowingKeywords<TokenStream<'_>> {
+        #[inline]
+        fn text(&self) -> String {
+            self.word().to_owned()
+        }
+    }
+
+    impl ToText for LitDec<TokenStream<'_>> {
+        #[inline]
+        fn text(&self) -> String {
+            self.text()
+        }
+    }
+
+    impl ToText for LitUnicode<TokenStream<'_>> {
+        #[inline]
+        fn text(&self) -> String {
+            self.text()
+        }
+    }
+
+    impl ToText for AsciiEscape<TokenStream<'_>> {
+        #[inline]
+        fn text(&self) -> String {
+            self.text()
+        }
+    }
+
+    impl ToText for UnicodeEscape<TokenStream<'_>> {
+        #[inline]
+        fn text(&self) -> String {
+            self.text()
+        }
+    }
+
+    impl ToText for LitStr<TokenStream<'_>> {
+        #[inline]
+        fn text(&self) -> String {
+            self.text()
+        }
+    }
+
+    impl ToText for BlockComment<TokenStream<'_>> {
+        #[inline]
+        fn text(&self) -> String {
+            self.text()
+        }
+    }
+
+    impl ToText for InnerBlockDoc<TokenStream<'_>> {
+        #[inline]
+        fn text(&self) -> String {
+            self.text()
+        }
+    }
+
+    impl ToText for OuterBlockDoc<TokenStream<'_>> {
+        #[inline]
+        fn text(&self) -> String {
+            self.text()
+        }
+    }
+
+    impl ToText for InnerLineDoc<TokenStream<'_>> {
+        #[inline]
+        fn text(&self) -> String {
+            self.text()
+        }
+    }
+
+    impl ToText for OuterLineDoc<TokenStream<'_>> {
+        #[inline]
+        fn text(&self) -> String {
+            self.text()
+        }
+    }
 
     #[test]
     fn the_trivia_is_the_set_of_the_rule() {
@@ -1110,7 +1484,7 @@ mod tests {
     }
 
     #[test]
-    fn a_keyword_is_only_the_head_of_a_longer_word() {
+    fn a_keyword_is_a_word_whatever_stands_behind_it() {
         for word in ["lexer", "syntax", "whitespace"] {
             assert_eq!(text(&parse::<LeadingKeywords<_>>(word).unwrap()), word);
         }
@@ -1118,51 +1492,28 @@ mod tests {
             assert_eq!(text(&parse::<FollowingKeywords<_>>(word).unwrap()), word);
         }
 
-        // The head of a longer name is not a keyword: `lexerX` is one name, and
-        // so is `excepting`. The word the name begins with is the one reported,
-        // over the span of the whole name.
-        for (source, kind, span) in [
-            ("lexerX", KeywordKind::Lexer, 0..6),
-            ("lexer_", KeywordKind::Lexer, 0..6),
-            ("lexer9", KeywordKind::Lexer, 0..6),
-            ("syntaxX", KeywordKind::Syntax, 0..7),
-            ("syntax_", KeywordKind::Syntax, 0..7),
-            ("whitespace_", KeywordKind::Whitespace, 0..11),
-        ] {
-            assert_eq!(
-                parse::<LeadingKeywords<_>>(source),
-                Err(UnsynError::Keyword(
-                    kind,
-                    ControlFlow::Recovable,
-                    Span::Range(span)
-                )),
-                "{source}"
-            );
-        }
+        // The rule writes a word and nothing else, so the word is read wherever
+        // its text stands: `lexerX` begins with `lexer`, and it is the rules
+        // about it — the `except` that keeps the words out of the names, and the
+        // name that has to follow the word — that decide what the rest of the
+        // text is.
+        assert_eq!(
+            text(&parse::<LeadingKeywords<_>>("lexerX").unwrap()),
+            "lexer"
+        );
+        assert_eq!(
+            text(&parse::<FollowingKeywords<_>>("excepting").unwrap()),
+            "except"
+        );
 
-        for (source, kind, span) in [
-            ("concatX", KeywordKind::Concat, 0..7),
-            ("excepting", KeywordKind::Except, 0..9),
-            ("followed_", KeywordKind::Followed, 0..9),
-        ] {
-            assert_eq!(
-                parse::<FollowingKeywords<_>>(source),
-                Err(UnsynError::Keyword(
-                    kind,
-                    ControlFlow::Recovable,
-                    Span::Range(span)
-                )),
-                "{source}"
-            );
-        }
-
-        // Where no word of a set begins at all, it is the set that is missing.
+        // Where no word of the set begins at all, it is the set that the
+        // position is missing.
         assert_eq!(
             parse::<LeadingKeywords<_>>("| 'a';"),
             Err(UnsynError::Syntax(
                 SyntaxKind::LeadingKeywords,
                 ControlFlow::Recovable,
-                Span::Range(0..0)
+                Span::Range(0..1)
             ))
         );
     }
@@ -1203,13 +1554,10 @@ mod tests {
 
         // The raw form is read first, because `NonKeywordIdent` would settle for
         // the `r` of `r#lexer` and leave `#lexer` behind.
-        assert!(matches!(
-            parse::<Ident<_>>("r#lexer"),
-            Ok(Ident::Raw(RawIdent(_)))
-        ));
+        assert!(matches!(parse::<Ident<_>>("r#lexer"), Ok(Ident::Raw(_))));
         assert!(matches!(
             parse::<Ident<_>>("lexer2"),
-            Ok(Ident::NonKeyword(NonKeywordIdent(_)))
+            Ok(Ident::NonKeyword(_))
         ));
     }
 
@@ -1270,27 +1618,20 @@ mod tests {
 
         assert_eq!(text(&parse::<AsciiEscape<_>>("\\x7F").unwrap()), "\\x7F");
 
-        assert_eq!(
-            parse::<AsciiEscape<_>>("\\x80"),
-            Err(UnsynError::Semantics(
-                SemanticsKind::Char7BitEscapeOutOfRange,
-                Span::Range(2..3)
-            ))
-        );
-        assert_eq!(
-            parse::<AsciiEscape<_>>("\\xg0"),
-            Err(UnsynError::Semantics(
-                SemanticsKind::HexDigit,
-                Span::Range(2..3)
-            ))
-        );
-        assert_eq!(
-            parse::<AsciiEscape<_>>("\\x0"),
-            Err(UnsynError::Semantics(
-                SemanticsKind::Char7BitEscapeTooShort,
-                Span::Range(3..3)
-            ))
-        );
+        // The two digits of the escape are the escape's own once its marker has
+        // been read: whatever stands where a digit must is a written escape
+        // going wrong, and no enclosing choice can mean anything else there.
+        for (source, span) in [("\\x80", 2..3), ("\\xg0", 2..3), ("\\x0", 3..3)] {
+            assert_eq!(
+                parse::<AsciiEscape<_>>(source),
+                Err(UnsynError::Kind(Kind::NextIf(
+                    ControlFlow::Fatal,
+                    Span::Range(span)
+                ))),
+                "{source}"
+            );
+        }
+
         assert_eq!(text(&parse::<QuoteEscape<_>>(r"\'").unwrap()), r"\'");
     }
 
@@ -1300,20 +1641,20 @@ mod tests {
             assert_eq!(text(&parse::<UnicodeEscape<_>>(source).unwrap()), source);
         }
 
-        // A run of digits that is too long, or of no digits at all, is refused by
-        // the bound of the escape.
-        for source in ["\\u{}", "\\u{1234567}"] {
-            assert!(
-                matches!(
-                    parse::<UnicodeEscape<_>>(source),
-                    Err(UnsynError::Semantics(SemanticsKind::UnicodeEscape, _))
-                ),
-                "{source}"
-            );
-        }
+        // No digits at all is the lower bound of the escape refusing its own
+        // reading.
+        assert!(
+            matches!(
+                parse::<UnicodeEscape<_>>("\\u{}"),
+                Err(UnsynError::Semantics(SemanticsKind::UnicodeEscape, _))
+            ),
+            "no digits at all"
+        );
 
-        // Text that is no digit at all leaves the closing brace to be asked for.
-        for source in ["\\u{abcdefg}", "\\u{0x}"] {
+        // A seventh digit is not the bound speaking: six are taken and the
+        // brace is then asked for where a digit stands. Text that is no digit
+        // at all leaves the same question to the same place.
+        for source in ["\\u{1234567}", "\\u{abcdefg}", "\\u{0x}"] {
             assert!(
                 matches!(
                     parse::<UnicodeEscape<_>>(source),
@@ -1353,18 +1694,22 @@ mod tests {
         assert_eq!(text(&parse::<LitStr<_>>("'\"'").unwrap()), "'\"'");
         assert_eq!(text(&parse::<LitStr<_>>("'a'b'").unwrap()), "'a'");
 
+        // A body that runs to the end of the input, and a `CR` that is no piece
+        // of a body, both end the reading where they stand: what was asked for
+        // there is the closing quote, and that is what the refusal says.
         assert_eq!(
             parse::<LitStr<_>>("'a"),
-            Err(UnsynError::Syntax(
-                SyntaxKind::StrContent,
+            Err(UnsynError::Punct(
+                PunctKind::SingleQuote,
                 ControlFlow::Recovable,
                 Span::Range(2..2)
             ))
         );
         assert_eq!(
             parse::<LitStr<_>>("'a\rb'"),
-            Err(UnsynError::Semantics(
-                SemanticsKind::StrContent,
+            Err(UnsynError::Punct(
+                PunctKind::SingleQuote,
+                ControlFlow::Recovable,
                 Span::Range(2..3)
             ))
         );
@@ -1401,7 +1746,11 @@ mod tests {
             "/// about"
         );
         assert_eq!(text(&parse::<OuterLineDoc<_>>("///").unwrap()), "///");
-        assert!(parse::<OuterLineDoc<_>>("////").is_err());
+
+        // The fourth `/` is refused by `~['/']`, which leaves the body of the
+        // document unfilled: the document is its three slashes, and whatever
+        // stands after them belongs to the file to read.
+        assert_eq!(text(&parse::<OuterLineDoc<_>>("////").unwrap()), "///");
     }
 
     /// The table of the forms a comment takes, which the third character
@@ -1438,21 +1787,27 @@ mod tests {
     }
 
     #[test]
-    fn an_unterminated_group_reports_over_the_text_it_swallowed() {
+    fn an_unterminated_group_is_answered_by_no_form_of_its_rule() {
+        // The comment is a choice of three forms, and none of them is what the
+        // text turns out to hold: the refusal comes back as the choice that
+        // was never fulfilled, where the opening was read.
         assert_eq!(
             parse::<BlockComment<_>>("/* a "),
             Err(UnsynError::Syntax(
                 SyntaxKind::BlockComment,
                 ControlFlow::Recovable,
-                Span::Range(0..5)
+                Span::Range(0..1)
             ))
         );
+
+        // The two documents are one form each, so what is missing is exactly
+        // the closing the body ran out before.
         assert_eq!(
             parse::<InnerBlockDoc<_>>("/*! a "),
             Err(UnsynError::Syntax(
                 SyntaxKind::InnerBlockDoc,
                 ControlFlow::Recovable,
-                Span::Range(0..6)
+                Span::Range(6..6)
             ))
         );
         assert_eq!(
@@ -1460,7 +1815,7 @@ mod tests {
             Err(UnsynError::Syntax(
                 SyntaxKind::OuterBlockDoc,
                 ControlFlow::Recovable,
-                Span::Range(0..6)
+                Span::Range(6..6)
             ))
         );
     }
