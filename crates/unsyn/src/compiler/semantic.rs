@@ -1136,7 +1136,7 @@ mod tests {
             .filter(|lint| lint.kind == LintKind::UnnamedAlternative)
             .count();
 
-        assert_eq!(unnamed, 10, "the choices of unsyn.us that name no node");
+        assert_eq!(unnamed, 9, "the choices of unsyn.us that name no node");
     }
 
     #[test]

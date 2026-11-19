@@ -69,10 +69,42 @@
 - [x] **M4 删 literal.rs**：值读取挪到节点（`chars()/value()/count()/text()`），
       `semantic.rs` 与 `codegen.rs` 的调用点全部改走节点；非法码点的报告位置
       改为 escape 节点自身的 span。
-- [ ] **M5 生成器**：`codegen.rs` 对 lexer 规则输出同样的 struct-field/具名 enum 建模
-      （中间 or 合成名字，与手写命名一致）；重生成 `tests/generated/unsyn_us.rs`；
-      冒烟测试更新。
-- [ ] **M6 门禁**：M5 完成后重跑全套：`cargo fmt --all`; `check -p unsyn
-      --no-default-features`; `test -p unsyn --all-features`; `test --workspace`;
+- [x] **M5 生成器**：`codegen.rs` 对 lexer 规则输出与手写侧同构的建模——
+      sequence → 每个操作数一个 field（引用规则 → `X<I>`/`Option<X<I>>`/`Vec<X<I>>`，
+      匿名操作数 → `I` + 属性注入 parser）；右侧全部匿名的 sequence → tuple struct；
+      无名字段按 `f1`/`f2`…；全引用选择的 root or → enum（变体名=规则名）；
+      node/text 形状由 `node_rules` 不动点判定（fold 臂、集合折叠、except 目标、
+      单名规则/单名组的答案会流回文本位置 → 该规则降级为文本）；
+      `{n,m}` over 引用 → `read_` 计数函数返回 `Vec<X<I>>`；字符类重复 →
+      `take_while(_with)` 直接写进属性。
+      重生成 `tests/generated/unsyn_us.rs`；冒烟测试（两种流）全部适配新形状。
+      中间 or 组的具名 enum 生成：按裁定取消——生成侧匿名中间 or = `I` 字段 +
+      注入 parser，不造名（手写侧侧保留补名 enum，规则 2 只约束手写）。
+- [x] **M5.5 BuildError → errors**：`BuildError` 消失，改为
+      `UnsynError::Build(BuildKind, Span)`；`BuildKind`（External/Whitespace/Name/
+      Literal/Syntax）住在 `errors.rs`，与 Punct/Keyword/Syntax/Semantics 四族同列，
+      实现同一套 `ParseError` 约定（to_span/control_flow/into_fatal）；
+      `build()` 返回 `Result<TokenStream, UnsynError>`。
+- [x] **M6 门禁**：`cargo fmt --all`; `check -p unsyn --no-default-features`;
+      `test -p unsyn --all-features`; `test --workspace`;
       `clippy --workspace --all-targets`（0 warning）; `RUSTDOCFLAGS=-D warnings
-      cargo doc --workspace --all-features`。（当前一轮已全绿。）
+      cargo doc --workspace --all-features`。（M5 后已全部重跑通过。）
+
+## 后续（本计划范围外，自举的最后一步）
+
+- [x] **M6.5 spec：IdentOrKeyword 改为 external**（M7 前置，本轮完成）：
+      `unsyn.us` 的 `lexer IdentOrKeyword -> ( XID_Start | '_' ) XID_Continue*;`
+      替换为 `lexer IdentOrKeyword -> <IdentOrKeyword>;`，并删除随之孤立的
+      `XID_Start`/`XID_Continue` 两条产生式（26→24 条 lexer 规则，unnamed-or
+      lint 10→9）。手写侧 `IdentOrKeyword` 相应变为单字段文本节点 +
+      `read_ident_or_keyword`（即该 external 的手写绑定：start 为
+      `is_xid_start(c) || c=='_'`，随后 `take_while(is_xid_continue)`），
+      `IdentStart`/`XID_Start`/`XID_Continue` 三个类型与对应 visit 钩子删除；
+      生成侧 fixture 重生成，external 由测试绑定到
+      `crate::scan_ident_or_keyword`。动机：Id 处理更高效（一次扫描而非逐字符节点）。
+- [ ] **M7 syntax 规则生成**：解开 `BuildKind::Syntax` 闸门，让 `syntax` 产生式
+      生成树节点（root or → enum；sequence → struct field，规则同 M5；操作数里
+      的 `Set`/`Repeat`/`Range`/`Suffix` 等匿名组按手写侧同名形状生成，`Delimiter`/
+      `Punctuated`/`Option`/`Vec`/tuple 用 parserc 内建形状），并为生成器输出
+      visit 接口（与手写 `visit.rs` 一致）；之后用生成的 parser 解析 `bootstrap.uns`
+      完成自举闭环。

@@ -330,6 +330,34 @@ impl Diagnostics {
     }
 }
 
+/// What a build refused to write, and where the file wrote the thing no code
+/// answers.
+///
+/// A build writes the code of a file that means something; this family is what
+/// it says when some part of that meaning has no code to answer it — an
+/// external no caller bound, a name no item can carry, a literal that spells no
+/// value — and unlike the errors of reading it is not a fault of the file's
+/// text. It is told as [`UnsynError::Build`], beside the rule's own text and
+/// the place the file wrote the thing there is no code to write.
+#[derive(Debug, thiserror::Error, PartialEq, Eq, Clone)]
+pub enum BuildKind {
+    /// The file calls an external the builder was not given.
+    #[error("the rule `{0}` calls the external `{1}`, which is not bound")]
+    External(String, String),
+    /// A `whitespace` rule denotes no set of single characters.
+    #[error("the whitespace rule `{0}` does not denote a set of characters")]
+    Whitespace(String),
+    /// A name no item of Rust can carry.
+    #[error("the rule `{0}` is named what no item can be named")]
+    Name(String),
+    /// A literal that spells no value a parser can be written with.
+    #[error("the rule `{0}` holds a literal that spells nothing to read")]
+    Literal(String),
+    /// A `syntax` rule, whose nodes are not written yet.
+    #[error("no code is written for the syntax rule `{0}` yet")]
+    Syntax(String),
+}
+
 /// Error information container for `unsyn` parsing.
 #[derive(Debug, thiserror::Error, PartialEq, Eq)]
 pub enum UnsynError {
@@ -352,6 +380,11 @@ pub enum UnsynError {
     /// Reports a semantics error
     #[error("unexpect/invalid: {0}, {1:?}")]
     Semantics(SemanticsKind, Span),
+
+    /// Reports that a build of the file refused: the part at the span is what
+    /// no code was written for.
+    #[error("build: wrote no code for {0}, {1:?}")]
+    Build(BuildKind, Span),
 }
 
 impl ParseError for UnsynError {
@@ -363,6 +396,7 @@ impl ParseError for UnsynError {
             UnsynError::Punct(_, _, span) => span.clone(),
             UnsynError::Keyword(_, _, span) => span.clone(),
             UnsynError::Semantics(_, span) => span.clone(),
+            UnsynError::Build(_, span) => span.clone(),
         }
     }
 
@@ -374,6 +408,7 @@ impl ParseError for UnsynError {
             UnsynError::Punct(_, control_flow, _) => *control_flow,
             UnsynError::Keyword(_, control_flow, _) => *control_flow,
             UnsynError::Semantics(_, _) => ControlFlow::Fatal,
+            UnsynError::Build(_, _) => ControlFlow::Fatal,
         }
     }
 
@@ -393,6 +428,7 @@ impl ParseError for UnsynError {
             UnsynError::Semantics(semantics_kind, span) => {
                 UnsynError::Semantics(semantics_kind, span)
             }
+            UnsynError::Build(build_kind, span) => UnsynError::Build(build_kind, span),
         }
     }
 }

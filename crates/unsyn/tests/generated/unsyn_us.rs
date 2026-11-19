@@ -19,62 +19,19 @@ where
 pub struct CR<I>(# [parserc (parser = :: parserc :: next ('\r'))] pub I)
 where
     I: ::parserc::chars::CharsInput;
-fn read_ident_or_keyword<I>(
-    input: &mut I,
-) -> ::core::result::Result<I, <I as ::parserc::Input>::Error>
+#[derive(Debug, PartialEq, Eq, PartialOrd, Ord, Clone, :: parserc :: syntax :: Syntax)]
+pub struct IdentOrKeyword<I>(# [parserc (parser = crate :: scan_ident_or_keyword)] pub I)
+where
+    I: ::parserc::chars::CharsInput;
+#[derive(Debug, PartialEq, Eq, PartialOrd, Ord, Clone, :: parserc :: syntax :: Syntax)]
+pub struct RawIdent<I>
 where
     I: ::parserc::chars::CharsInput,
 {
-    use ::parserc::Parser as _;
-    let mut whole = input.clone();
-    let before = input.len();
-    <XID_Start<I> as ::parserc::syntax::Syntax<I>>::into_parser()
-        .map(|node| node.0)
-        .or(::parserc::next('_'))
-        .parse(input)?;
-    while <XID_Continue<I> as ::parserc::syntax::Syntax<I>>::into_parser()
-        .map(|node| node.0)
-        .ok()
-        .parse(input)?
-        .is_some()
-    {}
-    Ok(whole.split_to(before - input.len()))
+    # [parserc (parser = :: parserc :: keyword ("r#"))]
+    pub f1: I,
+    pub ident_or_keyword: IdentOrKeyword<I>,
 }
-#[derive(Debug, PartialEq, Eq, PartialOrd, Ord, Clone, :: parserc :: syntax :: Syntax)]
-pub struct IdentOrKeyword<I>(# [parserc (parser = read_ident_or_keyword)] pub I)
-where
-    I: ::parserc::chars::CharsInput;
-#[derive(Debug, PartialEq, Eq, PartialOrd, Ord, Clone, :: parserc :: syntax :: Syntax)]
-#[allow(non_camel_case_types)]
-pub struct XID_Start<I>(
-    # [parserc (parser = :: parserc :: next_if (:: unicode_ident :: is_xid_start))] pub I,
-)
-where
-    I: ::parserc::chars::CharsInput;
-#[derive(Debug, PartialEq, Eq, PartialOrd, Ord, Clone, :: parserc :: syntax :: Syntax)]
-#[allow(non_camel_case_types)]
-pub struct XID_Continue<I>(
-    # [parserc (parser = :: parserc :: next_if (:: unicode_ident :: is_xid_continue))] pub I,
-)
-where
-    I: ::parserc::chars::CharsInput;
-fn read_raw_ident<I>(input: &mut I) -> ::core::result::Result<I, <I as ::parserc::Input>::Error>
-where
-    I: ::parserc::chars::CharsInput,
-{
-    use ::parserc::Parser as _;
-    let mut whole = input.clone();
-    let before = input.len();
-    ::parserc::keyword("r#").parse(input)?;
-    <IdentOrKeyword<I> as ::parserc::syntax::Syntax<I>>::into_parser()
-        .map(|node| node.0)
-        .parse(input)?;
-    Ok(whole.split_to(before - input.len()))
-}
-#[derive(Debug, PartialEq, Eq, PartialOrd, Ord, Clone, :: parserc :: syntax :: Syntax)]
-pub struct RawIdent<I>(# [parserc (parser = read_raw_ident)] pub I)
-where
-    I: ::parserc::chars::CharsInput;
 fn read_non_keyword_ident<I>(
     input: &mut I,
 ) -> ::core::result::Result<I, <I as ::parserc::Input>::Error>
@@ -139,14 +96,13 @@ pub struct FollowingKeywords<I>(
 )
 where
     I: ::parserc::chars::CharsInput;
-fn read_lit_str<I>(input: &mut I) -> ::core::result::Result<I, <I as ::parserc::Input>::Error>
+fn read_lit_str_1<I>(input: &mut I) -> ::core::result::Result<I, <I as ::parserc::Input>::Error>
 where
     I: ::parserc::chars::CharsInput,
 {
     use ::parserc::Parser as _;
     let mut whole = input.clone();
     let before = input.len();
-    ::parserc::next('\'').parse(input)?;
     while ::parserc::next_if(|c: char| !(matches!(c, '\'' | '\\' | '\r')))
         .or(<QuoteEscape<I> as ::parserc::syntax::Syntax<I>>::into_parser().map(|node| node.0))
         .or(<AsciiEscape<I> as ::parserc::syntax::Syntax<I>>::into_parser().map(|node| node.0))
@@ -155,11 +111,14 @@ where
         .parse(input)?
         .is_some()
     {}
-    ::parserc::next('\'').parse(input)?;
     Ok(whole.split_to(before - input.len()))
 }
 #[derive(Debug, PartialEq, Eq, PartialOrd, Ord, Clone, :: parserc :: syntax :: Syntax)]
-pub struct LitStr<I>(# [parserc (parser = read_lit_str)] pub I)
+pub struct LitStr<I>(
+    # [parserc (parser = :: parserc :: next ('\''))] pub I,
+    # [parserc (parser = read_lit_str_1)] pub I,
+    # [parserc (parser = :: parserc :: next ('\''))] pub I,
+)
 where
     I: ::parserc::chars::CharsInput;
 #[derive(Debug, PartialEq, Eq, PartialOrd, Ord, Clone, :: parserc :: syntax :: Syntax)]
@@ -251,23 +210,15 @@ pub struct HexDigit<I>(
 )
 where
     I: ::parserc::chars::CharsInput;
-fn read_lit_dec<I>(input: &mut I) -> ::core::result::Result<I, <I as ::parserc::Input>::Error>
+#[derive(Debug, PartialEq, Eq, PartialOrd, Ord, Clone, :: parserc :: syntax :: Syntax)]
+pub struct LitDec<I>
 where
     I: ::parserc::chars::CharsInput,
 {
-    use ::parserc::Parser as _;
-    let mut whole = input.clone();
-    let before = input.len();
-    <DecDigit<I> as ::parserc::syntax::Syntax<I>>::into_parser()
-        .map(|node| node.0)
-        .parse(input)?;
-    ::parserc::take_while(|c: char| matches!(c, '0'..='9' | '_')).parse(input)?;
-    Ok(whole.split_to(before - input.len()))
+    pub dec_digit: DecDigit<I>,
+    # [parserc (parser = :: parserc :: take_while (| c : char | matches ! (c , '0' ..= '9' | '_')))]
+    pub f1: I,
 }
-#[derive(Debug, PartialEq, Eq, PartialOrd, Ord, Clone, :: parserc :: syntax :: Syntax)]
-pub struct LitDec<I>(# [parserc (parser = read_lit_dec)] pub I)
-where
-    I: ::parserc::chars::CharsInput;
 fn read_lit_unicode<I>(input: &mut I) -> ::core::result::Result<I, <I as ::parserc::Input>::Error>
 where
     I: ::parserc::chars::CharsInput,
@@ -376,21 +327,13 @@ pub struct BlockComment<I>(
 )
 where
     I: ::parserc::chars::CharsInput;
-fn read_inner_line_doc<I>(
-    input: &mut I,
-) -> ::core::result::Result<I, <I as ::parserc::Input>::Error>
-where
-    I: ::parserc::chars::CharsInput,
-{
-    use ::parserc::Parser as _;
-    let mut whole = input.clone();
-    let before = input.len();
-    ::parserc::keyword("//!").parse(input)?;
-    ::parserc::take_while(|c: char| !(matches!(c, '\n' | '\r'))).parse(input)?;
-    Ok(whole.split_to(before - input.len()))
-}
 #[derive(Debug, PartialEq, Eq, PartialOrd, Ord, Clone, :: parserc :: syntax :: Syntax)]
-pub struct InnerLineDoc<I>(# [parserc (parser = read_inner_line_doc)] pub I)
+pub struct InnerLineDoc<I>(
+    # [parserc (parser = :: parserc :: keyword ("//!"))]
+    pub I,
+    # [parserc (parser = :: parserc :: take_while (| c : char | ! (matches ! (c , '\n' | '\r'))))]
+    pub I,
+)
 where
     I: ::parserc::chars::CharsInput;
 fn read_inner_block_doc_1<I>(
@@ -457,7 +400,7 @@ where
     ::parserc::take_while(|c: char| !(matches!(c, '\n' | '\r'))).parse(input)?;
     Ok(whole.split_to(before - input.len()))
 }
-fn read_outer_line_doc<I>(
+fn read_outer_line_doc_2<I>(
     input: &mut I,
 ) -> ::core::result::Result<I, <I as ::parserc::Input>::Error>
 where
@@ -466,12 +409,15 @@ where
     use ::parserc::Parser as _;
     let mut whole = input.clone();
     let before = input.len();
-    ::parserc::keyword("///").parse(input)?;
     let _ = read_outer_line_doc_1.ok().parse(input)?;
     Ok(whole.split_to(before - input.len()))
 }
 #[derive(Debug, PartialEq, Eq, PartialOrd, Ord, Clone, :: parserc :: syntax :: Syntax)]
-pub struct OuterLineDoc<I>(# [parserc (parser = read_outer_line_doc)] pub I)
+pub struct OuterLineDoc<I>(
+    # [parserc (parser = :: parserc :: keyword ("///"))]
+    pub I,
+    # [parserc (parser = read_outer_line_doc_2)] pub I,
+)
 where
     I: ::parserc::chars::CharsInput;
 fn read_outer_block_doc_1<I>(

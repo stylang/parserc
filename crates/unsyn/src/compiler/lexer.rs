@@ -8,12 +8,14 @@
 //! that is the whole of the right side is an enum whose variants are the
 //! alternatives.
 //!
-//! A choice written inside a group — `( XID_Start | '_' )` within
-//! [`IdentOrKeyword`], the body of [`LitStr`] — belongs to no left side, and the
+//! A choice written inside a group — the body of [`LitStr`], the alternatives
+//! that fill the block rules — belongs to no left side, and the
 //! [analyzer](super::semantic) says so of every file that writes one. The hand
 //! tree cannot leave such a choice unmodelled either, so it names these groups
-//! on the pass's behalf — [`IdentStart`] and its like — and models each of them
-//! as an enum, the same shape a named rule would have earned.
+//! on the pass's behalf — [`LitStrContent`] and its like — and models each of
+//! them as an enum, the same shape a named rule would have earned. What the
+//! spec instead answers from outside itself — `<IdentOrKeyword>` and its like —
+//! is read whole, as one token of text, which is what the file says a name is.
 //!
 //! # Where the trivia goes
 //!
@@ -31,7 +33,7 @@
 //! therefore comes first, and takes the word whole.
 
 use parserc::syntax::{Char, Syntax};
-use parserc::{ControlFlow, Input, Kind, Parser, Span, keyword, next, next_if};
+use parserc::{ControlFlow, Input, Kind, Parser, Span, keyword, next, next_if, take_while};
 use unicode_ident::{is_xid_continue, is_xid_start};
 
 use crate::compiler::errors::{KeywordKind, PunctKind, SemanticsKind, SyntaxKind, UnsynError};
@@ -96,88 +98,49 @@ where
     I: UnsynInput;
 
 // ---------------------------------------------------------------------------
-// `lexer IdentOrKeyword -> ( XID_Start | '_' ) XID_Continue*;`
-// `lexer XID_Start -> <XID_Start>;`
-// `lexer XID_Continue -> <XID_Continue>;`
+// `lexer IdentOrKeyword -> <IdentOrKeyword>;`
 // ---------------------------------------------------------------------------
 
-/// The start of a name, which the spec reaches outside itself.
+/// A name before it is known whether it is a keyword.
 ///
-/// `<XID_Start>` is a link the caller of a generated parser binds; here the
-/// answer is the Unicode property of the same name, which `unicode-ident`
-/// publishes.
+/// `<IdentOrKeyword>` is a link the caller of a generated parser binds; the
+/// hand tree binds it to the same scan the name has always been: a start —
+/// [`is_xid_start`] or `_` — and then the run of characters a name continues
+/// with, in one greedy piece. The rule was once written a character at a time,
+/// over externals of the Unicode properties; the spec says the name is one
+/// token and the scan reads it whole, which is what a name is worth: the word
+/// it spells and nothing below it.
 ///
-/// The name is the one the spec writes, underscores and all, so that the node of
-/// a bootstrap tree built from this file is the node this file declares.
-#[allow(non_camel_case_types)]
+/// [`is_xid_start`]: unicode_ident::is_xid_start
 #[derive(Debug, PartialEq, Eq, PartialOrd, Ord, Clone, Syntax)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
-pub struct XID_Start<I>(#[parserc(parser = next_if(|c: char| is_xid_start(c)))] pub I)
+pub struct IdentOrKeyword<I>(#[parserc(parser = read_ident_or_keyword)] pub I)
 where
     I: UnsynInput;
 
-/// A character a name continues with, which the spec likewise reaches outside
-/// itself.
-#[allow(non_camel_case_types)]
-#[derive(Debug, PartialEq, Eq, PartialOrd, Ord, Clone, Syntax)]
-#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
-pub struct XID_Continue<I>(#[parserc(parser = next_if(|c: char| is_xid_continue(c)))] pub I)
-where
-    I: UnsynInput;
-
-/// The `( XID_Start | '_' )` that begins a name.
-///
-/// The group names no rule of the spec, which is what the analyzer's
-/// [`UnnamedAlternative`](super::errors::LintKind::UnnamedAlternative) lint says
-/// of a file that writes one: the hand tree cannot leave the choice unmodelled,
-/// so it names the group here and gives it the enum the choice deserves.
-#[derive(Debug, PartialEq, Eq, PartialOrd, Ord, Clone, Syntax)]
-#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
-pub enum IdentStart<I>
+/// The scan the external of [`IdentOrKeyword`] is bound to: the start of a
+/// name, of either of its two shapes, and then the run that continues it.
+fn read_ident_or_keyword<I>(input: &mut I) -> Result<I, UnsynError>
 where
     I: UnsynInput,
 {
-    /// A start the external of the same name answers for.
-    Xid(XID_Start<I>),
-    /// The `_` that may also begin a name.
-    Underscore(Char<I, '_'>),
-}
+    let mut whole = input.clone();
+    let before = input.len();
 
-/// A name before it is known whether it is a keyword: a start, then any run of
-/// continuing characters.
-#[derive(Debug, PartialEq, Eq, PartialOrd, Ord, Clone, Syntax)]
-#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
-pub struct IdentOrKeyword<I>
-where
-    I: UnsynInput,
-{
-    /// The character the name begins with, of either of the two shapes.
-    pub start: IdentStart<I>,
-    /// The characters the name continues with, each of the external's own shape.
-    pub tail: Vec<XID_Continue<I>>,
-}
+    next_if(|c: char| is_xid_start(c) || c == '_')
+        .parse(input)
+        .map_err(SyntaxKind::Ident.map())?;
 
-impl<I: UnsynInput> IdentStart<I> {
-    /// The text of the one character the start read.
-    #[inline]
-    pub fn text(&self) -> &str {
-        match self {
-            IdentStart::Xid(start) => start.0.as_str(),
-            IdentStart::Underscore(underscore) => underscore.0.as_str(),
-        }
-    }
+    take_while(is_xid_continue).parse(input)?;
+
+    Ok(whole.split_to(before - input.len()))
 }
 
 impl<I: UnsynInput> IdentOrKeyword<I> {
-    /// The whole of the name, its start and its run together.
+    /// The whole of the name.
+    #[inline]
     pub fn text(&self) -> String {
-        let mut text = String::from(self.start.text());
-
-        for continue_ in &self.tail {
-            text.push_str(continue_.0.as_str());
-        }
-
-        text
+        self.0.as_str().to_owned()
     }
 }
 
@@ -219,29 +182,27 @@ pub struct NonKeywordIdent<I>
 where
     I: UnsynInput,
 {
-    /// The name the `except` leaves standing, which is all the node keeps of it.
+    /// The name the `except` leaves standing.
     ///
-    /// What the removal asks is not a part of the name, and nothing beyond the
-    /// refusal it makes can say more than the node of [`IdentOrKeyword`] already
-    /// says.
+    /// The name is the whole node: what the removal asks is not a part of it,
+    /// and the name read is held by the [`IdentOrKeyword`] it answers with.
     #[parserc(parser = read_non_keyword_ident)]
     pub name: IdentOrKeyword<I>,
 }
 
 /// Reads the `IdentOrKeyword except Keywords` of [`NonKeywordIdent`].
 ///
-/// `except` asks its question of the text the name read and of nothing else: the
-/// removal runs over that text on its own, and only a removal that takes all of
-/// it refuses the name. `lexerX` is therefore a name of its own, although
-/// `lexer` fits the head of it.
+/// `except` asks its question of the text the operand to its left read and of
+/// nothing else: the removal runs over that text on its own, and only a removal
+/// that takes all of it refuses the name. `lexerX` is therefore a name of its
+/// own, although `lexer` fits the head of it.
 fn read_non_keyword_ident<I>(input: &mut I) -> Result<IdentOrKeyword<I>, UnsynError>
 where
     I: UnsynInput,
 {
-    let mut whole = input.clone();
     let name = IdentOrKeyword::into_parser().parse(input)?;
 
-    let mut rest = whole.split_to(whole.len() - input.len());
+    let mut rest = name.0.clone();
 
     if Keywords::into_parser().ok().parse(&mut rest)?.is_some() && rest.is_empty() {
         return Err(UnsynError::Semantics(
@@ -1324,8 +1285,7 @@ mod tests {
         S,
         LF,
         CR,
-        XID_Start,
-        XID_Continue,
+        IdentOrKeyword,
         OctDigit,
         DecDigit,
         HexDigit,
@@ -1334,13 +1294,6 @@ mod tests {
 
     // The nodes that are modelled as the shapes their right sides write answer
     // for their text from those shapes.
-
-    impl ToText for IdentOrKeyword<TokenStream<'_>> {
-        #[inline]
-        fn text(&self) -> String {
-            self.text()
-        }
-    }
 
     impl ToText for RawIdent<TokenStream<'_>> {
         #[inline]

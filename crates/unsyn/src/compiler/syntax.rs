@@ -367,7 +367,7 @@ where
         Set<I>,
     ),
     /// `'<' Ident '>'`, a call of an external the caller of the parser binds, as
-    /// in `<XID_Start>`.
+    /// in `<NAME>`.
     Call(Delimiter<Lt<I>, Gt<I>, Ident<I>>),
     /// `'(' Expr ')'`, a group, so that an expression may sit inside a sequence
     /// or take a suffix as one operand.
@@ -1040,9 +1040,9 @@ mod tests {
             })
             .collect::<Vec<_>>();
 
-        // One `whitespace`, twenty-six `lexer` and twelve `syntax` rules.
-        assert_eq!(statements.len(), 39);
-        assert_eq!(statements.iter().filter(|k| *k == "lexer").count(), 26);
+        // One `whitespace`, twenty-four `lexer` and twelve `syntax` rules.
+        assert_eq!(statements.len(), 37);
+        assert_eq!(statements.iter().filter(|k| *k == "lexer").count(), 24);
         assert_eq!(statements.iter().filter(|k| *k == "syntax").count(), 12);
         assert_eq!(statements.iter().filter(|k| *k == "whitespace").count(), 1);
 
@@ -1057,7 +1057,7 @@ mod tests {
             })
             .collect::<Vec<_>>();
 
-        assert_eq!(names.len(), 39, "a definition without a name");
+        assert_eq!(names.len(), 37, "a definition without a name");
         for name in [
             "S",
             "IdentOrKeyword",

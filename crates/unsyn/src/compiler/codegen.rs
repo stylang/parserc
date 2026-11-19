@@ -10,41 +10,55 @@
 //! # What a production becomes
 //!
 //! A node is named for the left side of a production and nothing else is, so one
-//! `lexer` rule is one `pub struct` of that name, and its right side is the code
-//! that reads the text the rule denotes:
+//! `lexer` rule is one type of that name, and its right side is what the type
+//! holds: a sequence is a struct with one field per operand, a choice of names
+//! is an enum with one variant per name, and anything the type holds besides is
+//! the text it read — one field of `I` with the reader of it written beside the
+//! field.
 //!
 //! | the DSL writes          | the code writes                                        |
 //! |-------------------------|--------------------------------------------------------|
 //! | `'a'`, `U+0009`         | `::parserc::next(c)`                                     |
 //! | `'abc'`                 | `::parserc::keyword("abc")`                              |
-//! | `Name`                  | `<Name<I> as Syntax<I>>::into_parser()`, read as the text it took |
+//! | `Name` as a whole rule  | the node `Name<I>`                                       |
+//! | `Name` beside others    | the text the rule read, of the input it was handed       |
 //! | `A \| B` of names only    | `pub enum` with one variant per name                      |
 //! | `<Ext>`                 | the tokens the caller bound `Ext` to                     |
 //! | `['a'-'z', '_']`        | `::parserc::next_if(\|c: char\| matches!(c, …))`           |
 //! | `~[…]`, `A \| B`        | the same predicate refused, or a fold of `.or()`         |
-//! | `A B`                   | the code of `A`, then the code of `B`                    |
-//! | `A?`, `A*`, `A+`, `{n}` | `ok()`, a `while`, one then a `while`, a `for`           |
-//! | `except`, `followed`    | a probe run over a clone of what the left side read      |
+//! | `A B`                   | a field for `A`, a field for `B`, in that order          |
+//! | `A?`, `A*`              | `Option<A<I>>`, `Vec<A<I>>` — the derive's own shapes    |
+//! | `A+`, `{n}`, `{n, m}`   | a `read_` function that counts the nodes it took         |
+//! | `except`, `followed`    | a probe the field's reader runs beside the text it took  |
 //! | `whitespace W -> […]`   | `#[parserc(take_while = is_w)]` and the predicate        |
 //!
-//! A right side that reads as one expression is written into the `parser` of the
-//! field, so that the declaration of a type is the declaration of the rule. Only
-//! when a rule needs statements — a sequence, a repetition, a probe — does it get
-//! a function of its own, named `read_` after the rule in lower case with
-//! underscores, which is what a group inside a rule is named `read_` after the
-//! rule and its place in it.
+//! A field that names no rule is the text its operand read, and is called by
+//! its place: `f1`, `f2`, and onward. A rule whose sequence holds nothing but
+//! such fields is written as a tuple of them, since where they stand already
+//! says what they are, and where one field reaches in by name every other
+//! takes its number beside it.
 //!
-//! One rule is not a struct over the text it read: a `lexer` rule whose whole right
-//! side is a choice of other rules by name — `lexer Ident -> RawIdent |
-//! NonKeywordIdent;` — says *which* of the names was read as well as what was read, and
-//! comes out as an enum with one variant per name. The text alone does not say
-//! which, so throwing it away is not an option; the variant it names is the node.
+//! A right side that reads as one expression is written into the `parser` of
+//! that one field, so that the declaration of a type is the declaration of the
+//! rule. Only when a reading needs statements — a group that folds, a bound
+//! over anything wider than a character, a probe — does it get a function of
+//! its own, named `read_` after the rule in lower case with underscores, and
+//! after the rule and its place in it for a group inside a rule.
 //!
-//! Such a name is only written as a node where nothing asks it to be the text a
-//! combinator read beside another. Two alternatives of a choice hand back the same
-//! type, so a name read among others — `BlockCommentOrDoc` within the alternatives
-//! of `BlockComment` — keeps the code of the text it read, and the whole file is
-//! read through for those places before any rule is written.
+//! Which rules come out as nodes and which as the text they read is settled
+//! over the whole file before any rule is written, because it is a fact about
+//! the other rules' code as much as about its own. A name whose answer flows
+//! back as text — an alternative of a folded choice, a member of a set read
+//! one character at a time, the operand an `except` is written over, the one
+//! name a rule or a group answers with whole — asks its rule for the text, and
+//! the rule asked for is written as text even where its own right side is a
+//! choice of names or a sequence of fields; and a text rule folds arms that
+//! reach names of its own, so the question is asked again of what the first
+//! answers settle, until the two sets hold still. What comes out is that a
+//! choice of names is an enum only where nothing reads the choice beside
+//! another thing: `Ident` and `Keywords` are enums, while `BlockCommentOrDoc`
+//! — read among the alternatives of `BlockComment` — is the text its three
+//! rules read.
 //!
 //! Three of the combinators of [`parserc`] are worth knowing about, since the
 //! generator reaches for them whenever a rule fits: a set of single characters
@@ -52,27 +66,28 @@
 //! apiece, and a repetition of such a set becomes
 //! [`take_while`](parserc::take_while_with), which counts items and needs no loop
 //! of its own. What they cannot do is bound a repetition of anything wider than a
-//! character, so `{n, m}` over a name is a `for`.
+//! character, so `{n, m}` over a name is a `read_` of its own.
 //!
 //! # Where the generated code differs from this crate's own
 //!
 //! [`lexer`] is written by hand and is tuned where a generated file
-//! is merely correct. Four differences are deliberate:
+//! is merely correct. The differences that remain are deliberate:
 //!
 //! - [`BlockCommentOrDoc`](super::lexer::BlockCommentOrDoc) is an enum of the three
 //!   rules it names, where the generator writes it as the text it read: the hand-
 //!   written rule reaches it from among the alternatives of `BlockComment`, where
-//!   the two sides of a `.or()` have to answer with one type. Every other rule of
-//!   that shape is an enum in both.
-//! - The variants of [`Ident`](super::lexer::Ident) are named what they are
-//!   (`Raw`, `NonKeyword`) where the generator names them after the rule each
-//!   holds (`RawIdent`, `NonKeywordIdent`): nothing in the text of a rule says
-//!   what a variant should be called, and the only name the file offers is the
-//!   name of the rule. A spec that wants shorter names says them itself, as a
-//!   rule of its own.
+//!   the two sides of a `.or()` have to answer with one type — and the generator
+//!   lets that question decide, while the hand file answers it by naming the
+//!   node anyway.
+//! - The hand file gives the parts of a rule names that say what they hold —
+//!   `open`, `head`, `tail` — and names the unnamed choices of a right side as
+//!   rules of their own (`LitStrContent`, `BlockCommentTail`), which is what the
+//!   [`UnnamedAlternative`](super::errors::LintKind::UnnamedAlternative) lint
+//!   asks the author of a file to do in the spec. The generator has only the
+//!   file to go by, and says `f1`, `f2`, and the rule's own name.
 //! - A refusal the generated code reports is a [`Kind`](parserc::Kind) of the
 //!   combinator that met it, where the hand-written file names what it expected
-//!   with its own [`UnsynError`](super::errors::UnsynError) variants. Naming them
+//!   with its own [`UnsynError`] variants. Naming them
 //!   is a table the caller of a build would have to supply, in the same way that
 //!   it supplies the externals.
 //! - A `LitUnicode` is read as the four digits its rule asks for and no more, so
@@ -117,7 +132,11 @@ use unicode_ident::{is_xid_continue, is_xid_start};
 
 use super::input::UnsynInput;
 
-use super::{lexer, syntax, syntax::Decl};
+use super::{
+    errors::{BuildKind, UnsynError},
+    lexer, syntax,
+    syntax::Decl,
+};
 
 // ---------------------------------------------------------------------------
 // The builder
@@ -178,51 +197,29 @@ where
     ///
     /// # Errors
     ///
-    /// A [`BuildError`] says which rule asked for code there is none of. The
+    /// An [`UnsynError::Build`] says which rule asked for code there is none of. The
     /// precondition is a file the analyzer found nothing in; a rule that reaches a
     /// name the file never declares, for instance, is refused there and not here,
     /// and the code written for it then names a type that is not.
-    pub fn build(&self) -> Result<TokenStream, BuildError> {
+    pub fn build(&self) -> Result<TokenStream, UnsynError> {
         let denotations = denotations(self.file);
-        let named_choices = named_choice_rules(self.file);
+        let nodes = node_rules(self.file);
 
         let mut generator = Generator {
             file: self.file,
             external: &self.external,
             denotations: &denotations,
-            named_choices: &named_choices,
+            nodes: &nodes,
             taken: HashSet::new(),
             helpers: Vec::new(),
             seq: 0,
+            field_no: 0,
+            field_names: HashSet::new(),
             rule: String::new(),
         };
 
         generator.crate_of()
     }
-}
-
-/// Why a file was not written as code.
-///
-/// Every refusal names the rule that met it and where the file wrote it, which is
-/// all a caller can be told about a file that means something the generator has no
-/// code for.
-#[derive(Debug, thiserror::Error)]
-pub enum BuildError {
-    /// The file calls an external the builder was not given.
-    #[error("the rule `{0}` calls the external `{1}`, which is not bound: {2:?}")]
-    External(String, String, Span),
-    /// A `whitespace` rule denotes no set of single characters.
-    #[error("the whitespace rule `{0}` does not denote a set of characters: {1:?}")]
-    Whitespace(String, Span),
-    /// A name no item of Rust can carry.
-    #[error("the rule `{0}` is named what no item can be named: {1:?}")]
-    Name(String, Span),
-    /// A literal that spells no value a parser can be written with.
-    #[error("the rule `{0}` holds a literal that spells nothing to read: {1:?}")]
-    Literal(String, Span),
-    /// A `syntax` rule, whose nodes are not written yet.
-    #[error("no code is written for the syntax rule `{0}` yet: {1:?}")]
-    Syntax(String, Span),
 }
 
 /// How many times something is read, written as a number that is free to take the
@@ -271,49 +268,31 @@ where
     (names.len() >= 2).then_some(names)
 }
 
-/// The rules of `file` that are a choice of other rules by name.
+/// The rules of `file` that are written as a node rather than as the text they
+/// read.
 ///
-/// The whole file is read through first, since a rule is asked for the code of a
-/// name before the code of that name is written, and whether the name denotes a
-/// token or a node is decided by what the name is written as rather than by the
-/// order the file declares them in.
-fn named_choice_rules<I>(file: &syntax::Crate<I>) -> HashSet<String>
+/// Two shapes earn a node. A rule whose whole right side is a choice of other
+/// rules by name says *which* of them was read, and the text alone does not: it
+/// comes out as an enum with one part per name. A rule whose right side is one
+/// alternative of more than one operand is a sequence, and a sequence is written
+/// as a struct with one field per operand, each field holding what its operand
+/// holds — a node, a list, an option, or the text of what was read.
+///
+/// Either shape is undone by the shape of another rule's code: wherever the
+/// code of a name is asked for among the parts of a choice, of a set read as a
+/// choice of characters, or as the text a removal is written over, the answer
+/// has to be the text and not a part of the tree, and the rule asked for in
+/// such a place is written as one field of that text after all. The whole file
+/// is read through until the two sets settle, since one rule written as text
+/// reads a choice whose other parts then have to be text too, and what is
+/// settled for one rule is a fact about the file rather than about the order
+/// the file declares its rules in.
+fn node_rules<I>(file: &syntax::Crate<I>) -> HashSet<String>
 where
     I: UnsynInput,
 {
-    let mut rules = HashSet::new();
-
-    for item in &file.items {
-        let syntax::Item::Stmt(stmt) = item else {
-            continue;
-        };
-
-        if matches!(stmt.decl(), Decl::Lexer)
-            && named_choice(&stmt.definition.body).is_some()
-            && !asked_for(file, stmt.ident.text().as_str())
-        {
-            rules.insert(external_key(stmt.ident.text().as_str()));
-        }
-    }
-
-    rules
-}
-
-/// Whether the code of `name` is asked for somewhere among the parts of another
-/// `lexer` rule, where a node of the tree cannot stand.
-///
-/// Two alternatives of a choice are tried against one another, so both have to
-/// hand back the same thing: where one of them is the text a rule read, a name
-/// whose code hands back a part of the tree cannot be read beside it. The same
-/// holds of the two members of a set, and of the operand a removal is written
-/// over, whose text is asked of the answer rather than thrown away. A name asked
-/// for in one of those places therefore keeps the code of the text it read, even
-/// where its own rule is a choice of names.
-fn asked_for<I>(file: &syntax::Crate<I>, name: &str) -> bool
-where
-    I: UnsynInput,
-{
-    let mut asked = HashSet::new();
+    let mut nodes = HashSet::new();
+    let mut sequences = HashSet::new();
 
     for item in &file.items {
         let syntax::Item::Stmt(stmt) = item else {
@@ -324,98 +303,191 @@ where
             continue;
         }
 
-        // A rule whose whole body is one name reads that name as its whole answer,
-        // which is asked for rather than thrown away.
-        let body = &stmt.definition.body;
-        let alone = body.is_single()
-            && body
-                .branches()
-                .next()
-                .is_some_and(|branch| branch.elements().take(2).count() == 1);
+        let key = external_key(stmt.ident.text().as_str());
 
-        expr_asked(body, alone, &mut asked);
+        if named_choice(&stmt.definition.body).is_some() {
+            nodes.insert(key);
+        } else if is_sequence(&stmt.definition.body) {
+            sequences.insert(key.clone());
+            nodes.insert(key);
+        }
     }
 
-    asked.contains(&external_key(name))
-}
+    loop {
+        let mut forced = HashSet::new();
 
-/// The names whose code is asked for within `expr`, which is read among the
-/// alternatives of a choice when `choice` says it is.
-fn expr_asked<I>(expr: &syntax::Expr<I>, choice: bool, asked: &mut HashSet<String>)
-where
-    I: UnsynInput,
-{
-    // A rule that is nothing but a name reads that name as its whole answer, so
-    // the answer is asked for rather than thrown away.
-    let choice = choice || !expr.is_single();
+        for item in &file.items {
+            let syntax::Item::Stmt(stmt) = item else {
+                continue;
+            };
 
-    for branch in expr.branches() {
-        for element in branch.elements() {
-            operand_asked(element, choice, asked);
+            if !matches!(stmt.decl(), Decl::Lexer) {
+                continue;
+            }
+
+            // A rule written as text reads its whole answer back as text, and
+            // a rule written as a sequence reads the parts it names back as
+            // parts: in both, every choice the body folds, every set the body
+            // lists as a choice of characters, and every removal written over
+            // a name asks that name for the text it read. A rule written as an
+            // enum of names is the one body that asks for nothing: its parts
+            // are the names, and no text of them is read back.
+            let key = external_key(stmt.ident.text().as_str());
+            let body = &stmt.definition.body;
+
+            if nodes.contains(&key) && !sequences.contains(&key) {
+                continue;
+            }
+
+            // A rule whose whole body is one name answers with that name, and
+            // a rule that is not written as a node answers with text: the
+            // name it reads has to answer with text too.
+            if body.is_single()
+                && let Some(element) = body
+                    .branches()
+                    .next()
+                    .expect("one branch")
+                    .elements()
+                    .next()
+                && matches!(
+                    element,
+                    syntax::ExprNoTopAlt::WithoutSuffix(syntax::ExprWithoutSuffix::Reference(_))
+                )
+            {
+                operand_forced(element, true, &mut forced);
+            }
+
+            expr_forced(body, false, &mut forced);
+        }
+
+        let before = nodes.len();
+        nodes.retain(|rule| !forced.contains(rule));
+
+        if nodes.len() == before {
+            return nodes;
         }
     }
 }
 
-fn operand_asked<I>(operand: &syntax::ExprNoTopAlt<I>, choice: bool, asked: &mut HashSet<String>)
+/// Whether the rule is one alternative of more than one operand, which is the
+/// sequence the generator writes as a struct of fields.
+fn is_sequence<I>(body: &syntax::Expr<I>) -> bool
+where
+    I: UnsynInput,
+{
+    body.is_single()
+        && body
+            .branches()
+            .next()
+            .is_some_and(|branch| branch.elements().count() > 1)
+}
+
+/// The names whose text is asked for by `expr`: by the alternatives it folds,
+/// by the members of the sets it lists, and by the operand a removal is written
+/// over. A name read as the whole answer of a rule or of an operand is not
+/// among them; that answer keeps its shape.
+/// The names whose answer flows as text wherever `expr` is read as one
+/// answer: the alternatives it folds, the member of a set read as a choice of
+/// characters, the group whose whole answer is one name, and the operand a
+/// removal is written over.
+fn expr_forced<I>(expr: &syntax::Expr<I>, folds: bool, forced: &mut HashSet<String>)
+where
+    I: UnsynInput,
+{
+    // The alternatives of a pattern that has more than one of them answer a
+    // fold, and a fold asks one shape of every part that reaches it.
+    let folds = folds || !expr.is_single();
+
+    for branch in expr.branches() {
+        for element in branch.elements() {
+            operand_forced(element, folds, forced);
+        }
+    }
+}
+
+fn operand_forced<I>(operand: &syntax::ExprNoTopAlt<I>, folds: bool, forced: &mut HashSet<String>)
 where
     I: UnsynInput,
 {
     match operand {
-        syntax::ExprNoTopAlt::WithoutSuffix(atom) => atom_asked(atom, choice, asked),
+        syntax::ExprNoTopAlt::WithoutSuffix(atom) => atom_forced(atom, folds, forced),
         syntax::ExprNoTopAlt::WithSuffix(suffix) => match suffix {
-            // A group repeated reads each time as a statement, and what it read
-            // is thrown away, so the group is asked for nothing of its answer.
-            syntax::ExprWithSuffix::Grouped { target, .. } => atom_asked(target, choice, asked),
+            syntax::ExprWithSuffix::Grouped { target, .. } => atom_forced(target, folds, forced),
             syntax::ExprWithSuffix::Concat {
                 target,
                 suffix: next,
                 ..
             } => {
-                atom_asked(target, choice, asked);
-                operand_asked(next, choice, asked);
+                atom_forced(target, folds, forced);
+                operand_forced(next, folds, forced);
             }
-            // What follows is only probed, and what a removal is written over is
-            // the text the operand to its left read, which nothing else answers.
-            syntax::ExprWithSuffix::Followed { target, .. } => atom_asked(target, choice, asked),
+            // What follows is only probed, and its answer thrown away: the
+            // probe asks the shape of the answer of nothing. What a removal is
+            // written over is the one operand whose text is read back.
+            syntax::ExprWithSuffix::Followed { target, .. } => atom_forced(target, folds, forced),
             syntax::ExprWithSuffix::Except { target, tokens, .. } => {
-                atom_asked(target, true, asked);
-                atom_asked(tokens, false, asked);
+                if let syntax::ExprWithoutSuffix::Reference(ident) = target {
+                    forced.insert(external_key(ident.text().as_str()));
+                }
+
+                atom_forced(tokens, folds, forced);
             }
         },
     }
 }
 
-fn atom_asked<I>(atom: &syntax::ExprWithoutSuffix<I>, choice: bool, asked: &mut HashSet<String>)
+fn atom_forced<I>(atom: &syntax::ExprWithoutSuffix<I>, folds: bool, forced: &mut HashSet<String>)
 where
     I: UnsynInput,
 {
     match atom {
-        syntax::ExprWithoutSuffix::Reference(ident) => {
-            if choice {
-                asked.insert(external_key(ident.text().as_str()));
+        // A name read alone hands back its whole answer. Read among the parts
+        // of a fold, the fold asks that answer of every part as one thing, and
+        // the thing a fold of text answers with is text; read on its own, as
+        // the field of a struct or the target of a probe that throws the
+        // answer away, the name keeps whichever shape it was written in.
+        syntax::ExprWithoutSuffix::Reference(ident) if folds => {
+            forced.insert(external_key(ident.text().as_str()));
+        }
+        // A group whose whole answer is one name hands that name's answer
+        // back, and a group is read back as text wherever it stands: a field
+        // of `I`, an operand the code of a rule folds. What a group reads
+        // besides — a sequence, a choice of its own — it answers with its
+        // reading, and the names inside answer only to that.
+        syntax::ExprWithoutSuffix::Paren(group) => {
+            if group
+                .body
+                .branches()
+                .next()
+                .is_some_and(|branch| branch.elements().count() == 1)
+                && group.body.is_single()
+                && let Some(syntax::ExprNoTopAlt::WithoutSuffix(
+                    syntax::ExprWithoutSuffix::Reference(ident),
+                )) = group
+                    .body
+                    .branches()
+                    .next()
+                    .expect("one element")
+                    .elements()
+                    .next()
+            {
+                forced.insert(external_key(ident.text().as_str()));
+            } else {
+                expr_forced(&group.body, false, forced);
             }
         }
-        syntax::ExprWithoutSuffix::Paren(group) => expr_asked(&group.body, choice, asked),
-        syntax::ExprWithoutSuffix::Set(set) => set_asked(set, choice, asked),
-        syntax::ExprWithoutSuffix::Tilde(_, set) => set_asked(set, choice, asked),
-        _ => {}
-    }
-}
-
-/// A set of more than one member is a choice of them, read one character at a
-/// time, so a name within one is asked for the character it read.
-fn set_asked<I>(set: &syntax::Set<I>, choice: bool, asked: &mut HashSet<String>)
-where
-    I: UnsynInput,
-{
-    let choice = choice || set_items(set).len() > 1;
-
-    for item in set_items(set) {
-        if let syntax::SetItem::Reference(ident) = item
-            && choice
+        // A set of more than one member is a choice of its members, and a
+        // choice answers with one thing however wide the members are.
+        syntax::ExprWithoutSuffix::Set(set) | syntax::ExprWithoutSuffix::Tilde(_, set)
+            if set_items(set).len() > 1 =>
         {
-            asked.insert(external_key(ident.text().as_str()));
+            for item in set_items(set) {
+                if let syntax::SetItem::Reference(ident) = item {
+                    forced.insert(external_key(ident.text().as_str()));
+                }
+            }
         }
+        _ => {}
     }
 }
 
@@ -669,15 +741,22 @@ where
     external: &'a HashMap<String, TokenStream>,
     /// What each name of the file denotes, of the names that denote characters.
     denotations: &'a HashMap<String, Vec<Arm>>,
-    /// The rules that are a choice of other rules by name, and so denote a node
-    /// of the tree rather than the text they read.
-    named_choices: &'a HashSet<String>,
+    /// The rules that are written as a node — an enum of the names a choice
+    /// reads, or a struct of the fields a sequence writes — rather than as the
+    /// text they read.
+    nodes: &'a HashSet<String>,
     /// The names of the functions the module has been given already.
     taken: HashSet<String>,
     /// The functions the rule being written has asked for, in the order asked.
     helpers: Vec<TokenStream>,
     /// How many functions the rule being written has asked for.
     seq: usize,
+    /// How many fields of the rule being written have been named by their
+    /// place, counting up from one.
+    field_no: usize,
+    /// The field names the rule being written has taken, which no second field
+    /// may wear as well.
+    field_names: HashSet<String>,
     /// The rule being written, which is what a refusal is reported against.
     rule: String,
 }
@@ -687,7 +766,7 @@ where
     I: UnsynInput,
 {
     /// The items of a whole file.
-    fn crate_of(&mut self) -> Result<TokenStream, BuildError> {
+    fn crate_of(&mut self) -> Result<TokenStream, UnsynError> {
         let file = self.file;
         let mut items = Vec::new();
 
@@ -704,7 +783,7 @@ where
 
     /// The code of one definition: the functions its pattern asked for, and the
     /// node its name declares.
-    fn stmt(&mut self, stmt: &syntax::Stmt<I>) -> Result<Vec<TokenStream>, BuildError> {
+    fn stmt(&mut self, stmt: &syntax::Stmt<I>) -> Result<Vec<TokenStream>, UnsynError> {
         let text = stmt.ident.text();
         let span = stmt.ident.to_span();
         let name = item_name(&text, span.clone())?;
@@ -713,13 +792,15 @@ where
         self.rule = text.clone();
         self.seq = 0;
         self.helpers.clear();
+        self.field_no = 0;
+        self.field_names.clear();
 
         // A rule that is a choice of names is a node, and the names it chooses
         // between were read on their own: nothing is asked of the body here, and
         // the part of each alternative is the node that alternative names. Which
         // rules are of that shape was settled over the whole file first, since a
         // rule asked for among the parts of another is not written as a node.
-        if self.named_choices.contains(&external_key(&text))
+        if self.nodes.contains(&external_key(&text))
             && let Some(names) = named_choice(&stmt.definition.body)
         {
             let mut variants = Vec::new();
@@ -752,7 +833,7 @@ where
         let allow = allow.then(|| quote! { #[allow(non_camel_case_types)] });
 
         let code = match stmt.decl() {
-            Decl::Syntax => return Err(BuildError::Syntax(text, span)),
+            Decl::Syntax => return Err(UnsynError::Build(BuildKind::Syntax(text), span)),
             Decl::Whitespace => self.whitespace(&text, stmt)?,
             Decl::Lexer => self.lexer_rule(&text, stmt)?,
         };
@@ -781,6 +862,59 @@ where
                 where
                     I: ::parserc::chars::CharsInput;
             },
+            Rule::Fields { tuple, fields } => {
+                let decl = if tuple {
+                    let tys = fields.iter().map(|field| {
+                        let attr = &field.attr;
+                        let ty = &field.ty;
+
+                        quote! { #attr pub #ty, }
+                    });
+
+                    quote! {
+                        pub struct #name<I>(
+                            #(#tys)*
+                        )
+                    }
+                } else {
+                    let decls = fields.iter().map(|field| {
+                        let attr = &field.attr;
+                        let name = field.name.as_ref().expect("a named struct");
+                        let ty = &field.ty;
+
+                        quote! {
+                            #attr
+                            pub #name: #ty,
+                        }
+                    });
+
+                    // A struct with braces settles its bounds before them.
+                    quote! {
+                        pub struct #name<I>
+                        where
+                            I: ::parserc::chars::CharsInput,
+                        {
+                            #(#decls)*
+                        }
+                    }
+                };
+
+                let where_ = if tuple {
+                    quote! {
+                        where
+                            I: ::parserc::chars::CharsInput;
+                    }
+                } else {
+                    quote! {}
+                };
+
+                quote! {
+                    #[derive(Debug, PartialEq, Eq, PartialOrd, Ord, Clone, ::parserc::syntax::Syntax)]
+                    #allow
+                    #decl
+                    #where_
+                }
+            }
         });
 
         Ok(items)
@@ -788,9 +922,12 @@ where
 
     /// The predicate of a `whitespace` rule, which is the one rule the derive of
     /// the syntax asks a function of a character rather than a parser.
-    fn whitespace(&mut self, text: &str, stmt: &syntax::Stmt<I>) -> Result<Rule, BuildError> {
+    fn whitespace(&mut self, text: &str, stmt: &syntax::Stmt<I>) -> Result<Rule, UnsynError> {
         let arms = expr_arms(&stmt.definition.body, self.denotations).ok_or_else(|| {
-            BuildError::Whitespace(text.to_owned(), stmt.definition.body.to_span())
+            UnsynError::Build(
+                BuildKind::Whitespace(text.to_owned()),
+                stmt.definition.body.to_span(),
+            )
         })?;
 
         let pred = self.unique(format!("is_{}", to_snake_case(text)));
@@ -812,8 +949,19 @@ where
     }
 
     /// The parser of a `lexer` rule.
-    fn lexer_rule(&mut self, text: &str, stmt: &syntax::Stmt<I>) -> Result<Rule, BuildError> {
-        match self.code_of_expr(&stmt.definition.body)? {
+    fn lexer_rule(&mut self, text: &str, stmt: &syntax::Stmt<I>) -> Result<Rule, UnsynError> {
+        // A rule whose whole right side is one alternative of more than one
+        // operand is a sequence, and a sequence is modelled as the struct its
+        // operands write: one field apiece, in the order they were written.
+        let body = &stmt.definition.body;
+
+        if is_sequence(body) && self.nodes.contains(&external_key(text)) {
+            let branch = body.branches().next().expect("a pattern has a branch");
+
+            return self.fields_of(branch);
+        }
+
+        match self.code_of_expr(body)? {
             // The whole rule reads as one expression, and the expression says so
             // beside the field it reads into. Any function the expression reaches
             // was asked for while it was being read, and stands beside the rule.
@@ -828,10 +976,256 @@ where
         }
     }
 
+    // -- fields --------------------------------------------------------------
+
+    /// The struct a sequence of operands came out as.
+    ///
+    /// A sequence of nothing but nameless operands is a tuple of them: the
+    /// fields are told apart by where they stand, and a name would only say
+    /// again what the order already says. Where a name reaches in — a reference
+    /// to another rule, read as the node it names — every field is given one:
+    /// the reference after the rule it reads, the rest as the count of anonymous
+    /// fields.
+    fn fields_of(
+        &mut self,
+        branch: &syntax::OneOrMore<I, syntax::ExprNoTopAlt<I>>,
+    ) -> Result<Rule, UnsynError> {
+        let mut fields = Vec::new();
+
+        for element in branch.elements() {
+            fields.extend(self.field_of(element)?);
+        }
+
+        // A struct of nothing but nameless operands is a tuple of them: where
+        // they stand says what they are, and a name would only say it twice.
+        // Where a name reaches in, every other field takes its number.
+        let tuple = fields.iter().all(|field| field.name.is_none());
+
+        if !tuple {
+            for field in &mut fields {
+                if field.name.is_none() {
+                    field.name = self.anonymous_name();
+                }
+            }
+        }
+
+        Ok(Rule::Fields { tuple, fields })
+    }
+
+    /// The fields one operand of a sequence is written as.
+    ///
+    /// Most operands are one field. A `concat` is the two operands it joins,
+    /// which at this level is what a sequence of them already is.
+    fn field_of(&mut self, operand: &syntax::ExprNoTopAlt<I>) -> Result<Vec<Field>, UnsynError> {
+        match operand {
+            syntax::ExprNoTopAlt::WithoutSuffix(atom) => Ok(vec![self.atom_field(atom, None)?]),
+            syntax::ExprNoTopAlt::WithSuffix(suffix) => match suffix {
+                syntax::ExprWithSuffix::Grouped { target, suffix } => {
+                    let bounds = match suffix {
+                        syntax::Suffix::Star(_) => (0, None),
+                        syntax::Suffix::Question(_) => (0, Some(1)),
+                        syntax::Suffix::Plus(_) => (1, None),
+                        syntax::Suffix::Repeat(repeat) => self.bounds(&repeat.0.body)?,
+                    };
+
+                    Ok(vec![self.atom_field(target, Some(bounds))?])
+                }
+                syntax::ExprWithSuffix::Concat { target, suffix, .. } => {
+                    let mut fields = vec![self.atom_field(target, None)?];
+
+                    fields.extend(self.field_of(suffix)?);
+
+                    Ok(fields)
+                }
+                // A `followed` asks of the text what came before it, and an
+                // `except` refuses what all of it amounts to: neither is a
+                // field of its own, and both are what one field's reader does.
+                syntax::ExprWithSuffix::Followed { .. } | syntax::ExprWithSuffix::Except { .. } => {
+                    let code = self.code_of_suffix(suffix)?;
+                    let parser = self.expr_of(code)?;
+
+                    Ok(vec![Field {
+                        name: None,
+                        ty: quote! { I },
+                        attr: Some(field_parser(&parser)),
+                    }])
+                }
+            },
+        }
+    }
+
+    /// The field one operand that stands alone is written as, repeated as
+    /// many times as its suffix asks.
+    ///
+    /// A reference keeps the shape it names: the node of the rule read, once or
+    /// as an option or as a list of them. Anything else is read into the text
+    /// it took, which is one field of `I` with the reader of it written beside
+    /// the field. What a bound asks of a class of characters is one call of a
+    /// combinator that counts items; what it asks of anything wider is a
+    /// function of its own.
+    fn atom_field(
+        &mut self,
+        atom: &syntax::ExprWithoutSuffix<I>,
+        bounds: Option<(usize, Option<usize>)>,
+    ) -> Result<Field, UnsynError> {
+        if let syntax::ExprWithoutSuffix::Reference(ident) = atom {
+            let name = ident.text();
+            let span = ident.to_span();
+            let ty = item_name(&name, span)?;
+
+            // The field's own name is settled before anything else the field
+            // asks, which is what lets the rest of the building borrow the
+            // generator once.
+            let field_name = self.named_field(&name);
+
+            let (field_ty, attr) = match bounds {
+                None => (quote! { #ty<I> }, None),
+                Some((0, None)) => (quote! { ::std::vec::Vec<#ty<I>> }, None),
+                Some((0, Some(1))) => (quote! { ::core::option::Option<#ty<I>> }, None),
+                Some((at_least, at_most)) => {
+                    let read = self.bounded_reader(&ty, at_least, at_most);
+
+                    (
+                        quote! { ::std::vec::Vec<#ty<I>> },
+                        Some(field_parser(&read.to_token_stream())),
+                    )
+                }
+            };
+
+            return Ok(Field {
+                name: field_name,
+                ty: field_ty,
+                attr,
+            });
+        }
+
+        let parser = match bounds {
+            None => {
+                let code = self.code_of_atom(atom)?;
+                self.expr_of(code)?
+            }
+            Some(bounds) => match self.class_of(atom) {
+                Some(pred) => bound_combinator(&pred, bounds.0, bounds.1),
+                None => {
+                    let code = self.code_of_repetition(atom, bounds.0, bounds.1)?;
+                    self.expr_of(code)?
+                }
+            },
+        };
+
+        Ok(Field {
+            name: None,
+            ty: quote! { I },
+            attr: Some(field_parser(&parser)),
+        })
+    }
+
+    /// The characters a repeated operand can be one test of, when it is a class
+    /// of them at all: what the code of a repetition asks of the arms it can
+    /// count, counted here for the field it will be written into.
+    fn class_of(&self, atom: &syntax::ExprWithoutSuffix<I>) -> Option<TokenStream> {
+        match atom {
+            syntax::ExprWithoutSuffix::Tilde(_, set) => {
+                set_arms(set, self.denotations).as_deref().map(refused_pred)
+            }
+            atom => atom_arms(atom, self.denotations).as_deref().map(class_pred),
+        }
+    }
+
+    /// The function that reads one reference repeated a bounded number of
+    /// times, and hands back the nodes it took.
+    fn bounded_reader(&mut self, ty: &Ident, at_least: usize, at_most: Option<usize>) -> Ident {
+        let seq = self.seq;
+        self.seq += 1;
+
+        let read = self.unique(format!(
+            "read_{}_{}",
+            to_snake_case(&self.rule.clone()),
+            seq + 1
+        ));
+
+        let each = quote! {
+            <#ty<I> as ::parserc::syntax::Syntax<I>>::into_parser()
+                .ok()
+                .parse(input)?
+        };
+
+        let loop_ = match at_most {
+            None => quote! {
+                while let Some(one) = #each {
+                    taken.push(one);
+                }
+            },
+            Some(at_most) => quote! {
+                while taken.len() < #at_most {
+                    let Some(one) = #each else { break };
+                    taken.push(one);
+                }
+            },
+        };
+
+        let rule = self.rule.clone();
+
+        self.helpers.push(quote! {
+            fn #read<I>(
+                input: &mut I,
+            ) -> ::core::result::Result<::std::vec::Vec<#ty<I>>, <I as ::parserc::Input>::Error>
+            where
+                I: ::parserc::chars::CharsInput,
+            {
+                use ::parserc::Parser as _;
+
+                let mut taken = ::std::vec::Vec::new();
+
+                #loop_
+
+                // Fewer than the bound asked for is the repetition itself
+                // missing, told at the place the reading of it stands.
+                if taken.len() < #at_least {
+                    return Err(::parserc::Kind::Syntax(
+                        #rule,
+                        ::parserc::ControlFlow::Recovable,
+                        input.to_span(),
+                    )
+                    .into());
+                }
+
+                Ok(taken)
+            }
+        });
+
+        read
+    }
+
+    /// The name of the next field that has none of its own.
+    fn anonymous_name(&mut self) -> Option<Ident> {
+        self.field_no += 1;
+
+        Some(Ident::new(
+            &format!("f{}", self.field_no),
+            proc_macro2::Span::call_site(),
+        ))
+    }
+
+    /// The name a field that reads a rule by name wears: the rule's own, in
+    /// the case the fields of a struct are written in. Where two operands
+    /// reach the same name, the second of them stays nameless and takes its
+    /// number with the others.
+    ///
+    /// The count of nameless fields says nothing about this one: the name is
+    /// the rule's, and only the fields that have no other go by their number.
+    fn named_field(&mut self, text: &str) -> Option<Ident> {
+        let base = to_snake_case(text);
+
+        self.field_names
+            .insert(base.clone())
+            .then(|| Ident::new(&base, proc_macro2::Span::call_site()))
+    }
+
     // -- expressions and statements -----------------------------------------
 
     /// The code of a pattern: the alternatives of it tried in the order written.
-    fn code_of_expr(&mut self, expr: &syntax::Expr<I>) -> Result<Code, BuildError> {
+    fn code_of_expr(&mut self, expr: &syntax::Expr<I>) -> Result<Code, UnsynError> {
         let mut branches = Vec::new();
 
         for branch in expr.branches() {
@@ -857,7 +1251,7 @@ where
     fn code_of_branch(
         &mut self,
         branch: &syntax::OneOrMore<I, syntax::ExprNoTopAlt<I>>,
-    ) -> Result<Code, BuildError> {
+    ) -> Result<Code, UnsynError> {
         let mut elements = branch.elements();
         let Some(first) = elements.next() else {
             return Ok(Code::Stmt(Vec::new()));
@@ -879,7 +1273,7 @@ where
     }
 
     /// The code of one operand, with whatever the operand carries after it.
-    fn code_of_operand(&mut self, operand: &syntax::ExprNoTopAlt<I>) -> Result<Code, BuildError> {
+    fn code_of_operand(&mut self, operand: &syntax::ExprNoTopAlt<I>) -> Result<Code, UnsynError> {
         match operand {
             syntax::ExprNoTopAlt::WithoutSuffix(atom) => self.code_of_atom(atom),
             syntax::ExprNoTopAlt::WithSuffix(suffix) => self.code_of_suffix(suffix),
@@ -887,7 +1281,7 @@ where
     }
 
     /// The code of an operand that stands alone.
-    fn code_of_atom(&mut self, atom: &syntax::ExprWithoutSuffix<I>) -> Result<Code, BuildError> {
+    fn code_of_atom(&mut self, atom: &syntax::ExprWithoutSuffix<I>) -> Result<Code, UnsynError> {
         match atom {
             syntax::ExprWithoutSuffix::Str(lit) => self.code_of_str(lit),
             syntax::ExprWithoutSuffix::Unicode(lit) => {
@@ -899,7 +1293,10 @@ where
                 let name = call.body.text();
 
                 let parser = self.external.get(&external_key(&name)).ok_or_else(|| {
-                    BuildError::External(self.rule.clone(), name.clone(), call.body.to_span())
+                    UnsynError::Build(
+                        BuildKind::External(self.rule.clone(), name.clone()),
+                        call.body.to_span(),
+                    )
                 })?;
 
                 Ok(Code::Expr(parser.clone()))
@@ -936,7 +1333,7 @@ where
 
     /// The code of a set: one test of a character where every member is one, and
     /// a choice of its members where any of them is more.
-    fn code_of_set(&mut self, set: &syntax::Set<I>) -> Result<TokenStream, BuildError> {
+    fn code_of_set(&mut self, set: &syntax::Set<I>) -> Result<TokenStream, UnsynError> {
         if let Some(arms) = set_arms(set, self.denotations) {
             let pred = class_pred(&arms);
             return Ok(quote! { ::parserc::next_if(#pred) });
@@ -965,11 +1362,12 @@ where
     }
 
     /// The code of one member of a set.
-    fn code_of_set_item(&mut self, item: &syntax::SetItem<I>) -> Result<Code, BuildError> {
+    fn code_of_set_item(&mut self, item: &syntax::SetItem<I>) -> Result<Code, UnsynError> {
         match item {
             syntax::SetItem::Range(range) => {
-                let arm = range_arm(range)
-                    .ok_or_else(|| BuildError::Literal(self.rule.clone(), range.to_span()))?;
+                let arm = range_arm(range).ok_or_else(|| {
+                    UnsynError::Build(BuildKind::Literal(self.rule.clone()), range.to_span())
+                })?;
 
                 match arm {
                     Arm::Char(c) => Ok(Code::Expr(quote! { ::parserc::next(#c) })),
@@ -991,12 +1389,17 @@ where
     ///
     /// One character is one item of the input, and more than one is a word of it,
     /// which the two combinators of `parserc` are asked apart.
-    fn code_of_str(&self, lit: &lexer::LitStr<I>) -> Result<Code, BuildError> {
+    fn code_of_str(&self, lit: &lexer::LitStr<I>) -> Result<Code, UnsynError> {
         let chars = lit.chars();
 
         let parser = match chars[..] {
             [c] => quote! { ::parserc::next(#c) },
-            [] => return Err(BuildError::Literal(self.rule.clone(), lit.to_span())),
+            [] => {
+                return Err(UnsynError::Build(
+                    BuildKind::Literal(self.rule.clone()),
+                    lit.to_span(),
+                ));
+            }
             _ => {
                 let text: String = chars.into_iter().collect();
                 quote! { ::parserc::keyword(#text) }
@@ -1006,20 +1409,19 @@ where
         Ok(Code::Expr(parser))
     }
 
-    /// The code that reads one rule by name.
+    /// The code that reads one rule by name, as the text the rule took.
     ///
-    /// A rule that denotes a set of strings hands back the text it took, which is
-    /// what lets a choice and a repetition both ask their operands to be the input
-    /// they were handed. A rule that is itself a choice of names is a node of the
-    /// tree and owns no single extent, so the node it read is what stands for it.
-    fn reference(&self, ident: &lexer::Ident<I>) -> Result<TokenStream, BuildError> {
+    /// A field, a list and a probe all ask their operand to answer with one
+    /// thing: what a choice or a repetition of two rules hands back has to be
+    /// one type, and the text both took is that. A node that has been modelled
+    /// as parts of its own has no text of a field to hand — the parts are the
+    /// node — and reads as itself, which is what [`node_of`] is for.
+    fn reference(&self, ident: &lexer::Ident<I>) -> Result<TokenStream, UnsynError> {
         let text = ident.text();
         let ty = item_name(&text, ident.to_span())?;
 
-        if self.named_choices.contains(&external_key(&text)) {
-            return Ok(quote! {
-                <#ty<I> as ::parserc::syntax::Syntax<I>>::into_parser()
-            });
+        if self.nodes.contains(&external_key(&text)) {
+            return Ok(node_of(&ty));
         }
 
         Ok(quote! {
@@ -1028,7 +1430,7 @@ where
     }
 
     /// The code of an operand that carries one of the suffixes.
-    fn code_of_suffix(&mut self, suffix: &syntax::ExprWithSuffix<I>) -> Result<Code, BuildError> {
+    fn code_of_suffix(&mut self, suffix: &syntax::ExprWithSuffix<I>) -> Result<Code, UnsynError> {
         match suffix {
             syntax::ExprWithSuffix::Grouped { target, suffix } => {
                 let (at_least, at_most) = match suffix {
@@ -1103,7 +1505,7 @@ where
         target: &syntax::ExprWithoutSuffix<I>,
         at_least: usize,
         at_most: Option<usize>,
-    ) -> Result<Code, BuildError> {
+    ) -> Result<Code, UnsynError> {
         let class = match target {
             // A refusal is a class when what it refuses is one, and the class of
             // the refusal is the other half of the characters.
@@ -1170,7 +1572,7 @@ where
     }
 
     /// How many times an operand is repeated, of the three forms a bound has.
-    fn bounds(&self, bound: &syntax::RepeatBound<I>) -> Result<(usize, Option<usize>), BuildError> {
+    fn bounds(&self, bound: &syntax::RepeatBound<I>) -> Result<(usize, Option<usize>), UnsynError> {
         Ok(match bound {
             syntax::RepeatBound::RangeTo(_, to) => (0, Some(self.count_of(to)?)),
             syntax::RepeatBound::RangeFrom(from, _, to) => (
@@ -1185,22 +1587,22 @@ where
     }
 
     /// The character a `U+…` of the file spells.
-    fn code_of(&self, lit: &lexer::LitUnicode<I>) -> Result<char, BuildError> {
+    fn code_of(&self, lit: &lexer::LitUnicode<I>) -> Result<char, UnsynError> {
         lit.value()
-            .ok_or_else(|| BuildError::Literal(self.rule.clone(), lit.to_span()))
+            .ok_or_else(|| UnsynError::Build(BuildKind::Literal(self.rule.clone()), lit.to_span()))
     }
 
     /// The number of times a bound of the file repeats.
-    fn count_of(&self, lit: &lexer::LitDec<I>) -> Result<usize, BuildError> {
+    fn count_of(&self, lit: &lexer::LitDec<I>) -> Result<usize, UnsynError> {
         lit.count()
             .map(|count| count as usize)
-            .ok_or_else(|| BuildError::Literal(self.rule.clone(), lit.to_span()))
+            .ok_or_else(|| UnsynError::Build(BuildKind::Literal(self.rule.clone()), lit.to_span()))
     }
 
     // -- names --------------------------------------------------------------
 
     /// The parser an expression is, given a function to be if it is statements.
-    fn expr_of(&mut self, code: Code) -> Result<TokenStream, BuildError> {
+    fn expr_of(&mut self, code: Code) -> Result<TokenStream, UnsynError> {
         Ok(match code {
             Code::Expr(parser) => parser,
             Code::Stmt(stmts) => {
@@ -1228,7 +1630,7 @@ where
     }
 }
 
-/// Which of the three shapes a rule came to.
+/// Which of the four shapes a rule came to.
 enum Rule {
     /// The rule is one expression, written beside the field it reads into.
     Field(TokenStream),
@@ -1236,6 +1638,51 @@ enum Rule {
     Read(Ident),
     /// The rule is the trivia, and is one test of a character.
     TakeWhile(Ident),
+    /// The rule is a sequence, and the struct holds one field per operand.
+    Fields {
+        /// Whether the fields are nameless and stand in a tuple, which says
+        /// what they are by where they are.
+        tuple: bool,
+        /// The fields, in the order the operands were written.
+        fields: Vec<Field>,
+    },
+}
+
+/// One field of the struct a sequence came out as.
+struct Field {
+    /// What the field is called, which is nothing where the struct is a tuple.
+    name: Option<Ident>,
+    /// The type the field holds: the node of a rule, a list or an option of
+    /// one, or the text of whatever else was read.
+    ty: TokenStream,
+    /// The attribute that says how the field is read, where its type alone
+    /// does not say it.
+    attr: Option<TokenStream>,
+}
+
+/// The parser of a rule that is a node rather than the text it read: the node
+/// it names, read whole.
+fn node_of(ty: &Ident) -> TokenStream {
+    quote! {
+        <#ty<I> as ::parserc::syntax::Syntax<I>>::into_parser()
+    }
+}
+
+/// The attribute that writes a field's reader beside the field.
+fn field_parser(parser: &TokenStream) -> TokenStream {
+    quote! { #[parserc(parser = #parser)] }
+}
+
+/// The combinator that reads a class of characters a bounded number of times,
+/// which is one call that counts items and needs no function of its own.
+fn bound_combinator(pred: &TokenStream, at_least: usize, at_most: Option<usize>) -> TokenStream {
+    match (at_least, at_most) {
+        (0, None) => quote! { ::parserc::take_while(#pred) },
+        (at_least, None) => quote! { ::parserc::take_while_with(#at_least.., #pred) },
+        (at_least, Some(at_most)) => {
+            quote! { ::parserc::take_while_with(#at_least..=#at_most, #pred) }
+        }
+    }
 }
 
 /// The function that reads `stmts` and keeps the text they took.
@@ -1263,7 +1710,7 @@ fn reader(read: &Ident, stmts: &[TokenStream]) -> TokenStream {
 /// before a word of Rust is an item written the same way, and a rule written plain
 /// is plain. What is no name at all is refused rather than mended, since a name the
 /// file could not be read as holding is not a name the code should invent.
-fn item_name(text: &str, span: Span) -> Result<Ident, BuildError> {
+fn item_name(text: &str, span: Span) -> Result<Ident, UnsynError> {
     let base = text.strip_prefix("r#").unwrap_or(text);
     let mut chars = base.chars();
 
@@ -1276,7 +1723,7 @@ fn item_name(text: &str, span: Span) -> Result<Ident, BuildError> {
     };
 
     if !named {
-        return Err(BuildError::Name(text.to_owned(), span));
+        return Err(UnsynError::Build(BuildKind::Name(text.to_owned()), span));
     }
 
     // A name the file wrote raw is written raw here too, which is what lets a rule
@@ -1373,7 +1820,10 @@ mod tests {
     }
 
     /// The code the file is written as, with what the builder was given.
-    fn build(source: &str) -> Result<TokenStream, BuildError> {
+    ///
+    /// `<IdentOrKeyword>` is bound to a scan of the module's own, which is what
+    /// an external is: the code written for it reaches nothing of the file.
+    fn build(source: &str) -> Result<TokenStream, UnsynError> {
         let file = parse(source);
         let mut builder = Builder::new(&file);
         builder.external(
@@ -1383,6 +1833,15 @@ mod tests {
         builder.external(
             "XID_Continue",
             quote! { ::parserc::next_if(::unicode_ident::is_xid_continue) },
+        );
+        builder.external(
+            "IdentOrKeyword",
+            quote! {
+                ::parserc::take_while_with(1.., |c: char| {
+                    ::unicode_ident::is_xid_continue(c) || ::unicode_ident::is_xid_start(c)
+                        || c == '_'
+                })
+            },
         );
         builder.build()
     }
@@ -1411,12 +1870,13 @@ mod tests {
 
         let mut builder = Builder::new(&terminals);
         builder.external(
-            "XID_Start",
-            quote! { ::parserc::next_if(::unicode_ident::is_xid_start) },
-        );
-        builder.external(
-            "XID_Continue",
-            quote! { ::parserc::next_if(::unicode_ident::is_xid_continue) },
+            "IdentOrKeyword",
+            quote! {
+                ::parserc::take_while_with(1.., |c: char| {
+                    ::unicode_ident::is_xid_continue(c) || ::unicode_ident::is_xid_start(c)
+                        || c == '_'
+                })
+            },
         );
 
         builder
@@ -1506,19 +1966,25 @@ mod tests {
         let file = parse("lexer A -> <NoSuchCombinator>;");
         let error = Builder::new(&file).build().unwrap_err();
 
-        assert!(
-            matches!(error, BuildError::External(rule, name, _) if rule == "A" && name == "NoSuchCombinator")
-        );
+        assert!(matches!(
+            error,
+            UnsynError::Build(BuildKind::External(rule, name), _)
+                if rule == "A" && name == "NoSuchCombinator"
+        ));
     }
 
     #[test]
-    fn a_reference_keeps_the_text_the_rule_read() {
+    fn a_reference_in_a_sequence_is_written_as_the_node_it_names() {
+        // A reference of a sequence is a field of the node it names, read by
+        // nothing but the type; the text of it is what the node keeps in its
+        // own parts.
         let soup = code("lexer A -> 'a'; lexer B -> A 'b';");
 
         assert!(has(
             &soup,
-            quote! { <A<I> as ::parserc::syntax::Syntax<I>>::into_parser().map(|node| node.0) }
+            quote! { #[parserc(parser = ::parserc::next('b'))] pub f1: I, }
         ));
+        assert!(has(&soup, quote! { pub a: A<I>, }));
     }
 
     #[test]
@@ -1584,10 +2050,14 @@ mod tests {
 
     #[test]
     fn the_trivia_of_a_lexer_rule_is_not_taken() {
-        // The rule reads one character and no run of the trivia beside it: the
-        // text it keeps is the one character.
+        // The sequence is a field apiece, and no field of a lexer node is a
+        // run of the trivia: a literal's field is the keyword's own text.
         let soup = code("lexer A -> 'a'; lexer C -> A 'x';");
-        assert!(soup.contains("whole . split_to (before - input . len ())"));
+        assert!(has(
+            &soup,
+            quote! { #[parserc(parser = ::parserc::next('x'))] pub f1: I, }
+        ));
+        assert!(!soup.contains("whole . split_to"));
 
         // A rule that is one expression keeps the text of the expression it is.
         let soup = code("lexer A -> 'a' | 'b';");
@@ -1610,7 +2080,10 @@ mod tests {
         let file = parse("whitespace W -> <XID_Start>;");
         let error = Builder::new(&file).build().unwrap_err();
 
-        assert!(matches!(error, BuildError::Whitespace(rule, _) if rule == "W"));
+        assert!(matches!(
+            error,
+            UnsynError::Build(BuildKind::Whitespace(rule), _) if rule == "W"
+        ));
     }
 
     #[test]
@@ -1618,14 +2091,20 @@ mod tests {
         let file = parse("lexer A -> 'a'; syntax B -> A;");
         let error = Builder::new(&file).build().unwrap_err();
 
-        assert!(matches!(error, BuildError::Syntax(rule, _) if rule == "B"));
+        assert!(matches!(
+            error,
+            UnsynError::Build(BuildKind::Syntax(rule), _) if rule == "B"
+        ));
     }
 
     #[test]
     fn a_name_no_item_can_wear_is_refused() {
         let file = parse("lexer _ -> 'a';");
         let error = Builder::new(&file).build();
-        assert!(matches!(error, Err(BuildError::Name(..))));
+        assert!(matches!(
+            error,
+            Err(UnsynError::Build(BuildKind::Name(_), _))
+        ));
     }
 
     #[test]

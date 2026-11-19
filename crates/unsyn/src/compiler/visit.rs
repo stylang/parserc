@@ -304,28 +304,12 @@ where
         walk::walk_cr(self, node);
     }
 
-    /// `lexer IdentOrKeyword -> ( XID_Start | '_' ) XID_Continue*;`
-    fn visit_ident_or_keyword(&mut self, node: &'ast lexer::IdentOrKeyword<I>) {
-        walk::walk_ident_or_keyword(self, node);
-    }
-
-    /// The `( XID_Start | '_' )` of [`IdentOrKeyword`](lexer::IdentOrKeyword),
-    /// a group the spec leaves unnamed and the hand tree names for it.
-    fn visit_ident_start(&mut self, node: &'ast lexer::IdentStart<I>) {
-        walk::walk_ident_start(self, node);
-    }
-
-    /// `lexer XID_Start -> <XID_Start>;`
+    /// `lexer IdentOrKeyword -> <IdentOrKeyword>;`
     ///
     /// The text of an external is whatever the caller's function took, which is
-    /// why this walk has nothing to say about how long it was.
-    fn visit_xid_start(&mut self, node: &'ast lexer::XID_Start<I>) {
-        walk::walk_xid_start(self, node);
-    }
-
-    /// `lexer XID_Continue -> <XID_Continue>;`
-    fn visit_xid_continue(&mut self, node: &'ast lexer::XID_Continue<I>) {
-        walk::walk_xid_continue(self, node);
+    /// why this walk has nothing to say about how long a name was.
+    fn visit_ident_or_keyword(&mut self, node: &'ast lexer::IdentOrKeyword<I>) {
+        walk::walk_ident_or_keyword(self, node);
     }
 
     /// `lexer RawIdent -> 'r#' IdentOrKeyword;`
@@ -846,8 +830,7 @@ pub mod walk {
         walk_s, S;
         walk_lf, LF;
         walk_cr, CR;
-        walk_xid_start, XID_Start;
-        walk_xid_continue, XID_Continue;
+        walk_ident_or_keyword, IdentOrKeyword;
         walk_quote_escape, QuoteEscape;
         walk_oct_digit, OctDigit;
         walk_dec_digit, DecDigit;
@@ -970,27 +953,6 @@ pub mod walk {
 
     // The rules that are modelled as the shapes their right sides write are
     // walked as those shapes, down to the text each part read.
-
-    pub fn walk_ident_or_keyword<'ast, I: UnsynInput, V: ?Sized + Visit<'ast, I>>(
-        v: &mut V,
-        node: &'ast lexer::IdentOrKeyword<I>,
-    ) {
-        v.visit_ident_start(&node.start);
-
-        for continue_ in &node.tail {
-            v.visit_xid_continue(continue_);
-        }
-    }
-
-    pub fn walk_ident_start<'ast, I: UnsynInput, V: ?Sized + Visit<'ast, I>>(
-        v: &mut V,
-        node: &'ast lexer::IdentStart<I>,
-    ) {
-        match node {
-            lexer::IdentStart::Xid(start) => v.visit_xid_start(start),
-            lexer::IdentStart::Underscore(underscore) => v.visit_text(&underscore.0),
-        }
-    }
 
     pub fn walk_raw_ident<'ast, I: UnsynInput, V: ?Sized + Visit<'ast, I>>(
         v: &mut V,
@@ -1281,17 +1243,14 @@ mod tests {
         assert_eq!(
             tokens.0,
             [
-                "syntax", " ", "R", "e", "p", "e", "a", "t", " ", "->", " ", "'", "{", "'", " ",
-                "'", ",", "'", " ", "concat", " ", "L", "i", "t", "D", "e", "c", " ", "'", "}",
-                "'", ";",
+                "syntax", " ", "Repeat", " ", "->", " ", "'", "{", "'", " ", "'", ",", "'", " ",
+                "concat", " ", "LitDec", " ", "'", "}", "'", ";",
             ],
             "the words of a definition, in the order a walk hands them over"
         );
-        // The two names are read as the rule that names them writes them: one
-        // start and then the run of continuing characters, each of which is a
-        // token of the tree on its own; and a literal string is now read as its
-        // two quotes and its body, the `'{'` of the spec being three tokens of
-        // the walk.
+        // A name is one token now — the scan the spec calls for reads it whole —
+        // and a literal string is read as its two quotes and its body, the
+        // `'{'` of the spec being three tokens of the walk.
     }
 
     /// Every walk hands a child to the visitor's *method* for it, and never to the

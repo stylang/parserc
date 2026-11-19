@@ -17,11 +17,7 @@ whitespace S -> [
 lexer LF  -> U+000A;
 lexer CR  -> U+000D;
 
-lexer IdentOrKeyword -> ( XID_Start | '_' ) XID_Continue*;
-
-lexer XID_Start -> <XID_Start>;
-
-lexer XID_Continue -> <XID_Continue>;
+lexer IdentOrKeyword -> <IdentOrKeyword>;
 
 lexer RawIdent -> 'r#' IdentOrKeyword;
 

@@ -30,12 +30,33 @@ mod generated;
 /// The path of the file the code of the spec is kept in.
 const GENERATED: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/tests/generated/unsyn_us.rs");
 
+/// The scan `<IdentOrKeyword>` is bound to: the start of a name — an
+/// XID_Start or an `_` — and then the greedy run of characters a name
+/// continues with. A generated file reaches this by the path the caller gave
+/// in the binding, which is what an external is: the caller decides what a
+/// call means, and here the answer is the same scan the hand lexer of this
+/// crate reads.
+fn scan_ident_or_keyword<I>(input: &mut I) -> Result<I, <I as parserc::Input>::Error>
+where
+    I: parserc::chars::CharsInput,
+{
+    use parserc::{Parser, next_if, take_while};
+
+    let mut whole = input.clone();
+    let before = input.len();
+
+    next_if(|c: char| ::unicode_ident::is_xid_start(c) || c == '_').parse(input)?;
+
+    take_while(::unicode_ident::is_xid_continue).parse(input)?;
+
+    Ok(whole.split_to(before - input.len()))
+}
+
 /// The code of the terminals `unsyn.us` declares.
 ///
-/// The externals the spec calls are bound here rather than by anything the
-/// generator knows: `XID_Start` and `XID_Continue` are the two names a file of
-/// this language asks its caller for, and a build answers them as the tests of
-/// this crate read them.
+/// The one external the spec calls is bound here rather than by anything the
+/// generator knows: `IdentOrKeyword` is the name a file of this language asks
+/// its caller for, and a build answers it with the scan above.
 fn code_of_the_spec() -> String {
     let source = include_str!("../unsyn.us");
 
@@ -62,14 +83,8 @@ fn code_of_the_spec() -> String {
 
     let mut builder = Builder::new(&terminals);
     builder.external(
-        "XID_Start",
-        proc_macro2::TokenStream::from_str("::parserc::next_if(::unicode_ident::is_xid_start)")
-            .unwrap(),
-    );
-    builder.external(
-        "XID_Continue",
-        proc_macro2::TokenStream::from_str("::parserc::next_if(::unicode_ident::is_xid_continue)")
-            .unwrap(),
+        "IdentOrKeyword",
+        proc_macro2::TokenStream::from_str("crate::scan_ident_or_keyword").unwrap(),
     );
 
     builder
@@ -177,9 +192,16 @@ mod and_it_reads {
     }
 
     /// Which of the two forms of [`Ident`] was read, and what it read.
+    ///
+    /// The raw form is a name of two parts — the sigil and, behind it, a name
+    /// read again by the rule that names no word — and the plain form is the
+    /// one text the `except` left standing.
     fn name(node: &Ident<TokenStream<'_>>) -> (String, &'static str) {
         match node {
-            Ident::RawIdent(raw) => (raw.0.as_str().to_owned(), "RawIdent"),
+            Ident::RawIdent(raw) => (
+                raw.f1.as_str().to_owned() + raw.ident_or_keyword.0.as_str(),
+                "RawIdent",
+            ),
             Ident::NonKeywordIdent(plain) => (plain.0.as_str().to_owned(), "NonKeywordIdent"),
         }
     }
@@ -196,7 +218,12 @@ mod and_it_reads {
         ] {
             let read = parse::<LitStr<_>>(source).expect(source);
 
-            assert_eq!(read.0.as_str(), literal, "{source}");
+            // The literal is its two quotes and the text the body read — a
+            // tuple of them, which is what a sequence of nothing but parts
+            // with no name of their own comes out as.
+            let text = format!("{}{}{}", read.0.as_str(), read.1.as_str(), read.2.as_str());
+
+            assert_eq!(text, literal, "{source}");
         }
     }
 
@@ -288,8 +315,10 @@ mod and_it_reads_this_crate {
 
     #[test]
     fn the_generated_terminals_read_the_input_of_this_crate() {
+        let lit = parse::<LitStr<_>>("'a'").expect("a literal");
+
         assert_eq!(
-            parse::<LitStr<_>>("'a'").expect("a literal").0.as_str(),
+            format!("{}{}{}", lit.0.as_str(), lit.1.as_str(), lit.2.as_str()),
             "'a'"
         );
 
