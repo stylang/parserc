@@ -54,8 +54,9 @@ use parserc::{Span, syntax::Or as Choice, syntax::Syntax};
 
 use super::errors::{Diagnostics, LintKind, SemanticsKind, UnsynError};
 use super::input::UnsynInput;
+use super::literal;
 use super::visit::{Visit, walk};
-use super::{lexer, syntax};
+use super::{lexer, syntax, syntax::Decl};
 
 /// Reports what `file` gets wrong beyond the shape of its text.
 ///
@@ -317,32 +318,6 @@ impl Bound {
 // What a file says
 // ---------------------------------------------------------------------------
 
-/// The kind of node a definition declares, which is the word it opens with.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum Decl {
-    /// `whitespace`: the trivia the language separates its nodes with.
-    Whitespace,
-    /// `lexer`: a terminal, a pattern over characters.
-    Lexer,
-    /// `syntax`: a node of the tree, a pattern over other nodes.
-    Syntax,
-}
-
-impl Decl {
-    /// The kind the word declares.
-    ///
-    /// A [`lexer::LeadingKeywords`] holds one of the three words of the spec and
-    /// nothing else, since it is read from them, so the last arm is `syntax`
-    /// rather than a refusal of a word the reader would not have handed over.
-    fn from_word(word: &str) -> Self {
-        match word {
-            "whitespace" => Self::Whitespace,
-            "lexer" => Self::Lexer,
-            _ => Self::Syntax,
-        }
-    }
-}
-
 /// One definition the file wrote, and what its pattern came to.
 struct Rule<'ast> {
     /// The name the definition gives its node.
@@ -444,54 +419,21 @@ impl<'ast, I: UnsynInput> Checker<'ast, I> {
     /// piece of the literal's own span, since the literal is the only node that
     /// reaches it.
     fn chars_of(&mut self, lit: &'ast lexer::LitStr<I>) -> Vec<char> {
-        let text = lit.0.as_str();
         let Some(base) = start_of(&lit.to_span()) else {
             return Vec::new();
         };
 
-        // The two quotes bound the literal and carry no value, so the content
-        // begins one byte after where the token begins.
-        let content = text
-            .strip_prefix('\'')
-            .and_then(|body| body.strip_suffix('\''))
-            .unwrap_or(text);
+        let (chars, escapes) = literal::chars_of(lit);
 
-        let mut chars = Vec::new();
-        let mut from = 0;
+        for escape in escapes {
+            // The content begins one byte after the token does, where the quote
+            // that opens the literal was written.
+            let from = base + 1 + escape.offset;
 
-        while from < content.len() {
-            if !content[from..].starts_with('\\') {
-                let c = content[from..]
-                    .chars()
-                    .next()
-                    .expect("a byte left in the content of a literal");
-
-                chars.push(c);
-                from += c.len_utf8();
-                continue;
-            }
-
-            let (code, bytes) = decode_escape(&content[from + 1..]);
-
-            match code.and_then(char::from_u32) {
-                // A character, which is what the escape was written for.
-                Some(c) => chars.push(c),
-                None => {
-                    // A number that is no character. An escape that spells no
-                    // number at all was refused by the reader, which has the text
-                    // in front of it, and is not reported twice here.
-                    if let Some(code) = code {
-                        debug_assert!(char::from_u32(code).is_none());
-
-                        self.diagnostics.push(UnsynError::Semantics(
-                            SemanticsKind::InvalidCodePoint,
-                            Span::Range(base + 1 + from..base + 1 + from + 1 + bytes),
-                        ));
-                    }
-                }
-            }
-
-            from += 1 + bytes;
+            self.diagnostics.push(UnsynError::Semantics(
+                SemanticsKind::InvalidCodePoint,
+                Span::Range(from..from + escape.len),
+            ));
         }
 
         chars
@@ -500,17 +442,10 @@ impl<'ast, I: UnsynInput> Checker<'ast, I> {
     /// The code point a `U+` literal spells, when it spells one.
     ///
     /// Four hex digits is what the rule asks for and what the reader counted, so
-    /// the only thing left for this pass to say is that `D800` through `DFFF` are
+    /// the only thing left for this pass to say is that `D800` and its like are
     /// no character, which no count of digits can tell.
     fn code_of(&mut self, lit: &'ast lexer::LitUnicode<I>) -> Option<u32> {
-        let text = lit.0.as_str();
-        let digits = text.strip_prefix("U+").unwrap_or(text);
-
-        let Ok(code) = u32::from_str_radix(digits, 16) else {
-            return None;
-        };
-
-        match char::from_u32(code) {
+        match literal::code_of(lit) {
             Some(c) => Some(c as u32),
             None => {
                 self.diagnostics.push(UnsynError::Semantics(
@@ -543,13 +478,11 @@ impl<'ast, I: UnsynInput> Checker<'ast, I> {
     /// The count a [`lexer::LitDec`] spells, with the underscores the rule allows
     /// between its digits dropped.
     fn count_of(&mut self, lit: &'ast lexer::LitDec<I>) -> u32 {
-        let digits = lit.0.as_str().replace("_", "");
-
-        match digits.parse::<u32>() {
-            Ok(count) => count,
+        match literal::count_of(lit) {
+            Some(count) => count,
             // A bound past what a count of repetitions can be kept to is no
             // bound, whatever the digits of it say.
-            Err(_) => {
+            None => {
                 self.diagnostics.push(UnsynError::Semantics(
                     SemanticsKind::InvalidRepeat,
                     lit.to_span(),
@@ -783,7 +716,7 @@ impl<'ast, I: UnsynInput> Visit<'ast, I> for Checker<'ast, I> {
 
         self.rules.push(Rule {
             name: node.ident.text().as_str(),
-            kind: Decl::from_word(node.keyword.0.as_str()),
+            kind: node.decl(),
             span: node.ident.to_span(),
             body,
         });
@@ -1116,55 +1049,6 @@ fn start_of(span: &Span) -> Option<usize> {
     match span {
         Span::Range(range) => Some(range.start),
         _ => None,
-    }
-}
-
-/// The escape that begins at `rest`, which is the text just after a backslash.
-///
-/// It returns the code the escape spells and the number of bytes of `rest` it
-/// takes. A code that is no character is handed back rather than refused, since
-/// the reader has already said whether the escape is one of the shapes the spec
-/// writes, and only this pass knows whether the number of it is a character.
-fn decode_escape(rest: &str) -> (Option<u32>, usize) {
-    let escaped = |c: char| (Some(c as u32), 1);
-
-    match rest.chars().next() {
-        Some('\'') => escaped('\''),
-        Some('\\') => escaped('\\'),
-        Some('n') => escaped('\n'),
-        Some('r') => escaped('\r'),
-        Some('t') => escaped('\t'),
-        Some('0') => escaped('\0'),
-        // `\x` OctDigit HexDigit: the two digits of a code of seven bits.
-        Some('x') => {
-            let digits: String = rest[1..].chars().take(2).collect();
-
-            match u32::from_str_radix(&digits, 16) {
-                Ok(code) => (Some(code), 1 + digits.len()),
-                Err(_) => (None, 1),
-            }
-        }
-        // `\u{` digits `}`: from one digit to six, which underscores may separate.
-        Some('u') => {
-            let Some(body) = rest[1..].strip_prefix('{') else {
-                return (None, 1);
-            };
-
-            let Some(ends) = body.find('}') else {
-                return (None, 1);
-            };
-
-            let digits: String = body[..ends].chars().filter(|c| *c != '_').collect();
-
-            match u32::from_str_radix(&digits, 16) {
-                Ok(code) => (Some(code), 2 + ends + 1),
-                Err(_) => (None, 1),
-            }
-        }
-        // A backslash that opens none of the escapes the spec writes. The reader
-        // refuses a literal it finds one in, so this is reached only by a tree
-        // this pass did not read.
-        _ => (None, 1),
     }
 }
 

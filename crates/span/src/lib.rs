@@ -174,10 +174,10 @@ where
             }
             (Span::RangeTo(range_to), Span::RangeFrom(range_from)) => {
                 if range_to.end < range_from.start {
-                    return Span::None;
+                    Span::None
+                } else {
+                    Span::RangeFull
                 }
-
-                return Span::RangeFull;
             }
             (Span::RangeTo(range_to), Span::RangeTo(other_range_to)) => {
                 let end = cmp::max(range_to.end, other_range_to.end);

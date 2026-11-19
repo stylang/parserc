@@ -85,7 +85,7 @@ where
     where
         Self: Sized,
     {
-        self.map(|v| Box::new(v))
+        self.map(Box::new)
     }
 
     /// Creates a parser that falls back to `parser` when this one fails with a `non-fatal` error.

@@ -261,7 +261,7 @@ where
 // ---------------------------------------------------------------------------
 // `lexer RawIdent -> 'r#' IdentOrKeyword;`
 // `lexer NonKeywordIdent -> IdentOrKeyword except Keywords;`
-// `lexer Ident -> NonKeywordIdent | RawIdent;`
+// `lexer Ident -> RawIdent | NonKeywordIdent;`
 // ---------------------------------------------------------------------------
 
 /// A name written out of the keywords of the language, as `r#where` is.

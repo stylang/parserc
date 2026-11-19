@@ -608,6 +608,50 @@ where
     pub definition: Delimiter<ArrowRight<I>, Semi<I>, Expr<I>>,
 }
 
+impl<I: UnsynInput> Stmt<I> {
+    /// The kind of node this definition declares.
+    ///
+    /// The word the definition opens with is the only thing that says so, and it
+    /// is read from its text: a [`lexer::LeadingKeywords`](crate::compiler::lexer::LeadingKeywords)
+    /// holds one of the three words of the spec and nothing else, since it is
+    /// read from them.
+    #[inline]
+    pub fn decl(&self) -> Decl {
+        Decl::from_word(self.keyword.0.as_str())
+    }
+}
+
+/// The kind of node a definition declares, which is the word it opens with.
+///
+/// Which of the three words means which is a fact about the DSL rather than
+/// about the language a file of it describes, in the same way that the shapes of
+/// [`Expr`] and [`Stmt`] are: the nodes of the tree name the constructs, and the
+/// pass that reads them asks this question of the text.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Decl {
+    /// `whitespace`: the trivia the language separates its nodes with.
+    Whitespace,
+    /// `lexer`: a terminal, a pattern over characters.
+    Lexer,
+    /// `syntax`: a node of the tree, a pattern over other nodes.
+    Syntax,
+}
+
+impl Decl {
+    /// The kind the word declares.
+    ///
+    /// The last arm is `syntax` rather than a refusal, since a word the reader
+    /// would have handed over can only be one of the three.
+    #[inline]
+    pub fn from_word(word: &str) -> Self {
+        match word {
+            "whitespace" => Self::Whitespace,
+            "lexer" => Self::Lexer,
+            _ => Self::Syntax,
+        }
+    }
+}
+
 // ---------------------------------------------------------------------------
 // `syntax OuterDoc -> OuterBlockDoc | OuterLineDoc;`
 // `syntax InnerDoc -> InnerBlockDoc | InnerLineDoc;`

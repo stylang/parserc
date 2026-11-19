@@ -66,7 +66,7 @@ where
 {
     #[inline]
     fn parse(_input: &mut I) -> Result<Self, I::Error> {
-        Ok(Self::default())
+        Ok(PhantomData)
     }
 
     #[inline]

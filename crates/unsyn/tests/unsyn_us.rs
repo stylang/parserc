@@ -1,0 +1,336 @@
+//! The code the generator writes for `unsyn.us`, kept in the crate as a file of
+//! its own so that it is compiled rather than only printed.
+//!
+//! [`generated/unsyn_us.rs`](generated) is the half of the spec a build writes
+//! today — the `whitespace` rule and the `lexer` rules, whose nodes are the text
+//! they read — and the test here rebuilds it and asks whether the two are the
+//! same code. It is the only place a generated file is checked to *mean* what the
+//! generator was asked for: a file that does not compile, or that reads a rule the
+//! spec did not write, is caught here and not in whoever comes to depend on it.
+//!
+//! Reading the file is one test; running the code it holds is another, and
+//! [`and_it_reads`] does that.
+//!
+//! Only the terminals are in it. A `syntax` production makes a node of the tree
+//! rather than a run of the text, and no code is written for such a node yet, so a
+//! build of the whole spec is refused rather than half-written; see the
+//! [module documentation](unsyn::compiler::codegen) of the generator.
+
+use std::path::Path;
+use std::str::FromStr;
+
+use parserc::syntax::SyntaxInput;
+use quote::ToTokens;
+use unsyn::compiler::{codegen::Builder, input::TokenStream, semantic, syntax};
+
+/// The code of the spec, kept beside this test so that it is compiled with it.
+#[path = "generated/unsyn_us.rs"]
+mod generated;
+
+/// The path of the file the code of the spec is kept in.
+const GENERATED: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/tests/generated/unsyn_us.rs");
+
+/// The code of the terminals `unsyn.us` declares.
+///
+/// The externals the spec calls are bound here rather than by anything the
+/// generator knows: `XID_Start` and `XID_Continue` are the two names a file of
+/// this language asks its caller for, and a build answers them as the tests of
+/// this crate read them.
+fn code_of_the_spec() -> String {
+    let source = include_str!("../unsyn.us");
+
+    let mut input = TokenStream::from(source);
+    let file = input
+        .parse::<syntax::Crate<_>>()
+        .expect("unsyn.us should be a file of the language");
+
+    let report = semantic::analyze(&file);
+    assert!(report.errors.is_empty(), "unsyn.us: {:#?}", report.errors);
+
+    let terminals = syntax::Crate {
+        inner_docs: Vec::new(),
+        items: file
+            .items
+            .iter()
+            .filter(|item| match item {
+                syntax::Item::Stmt(stmt) => !matches!(stmt.decl(), syntax::Decl::Syntax),
+                _ => false,
+            })
+            .cloned()
+            .collect(),
+    };
+
+    let mut builder = Builder::new(&terminals);
+    builder.external(
+        "XID_Start",
+        proc_macro2::TokenStream::from_str("::parserc::next_if(::unicode_ident::is_xid_start)")
+            .unwrap(),
+    );
+    builder.external(
+        "XID_Continue",
+        proc_macro2::TokenStream::from_str("::parserc::next_if(::unicode_ident::is_xid_continue)")
+            .unwrap(),
+    );
+
+    builder
+        .build()
+        .expect("the terminals of unsyn.us should be generated")
+        .to_string()
+}
+
+/// The code as text, of a file laid out however `cargo fmt` likes it.
+///
+/// Rust lets a list broken over lines end with a comma that the same list written
+/// on one line does not carry, and `cargo fmt` breaks them wherever it can, so the
+/// comma with nothing after it inside its own group is dropped. What is left is
+/// what the code is rather than how it is written down.
+fn as_code(tokens: proc_macro2::TokenStream) -> String {
+    use proc_macro2::{Delimiter, TokenTree};
+
+    let mut trees: Vec<TokenTree> = tokens.into_iter().collect();
+
+    while let Some(TokenTree::Punct(punct)) = trees.last()
+        && punct.as_char() == ','
+    {
+        trees.pop();
+    }
+
+    trees
+        .iter()
+        .map(|tree| match tree {
+            TokenTree::Group(group) => {
+                let inner = as_code(group.stream());
+
+                let (open, close) = match group.delimiter() {
+                    Delimiter::Parenthesis => ("(", ")"),
+                    Delimiter::Brace => ("{", "}"),
+                    Delimiter::Bracket => ("[", "]"),
+                    Delimiter::None => ("", ""),
+                };
+
+                format!("{open}{inner}{close}")
+            }
+            other => other.to_string(),
+        })
+        .collect::<Vec<_>>()
+        .join(" ")
+}
+
+/// Whether the file the code is kept in is the code the generator writes.
+///
+/// The two are compared as tokens rather than as text, and only their items are
+/// compared: the words that say what the file is belong to the keeping of it and
+/// not to the code. How it is laid out is the business of `cargo fmt`.
+#[test]
+fn the_kept_file_is_the_code_of_the_spec() {
+    let kept = std::fs::read_to_string(GENERATED).expect("the generated file should be kept");
+
+    let items = |code: &str| {
+        let mut file = syn::parse_file(code).expect("the code should be Rust");
+
+        // What the file says it is is not part of the code it is.
+        file.attrs.clear();
+        file.shebang = None;
+
+        file.to_token_stream()
+    };
+
+    assert_eq!(
+        as_code(items(&kept)),
+        as_code(items(&code_of_the_spec())),
+        "the code kept in {} is not the code of the spec; \
+         run `cargo test -p unsyn --all-features --test unsyn_us the_generated_file_of_the_spec \
+         -- --ignored` and then `cargo fmt` to rewrite it",
+        GENERATED
+    );
+}
+
+/// Reading with the code the generator wrote, rather than only writing it.
+///
+/// [`the_kept_file_is_the_code_of_the_spec`] asks whether the file kept is the
+/// code that was asked for. The tests here ask whether that code reads: a rule
+/// that compiles and then takes the wrong span, or takes nothing, or takes what
+/// the rule after it should have, is caught only by running it.
+///
+/// Two streams are read, one per row of the table the two phases make. The plain
+/// [`parserc`] char stream says that the code a build writes names nothing of
+/// this crate, so a grammar can live in a crate that never depends on unsyn.
+/// The stream of this crate says the other half, which is that the same code is
+/// the parser this crate would bootstrap itself with, refusals and all: what it
+/// answers with is an [`UnsynError`] rather than a [`Kind`], and the generated
+/// code is none the wiser for which of the two it is handing back.
+mod and_it_reads {
+    use parserc::{
+        AsStr, Kind,
+        chars::TokenStream,
+        syntax::{Syntax, SyntaxInput},
+    };
+
+    use super::generated::{BlockComment, Ident, LitStr, LitUnicode, S, UnicodeEscape};
+
+    /// Reads the node `T` from the start of `source`.
+    fn parse<'a, T>(source: &'a str) -> Result<T, Kind>
+    where
+        T: Syntax<TokenStream<'a>>,
+    {
+        TokenStream::from(source).parse::<T>()
+    }
+
+    /// Which of the two forms of [`Ident`] was read, and what it read.
+    fn name(node: &Ident<TokenStream<'_>>) -> (String, &'static str) {
+        match node {
+            Ident::RawIdent(raw) => (raw.0.as_str().to_owned(), "RawIdent"),
+            Ident::NonKeywordIdent(plain) => (plain.0.as_str().to_owned(), "NonKeywordIdent"),
+        }
+    }
+
+    #[test]
+    fn a_character_literal_is_one_token() {
+        for (source, literal) in [
+            ("'a'", "'a'"),
+            (r"'\''", r"'\''"),
+            (r"'\n'", r"'\n'"),
+            (r"'\u{41}'", r"'\u{41}'"),
+            ("'lexer'", "'lexer'"),
+            ("'x' 'y'", "'x'"),
+        ] {
+            let read = parse::<LitStr<_>>(source).expect(source);
+
+            assert_eq!(read.0.as_str(), literal, "{source}");
+        }
+    }
+
+    #[test]
+    fn a_name_says_which_of_its_two_forms_it_is() {
+        let raw = parse::<Ident<_>>("r#lexer").expect("a raw name");
+        assert_eq!(name(&raw), ("r#lexer".to_owned(), "RawIdent"));
+
+        let plain = parse::<Ident<_>>("lexer2").expect("a name that is no word");
+        assert_eq!(name(&plain), ("lexer2".to_owned(), "NonKeywordIdent"));
+
+        assert!(
+            parse::<Ident<_>>("lexer").is_err(),
+            "a word of the language"
+        );
+    }
+
+    #[test]
+    fn a_unicode_literal_wants_four_digits() {
+        assert_eq!(
+            parse::<LitUnicode<_>>("U+0041")
+                .expect("four digits")
+                .0
+                .as_str(),
+            "U+0041"
+        );
+        assert!(parse::<LitUnicode<_>>("U+004").is_err(), "three digits");
+    }
+
+    #[test]
+    fn an_escape_counts_its_groups() {
+        assert_eq!(
+            parse::<UnicodeEscape<_>>(r"\u{1F_600}")
+                .expect("an escape with its underscores")
+                .0
+                .as_str(),
+            r"\u{1F_600}"
+        );
+        assert!(
+            parse::<UnicodeEscape<_>>(r"\u{}").is_err(),
+            "no digits at all"
+        );
+    }
+
+    #[test]
+    fn a_comment_closes_the_one_it_opened() {
+        assert_eq!(
+            parse::<BlockComment<_>>("/* a /* b */ c */")
+                .expect("a nested comment")
+                .0
+                .as_str(),
+            "/* a /* b */ c */"
+        );
+    }
+
+    #[test]
+    fn the_whitespace_is_taken_greedily() {
+        assert_eq!(
+            parse::<S<_>>(" \u{a0}\t\n ")
+                .expect("a run of whitespace")
+                .0
+                .as_str(),
+            " \u{a0}\t\n "
+        );
+    }
+}
+
+/// The same code read over the stream this crate reads its own language with.
+///
+/// This is the shape the bootstrap takes: the terminals of `unsyn.us`, generated
+/// into a parser of `unsyn.us`. What differs from [`and_it_reads`] is only the
+/// stream, and with it the type a refusal answers with.
+mod and_it_reads_this_crate {
+    use parserc::{
+        AsStr,
+        syntax::{Syntax, SyntaxInput},
+    };
+
+    use super::generated::{Ident, LitStr};
+    use unsyn::compiler::{errors::UnsynError, input::TokenStream};
+
+    /// Reads the node `T` from the start of `source`, over this crate's input.
+    fn parse<'a, T>(source: &'a str) -> Result<T, UnsynError>
+    where
+        T: Syntax<TokenStream<'a>>,
+    {
+        TokenStream::from(source).parse::<T>()
+    }
+
+    #[test]
+    fn the_generated_terminals_read_the_input_of_this_crate() {
+        assert_eq!(
+            parse::<LitStr<_>>("'a'").expect("a literal").0.as_str(),
+            "'a'"
+        );
+
+        assert!(
+            matches!(
+                parse::<Ident<_>>("r#lexer").expect("a raw name"),
+                Ident::RawIdent(_)
+            ),
+            "a name read over this crate's own stream should still say which form"
+        );
+
+        assert!(
+            parse::<Ident<_>>("lexer").is_err(),
+            "a word of the language"
+        );
+    }
+}
+
+/// Rewrites the file the code is kept in, for when the generator changed.
+///
+/// The file is written as the code comes out of the generator, in one line; run
+/// `cargo fmt` afterwards to lay it out.
+///
+/// The header the file is kept in belongs to the keeping and not to the code, so
+/// it says what the code will not: that a set the spec spells as a run of
+/// characters is written as that run, which is what the lint about ASCII ranges
+/// asks for instead, and that not every rule of the spec is read by anything here
+/// yet.
+#[test]
+#[ignore = "rewrites a file the repository keeps; run with --ignored"]
+fn the_generated_file_of_the_spec() {
+    std::fs::write(
+        Path::new(GENERATED),
+        format!(
+            "//! The code of `unsyn.us`, as the generator writes it.\n\
+                 //!\n\
+                 //! This file is generated: see `tests/unsyn_us.rs`. Do not edit it.\n\
+                 #![allow(dead_code, clippy::manual_is_ascii_check)]\n\
+                 {}\n",
+            code_of_the_spec()
+        ),
+    )
+    .expect("the file should be written");
+}

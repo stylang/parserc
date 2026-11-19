@@ -55,33 +55,38 @@
 //! The crate does two jobs that have nothing to do with each other, and the
 //! features of `Cargo.toml` say so:
 //!
-//! - `runtime`, the [`runtime`] module, is what a grammar the generator writes
-//!   is *compiled against*: the [`GeneratedInput`](runtime::GeneratedInput)
-//!   every generated type is bounded by, and nothing else. Two things are
-//!   deliberately not here. What a `<NAME>` in a pattern calls is the caller's
-//!   link, and unsyn ships no answer to it. Where a word of the described
-//!   language ends is the spec's business, and unsyn assumes no boundary for it.
-//!   The module knows nothing of the DSL, and needs nothing but a character
-//!   stream.
+//! - `runtimes`, the [`runtimes`] module, is the side a grammar the generator
+//!   writes belongs to: what a generated file is *compiled against*, and
+//!   nothing else. It is deliberately not what a generated file calls: what a
+//!   `<NAME>` in a pattern reaches is the caller's link, and unsyn ships no
+//!   answer to it; where a word of the described language ends is the spec's
+//!   business, and unsyn assumes no boundary for it. A generated file today
+//!   asks only [`parserc`] — the character stream it reads, the combinators it
+//!   runs, and the [`Syntax`](parserc::syntax::Syntax) its nodes derive — so
+//!   this module holds no item that a generated file needs, and stays a place
+//!   for the answers a later phase of the language will want to ship without
+//!   the generator having to reach into `compiler` for them.
 //! - `compiler`, the same-named feature, is the DSL itself: the reader, the
 //!   analyzer and the generator, in the stages its own module document lays
 //!   out, over `quote` and `proc_macro2`.
 //!
 //! The spec of the language, written in the language itself, lives in
-//! `bootstrap.uns` next to this crate, and `tests/bootstrap.rs` runs the reader
-//! and the analyzer over it, from source text to the module a tree is generated
-//! from.
+//! `unsyn.us` at the root of this crate, and `tests/unsyn_us.rs` runs the
+//! reader, the analyzer and the generator over it, from source text to the code
+//! of a parser and back to reading with it.
 //!
-//! A crate that keeps a generated file and never produces one therefore takes
-//! the runtime alone, and leaves `quote` and `proc-macro2` out of its tree:
+//! A crate that keeps a generated file and never produces one therefore needs
+//! no unsyn at all: `parserc`, with the two features a generated file names,
+//! and nothing else. `quote` and `proc-macro2` stay out of its tree, since only
+//! the writing of a spec reaches for them:
 //!
 //! ```toml
 //! [dependencies]
-//! unsyn = { version = "0.13", default-features = false, features = ["runtime"] }
+//! parserc = { version = "0.13", features = ["input", "syntax"] }
 //! ```
 //!
-//! A build without the `runtime` feature has pages that point at items it does
-//! not hold: the two above point at each other's phase, and the generator's own
+//! A build without the `compiler` feature has pages that point at items it does
+//! not hold: the two phases point at each other, and the generator's own
 //! documentation names the types a file it writes will call. Those links are
 //! allowed to break in that case rather than written twice, since nothing about
 //! the build changes, only what the documentation can show.

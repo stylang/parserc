@@ -24,6 +24,12 @@ pub trait AsBytes {
 pub trait Length {
     /// Returns the encoded length in bytes.
     fn len(&self) -> usize;
+
+    /// Returns true when there is nothing left to report a length for.
+    #[inline]
+    fn is_empty(&self) -> bool {
+        self.len() == 0
+    }
 }
 
 impl Length for &str {
@@ -45,9 +51,21 @@ pub trait AsStr {
 }
 
 /// A single item of an [`Input`] sequence.
+///
+/// The length of an item is how much of the source it encodes itself into, which
+/// is never nothing: one item is one, and an empty one is not a case this trait
+/// is ever met by. `is_empty` is there for the shape of the trait rather than
+/// for a state it can reach, and is `false` for every item this crate has.
 pub trait Item: PartialEq + Clone + Copy + Debug {
     /// Returns the encoded length of this item in bytes.
     fn len(&self) -> usize;
+
+    /// Returns true when this item encodes into no bytes at all, which none of
+    /// the items of this crate do.
+    #[inline]
+    fn is_empty(&self) -> bool {
+        self.len() == 0
+    }
 }
 
 impl Item for u8 {
@@ -354,7 +372,7 @@ pub mod bytes {
         }
     }
 
-    impl<'a, E> BytesInput for TokenStream<'a, E> where E: ParseError + Clone {}
+    impl<'a, E> BytesInput for TokenStream<'a, E> where E: ParseError {}
 }
 
 /// [`char`] input implementations.
@@ -571,7 +589,7 @@ pub mod chars {
         }
     }
 
-    impl<'a, E> CharsInput for TokenStream<'a, E> where E: ParseError + Clone {}
+    impl<'a, E> CharsInput for TokenStream<'a, E> where E: ParseError {}
 }
 
 // The `TokenStream` inputs live behind the `input` feature.
