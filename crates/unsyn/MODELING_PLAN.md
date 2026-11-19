@@ -102,9 +102,23 @@
       `IdentStart`/`XID_Start`/`XID_Continue` 三个类型与对应 visit 钩子删除；
       生成侧 fixture 重生成，external 由测试绑定到
       `crate::scan_ident_or_keyword`。动机：Id 处理更高效（一次扫描而非逐字符节点）。
-- [ ] **M7 syntax 规则生成**：解开 `BuildKind::Syntax` 闸门，让 `syntax` 产生式
-      生成树节点（root or → enum；sequence → struct field，规则同 M5；操作数里
-      的 `Set`/`Repeat`/`Range`/`Suffix` 等匿名组按手写侧同名形状生成，`Delimiter`/
-      `Punctuated`/`Option`/`Vec`/tuple 用 parserc 内建形状），并为生成器输出
-      visit 接口（与手写 `visit.rs` 一致）；之后用生成的 parser 解析 `bootstrap.uns`
-      完成自举闭环。
+- [x] **M7 syntax 规则生成**：`BuildKind::Syntax` 闸门解开，`syntax` 产生式
+      生成树节点——root or → enum（变体名：单引用臂=规则名；字面量词臂=词的
+      首字母大写，如 `Concat`/`Except`/`Followed`；其余 `F1`/`F2`…按位置）；
+      sequence → struct/tuple（全匿名 → tuple）；操作数 → 字段：引用 =
+      `Box<X<I>>`（syntax）或 `X<I>`（lexer），单字符字面量 = `Char<I, c>`，
+      多字符字面量 = `I` + `keyword` 属性，`?`/`*`/`+` = `Option`/`Vec`/
+      `(T, Vec<T>)`，匿名中间 or = 嵌套 `Or`（零造名），匿名组 = 内联 tuple；
+      操作数间隙 = `Option<S<I>>` 字段（S = 文件的 whitespace 规则；重复的操作数
+      若自身可读 trivia——如 `Item`——则不加间隙）；`concat` = 相邻字段无间隙；
+      `followed`/`except` = 注入 probe helper（保留目标节点值）。拒绝的形状：
+      节点计数重复 `{n}`、组内算子、组内多字符词/Call/非字符类 Set
+      （`BuildKind::Syntax`）。`node_rules` 不动点重写为**预演算法**：enum 变体
+      折叠同样要求引用规则降级为文本（`Keywords`→`LeadingKeywords` 传染）。
+      重生成全量 fixture（lexer+syntax），新验收测试
+      `the_generated_parser_reads_the_spec_it_was_generated_from`：生成的 parser
+      解析 `unsyn.us` 全文到 EOF，且每个定义的名字 span 与手写树逐一相等
+      ——自举第一个闭环。
+- [ ] **M7.5 visit 接口生成**：为生成的文件输出与手写 `visit.rs` 同构的
+      visitor（`visit_<node>` 钩子 + `walk_*`），使 semantic/codegen 两个 pass
+      可以跑在生成的树上；随后以生成的 parser 替换手写 parser 完成完全自举。

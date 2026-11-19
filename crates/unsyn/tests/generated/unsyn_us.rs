@@ -1,7 +1,7 @@
 //! The code of `unsyn.us`, as the generator writes it.
 //!
 //! This file is generated: see `tests/unsyn_us.rs`. Do not edit it.
-#![allow(dead_code, clippy::manual_is_ascii_check)]
+#![allow(dead_code, clippy::manual_is_ascii_check, clippy::type_complexity)]
 #[inline]
 fn is_s(c: char) -> bool {
     matches ! (c , '\t' ..= '\r' | ' ' | '\u{85}' | '\u{a0}' | '\u{1680}' | '\u{2000}' ..= '\u{200a}' | '\u{2028}' | '\u{2029}' | '\u{202f}' | '\u{205f}' | '\u{3000}')
@@ -23,15 +23,23 @@ where
 pub struct IdentOrKeyword<I>(# [parserc (parser = crate :: scan_ident_or_keyword)] pub I)
 where
     I: ::parserc::chars::CharsInput;
-#[derive(Debug, PartialEq, Eq, PartialOrd, Ord, Clone, :: parserc :: syntax :: Syntax)]
-pub struct RawIdent<I>
+fn read_raw_ident<I>(input: &mut I) -> ::core::result::Result<I, <I as ::parserc::Input>::Error>
 where
     I: ::parserc::chars::CharsInput,
 {
-    # [parserc (parser = :: parserc :: keyword ("r#"))]
-    pub f1: I,
-    pub ident_or_keyword: IdentOrKeyword<I>,
+    use ::parserc::Parser as _;
+    let mut whole = input.clone();
+    let before = input.len();
+    ::parserc::keyword("r#").parse(input)?;
+    <IdentOrKeyword<I> as ::parserc::syntax::Syntax<I>>::into_parser()
+        .map(|node| node.0)
+        .parse(input)?;
+    Ok(whole.split_to(before - input.len()))
 }
+#[derive(Debug, PartialEq, Eq, PartialOrd, Ord, Clone, :: parserc :: syntax :: Syntax)]
+pub struct RawIdent<I>(# [parserc (parser = read_raw_ident)] pub I)
+where
+    I: ::parserc::chars::CharsInput;
 fn read_non_keyword_ident<I>(
     input: &mut I,
 ) -> ::core::result::Result<I, <I as ::parserc::Input>::Error>
@@ -508,6 +516,226 @@ where
 pub struct BlockCommentOrDoc<I>(
     # [parserc (parser = < BlockComment < I > as :: parserc :: syntax :: Syntax < I >> :: into_parser () . map (| node | node . 0) . or (< OuterBlockDoc < I > as :: parserc :: syntax :: Syntax < I >> :: into_parser () . map (| node | node . 0)) . or (< InnerBlockDoc < I > as :: parserc :: syntax :: Syntax < I >> :: into_parser () . map (| node | node . 0)))]
     pub I,
+)
+where
+    I: ::parserc::chars::CharsInput;
+#[derive(Debug, PartialEq, Eq, PartialOrd, Ord, Clone, :: parserc :: syntax :: Syntax)]
+pub struct Expr<I>(
+    pub  (
+        Box<ExprNoTopAlt<I>>,
+        ::std::vec::Vec<(::core::option::Option<S<I>>, Box<ExprNoTopAlt<I>>)>,
+    ),
+    pub  ::std::vec::Vec<(
+        ::core::option::Option<S<I>>,
+        ::parserc::syntax::Char<I, '|'>,
+        ::core::option::Option<S<I>>,
+        (
+            Box<ExprNoTopAlt<I>>,
+            ::std::vec::Vec<(::core::option::Option<S<I>>, Box<ExprNoTopAlt<I>>)>,
+        ),
+    )>,
+)
+where
+    I: ::parserc::chars::CharsInput;
+#[derive(Debug, PartialEq, Eq, PartialOrd, Ord, Clone, :: parserc :: syntax :: Syntax)]
+pub enum ExprNoTopAlt<I>
+where
+    I: ::parserc::chars::CharsInput,
+{
+    ExprWithSuffix(Box<ExprWithSuffix<I>>),
+    ExprWithoutSuffix(Box<ExprWithoutSuffix<I>>),
+}
+#[derive(Debug, PartialEq, Eq, PartialOrd, Ord, Clone, :: parserc :: syntax :: Syntax)]
+pub enum ExprWithoutSuffix<I>
+where
+    I: ::parserc::chars::CharsInput,
+{
+    F1(
+        ::parserc::syntax::Char<I, '~'>,
+        ::core::option::Option<S<I>>,
+        ::parserc::syntax::Char<I, '['>,
+        ::std::vec::Vec<(
+            ::core::option::Option<S<I>>,
+            Box<SetItem<I>>,
+            ::core::option::Option<S<I>>,
+            ::parserc::syntax::Char<I, ','>,
+        )>,
+        ::core::option::Option<(::core::option::Option<S<I>>, Box<SetItem<I>>)>,
+        ::core::option::Option<S<I>>,
+        ::parserc::syntax::Char<I, ']'>,
+    ),
+    F2 {
+        f1: ::parserc::syntax::Char<I, '<'>,
+        f2: ::core::option::Option<S<I>>,
+        ident: Ident<I>,
+        f3: ::core::option::Option<S<I>>,
+        f4: ::parserc::syntax::Char<I, '>'>,
+    },
+    F3 {
+        f1: ::parserc::syntax::Char<I, '('>,
+        f2: ::core::option::Option<S<I>>,
+        expr: Box<Expr<I>>,
+        f3: ::core::option::Option<S<I>>,
+        f4: ::parserc::syntax::Char<I, ')'>,
+    },
+    F4(
+        ::parserc::syntax::Char<I, '['>,
+        ::std::vec::Vec<(
+            ::core::option::Option<S<I>>,
+            Box<SetItem<I>>,
+            ::core::option::Option<S<I>>,
+            ::parserc::syntax::Char<I, ','>,
+        )>,
+        ::core::option::Option<(::core::option::Option<S<I>>, Box<SetItem<I>>)>,
+        ::core::option::Option<S<I>>,
+        ::parserc::syntax::Char<I, ']'>,
+    ),
+    LitStr(LitStr<I>),
+    LitUnicode(LitUnicode<I>),
+    Ident(Ident<I>),
+}
+#[derive(Debug, PartialEq, Eq, PartialOrd, Ord, Clone, :: parserc :: syntax :: Syntax)]
+pub enum ExprWithSuffix<I>
+where
+    I: ::parserc::chars::CharsInput,
+{
+    F1 {
+        expr_without_suffix: Box<ExprWithoutSuffix<I>>,
+        f1: ::core::option::Option<S<I>>,
+        f2: ::parserc::syntax::Or<
+            ::parserc::syntax::Or<
+                ::parserc::syntax::Or<
+                    ::parserc::syntax::Char<I, '*'>,
+                    ::parserc::syntax::Char<I, '?'>,
+                >,
+                ::parserc::syntax::Char<I, '+'>,
+            >,
+            Box<Repeat<I>>,
+        >,
+    },
+    Concat {
+        expr_without_suffix: Box<ExprWithoutSuffix<I>>,
+        f1: ::core::option::Option<S<I>>,
+        #[parserc(keyword = "concat")]
+        f2: I,
+        f3: ::core::option::Option<S<I>>,
+        expr_no_top_alt: Box<ExprNoTopAlt<I>>,
+    },
+    Followed {
+        expr_without_suffix: Box<ExprWithoutSuffix<I>>,
+        f1: ::core::option::Option<S<I>>,
+        #[parserc(keyword = "followed")]
+        f2: I,
+        f3: ::core::option::Option<S<I>>,
+        expr_no_top_alt: Box<ExprNoTopAlt<I>>,
+    },
+    Except {
+        expr_without_suffix: Box<ExprWithoutSuffix<I>>,
+        f1: ::core::option::Option<S<I>>,
+        #[parserc(keyword = "except")]
+        f2: I,
+        f3: ::core::option::Option<S<I>>,
+        f4: Box<ExprWithoutSuffix<I>>,
+    },
+}
+#[derive(Debug, PartialEq, Eq, PartialOrd, Ord, Clone, :: parserc :: syntax :: Syntax)]
+pub struct Repeat<I>(
+    pub ::parserc::syntax::Char<I, '{'>,
+    pub ::core::option::Option<S<I>>,
+    pub  ::parserc::syntax::Or<
+        ::parserc::syntax::Or<
+            (
+                ::parserc::syntax::Char<I, ','>,
+                ::core::option::Option<S<I>>,
+                LitDec<I>,
+            ),
+            (
+                LitDec<I>,
+                ::core::option::Option<S<I>>,
+                ::parserc::syntax::Char<I, ','>,
+                ::core::option::Option<(::core::option::Option<S<I>>, LitDec<I>)>,
+            ),
+        >,
+        LitDec<I>,
+    >,
+    pub ::core::option::Option<S<I>>,
+    pub ::parserc::syntax::Char<I, '}'>,
+)
+where
+    I: ::parserc::chars::CharsInput;
+#[derive(Debug, PartialEq, Eq, PartialOrd, Ord, Clone, :: parserc :: syntax :: Syntax)]
+pub enum Range<I>
+where
+    I: ::parserc::chars::CharsInput,
+{
+    F1 {
+        lit_unicode: LitUnicode<I>,
+        f1: ::core::option::Option<S<I>>,
+        f2: ::parserc::syntax::Char<I, '-'>,
+        f3: ::core::option::Option<S<I>>,
+        f4: LitUnicode<I>,
+    },
+    Concat {
+        lit_str: LitStr<I>,
+        f1: ::parserc::syntax::Char<I, '-'>,
+        f2: LitStr<I>,
+    },
+}
+#[derive(Debug, PartialEq, Eq, PartialOrd, Ord, Clone, :: parserc :: syntax :: Syntax)]
+pub enum SetItem<I>
+where
+    I: ::parserc::chars::CharsInput,
+{
+    Range(Box<Range<I>>),
+    LitStr(LitStr<I>),
+    LitUnicode(LitUnicode<I>),
+    Ident(Ident<I>),
+}
+#[derive(Debug, PartialEq, Eq, PartialOrd, Ord, Clone, :: parserc :: syntax :: Syntax)]
+pub struct Stmt<I>
+where
+    I: ::parserc::chars::CharsInput,
+{
+    pub leading_keywords: LeadingKeywords<I>,
+    pub f1: ::core::option::Option<S<I>>,
+    pub ident: Ident<I>,
+    pub f2: ::core::option::Option<S<I>>,
+    #[parserc(keyword = "->")]
+    pub f3: I,
+    pub f4: ::core::option::Option<S<I>>,
+    pub expr: Box<Expr<I>>,
+    pub f5: ::core::option::Option<S<I>>,
+    pub f6: ::parserc::syntax::Char<I, ';'>,
+}
+#[derive(Debug, PartialEq, Eq, PartialOrd, Ord, Clone, :: parserc :: syntax :: Syntax)]
+pub enum Item<I>
+where
+    I: ::parserc::chars::CharsInput,
+{
+    OuterDoc(Box<OuterDoc<I>>),
+    S(S<I>),
+    Stmt(Box<Stmt<I>>),
+}
+#[derive(Debug, PartialEq, Eq, PartialOrd, Ord, Clone, :: parserc :: syntax :: Syntax)]
+pub enum OuterDoc<I>
+where
+    I: ::parserc::chars::CharsInput,
+{
+    OuterBlockDoc(OuterBlockDoc<I>),
+    OuterLineDoc(OuterLineDoc<I>),
+}
+#[derive(Debug, PartialEq, Eq, PartialOrd, Ord, Clone, :: parserc :: syntax :: Syntax)]
+pub enum InnerDoc<I>
+where
+    I: ::parserc::chars::CharsInput,
+{
+    InnerBlockDoc(InnerBlockDoc<I>),
+    InnerLineDoc(InnerLineDoc<I>),
+}
+#[derive(Debug, PartialEq, Eq, PartialOrd, Ord, Clone, :: parserc :: syntax :: Syntax)]
+pub struct Crate<I>(
+    pub ::std::vec::Vec<(::core::option::Option<S<I>>, Box<InnerDoc<I>>)>,
+    pub ::std::vec::Vec<Box<Item<I>>>,
 )
 where
     I: ::parserc::chars::CharsInput;

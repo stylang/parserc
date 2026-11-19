@@ -353,8 +353,8 @@ pub enum BuildKind {
     /// A literal that spells no value a parser can be written with.
     #[error("the rule `{0}` holds a literal that spells nothing to read")]
     Literal(String),
-    /// A `syntax` rule, whose nodes are not written yet.
-    #[error("no code is written for the syntax rule `{0}` yet")]
+    /// A shape of a `syntax` rule that no field of a node can hold.
+    #[error("the syntax rule `{0}` holds a shape no code is written for")]
     Syntax(String),
 }
 

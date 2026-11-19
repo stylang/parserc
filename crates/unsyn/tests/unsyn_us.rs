@@ -68,20 +68,7 @@ fn code_of_the_spec() -> String {
     let report = semantic::analyze(&file);
     assert!(report.errors.is_empty(), "unsyn.us: {:#?}", report.errors);
 
-    let terminals = syntax::Crate {
-        inner_docs: Vec::new(),
-        items: file
-            .items
-            .iter()
-            .filter(|item| match item {
-                syntax::Item::Stmt(stmt) => !matches!(stmt.decl(), syntax::Decl::Syntax),
-                _ => false,
-            })
-            .cloned()
-            .collect(),
-    };
-
-    let mut builder = Builder::new(&terminals);
+    let mut builder = Builder::new(&file);
     builder.external(
         "IdentOrKeyword",
         proc_macro2::TokenStream::from_str("crate::scan_ident_or_keyword").unwrap(),
@@ -89,7 +76,7 @@ fn code_of_the_spec() -> String {
 
     builder
         .build()
-        .expect("the terminals of unsyn.us should be generated")
+        .expect("unsyn.us should be generated whole")
         .to_string()
 }
 
@@ -110,9 +97,26 @@ fn as_code(tokens: proc_macro2::TokenStream) -> String {
         trees.pop();
     }
 
+    // `cargo fmt` also ends a broken list of generic arguments with a comma
+    // that the same list on one line does not carry, and the closer of a
+    // generic list is a plain `>` punct rather than a group: the comma that
+    // stands before one drops as surely as the comma at a group's end.
+    let mut dropped: Vec<bool> = vec![false; trees.len()];
+
+    for i in 0..trees.len().saturating_sub(1) {
+        if let (TokenTree::Punct(comma), TokenTree::Punct(closer)) = (&trees[i], &trees[i + 1])
+            && comma.as_char() == ','
+            && closer.as_char() == '>'
+        {
+            dropped[i] = true;
+        }
+    }
+
     trees
         .iter()
-        .map(|tree| match tree {
+        .zip(dropped)
+        .filter(|(_, drop)| !*drop)
+        .map(|(tree, _)| match tree {
             TokenTree::Group(group) => {
                 let inner = as_code(group.stream());
 
@@ -198,10 +202,7 @@ mod and_it_reads {
     /// one text the `except` left standing.
     fn name(node: &Ident<TokenStream<'_>>) -> (String, &'static str) {
         match node {
-            Ident::RawIdent(raw) => (
-                raw.f1.as_str().to_owned() + raw.ident_or_keyword.0.as_str(),
-                "RawIdent",
-            ),
+            Ident::RawIdent(raw) => (raw.0.as_str().to_owned(), "RawIdent"),
             Ident::NonKeywordIdent(plain) => (plain.0.as_str().to_owned(), "NonKeywordIdent"),
         }
     }
@@ -337,6 +338,70 @@ mod and_it_reads_this_crate {
     }
 }
 
+/// The whole generated file reading the whole spec it was generated from.
+///
+/// This is the bootstrap's first closed circle: the code `unsyn.us` writes
+/// reads `unsyn.us`, and what it reads is the file the hand tree reads —
+/// definition for definition, name for name, span for span. A generation
+/// that parses its own spec to a different tree is wrong wherever the two
+/// disagree.
+#[test]
+fn the_generated_parser_reads_the_spec_it_was_generated_from() {
+    use parserc::chars::TokenStream as Chars;
+    use parserc::syntax::{Syntax, SyntaxInput as _};
+    use parserc::{AsStr, Input};
+
+    use crate::generated::{Crate as GeneratedCrate, Item as GeneratedItem};
+    use unsyn::compiler::input::TokenStream as UnsynStream;
+    use unsyn::compiler::{syntax, syntax::Item};
+
+    const SOURCE: &str = include_str!("../unsyn.us");
+
+    let mut hand = UnsynStream::from(SOURCE);
+    let hand = hand
+        .parse::<syntax::Crate<_>>()
+        .expect("the hand parser reads its own spec");
+
+    let mut generated = Chars::<parserc::Kind>::from(SOURCE);
+    let tree = generated
+        .parse::<GeneratedCrate<_>>()
+        .expect("the generated parser reads the spec it was generated from");
+
+    assert!(
+        generated.is_empty(),
+        "the generated parser stopped at: {:?}",
+        &generated.as_str()[..generated.as_str().len().min(200)]
+    );
+
+    // The generated `Crate` is the struct its pattern writes: two repeated
+    // operands, nameless and numbered, the items being the second.
+    let defined = |name: &unsyn::compiler::lexer::Ident<UnsynStream<'_>>| name.to_span();
+
+    let hand_names: Vec<_> = hand
+        .items
+        .iter()
+        .filter_map(|item| match item {
+            Item::Stmt(stmt) => Some(defined(&stmt.ident)),
+            _ => None,
+        })
+        .collect();
+
+    let generated_names: Vec<_> = tree
+        .1
+        .iter()
+        .filter_map(|item| match item.as_ref() {
+            GeneratedItem::Stmt(stmt) => Some(stmt.ident.to_span()),
+            _ => None,
+        })
+        .collect();
+
+    assert_eq!(hand_names.len(), 37, "every definition of the spec");
+    assert_eq!(
+        generated_names, hand_names,
+        "the same definitions, where they were written"
+    );
+}
+
 /// Rewrites the file the code is kept in, for when the generator changed.
 ///
 /// The file is written as the code comes out of the generator, in one line; run
@@ -356,7 +421,7 @@ fn the_generated_file_of_the_spec() {
             "//! The code of `unsyn.us`, as the generator writes it.\n\
                  //!\n\
                  //! This file is generated: see `tests/unsyn_us.rs`. Do not edit it.\n\
-                 #![allow(dead_code, clippy::manual_is_ascii_check)]\n\
+                 #![allow(dead_code, clippy::manual_is_ascii_check, clippy::type_complexity)]\n\
                  {}\n",
             code_of_the_spec()
         ),

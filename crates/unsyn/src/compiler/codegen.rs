@@ -68,6 +68,32 @@
 //! of its own. What they cannot do is bound a repetition of anything wider than a
 //! character, so `{n, m}` over a name is a `read_` of its own.
 //!
+//! # The nodes of a `syntax` rule
+//!
+//! A `syntax` rule is read the same way: the root of a choice is an enum, a
+//! sequence is a struct of fields, and every field is the shape its operand
+//! holds. What differs from the text level is what stands between the fields:
+//! the trivia of the language is a separator no rule has to name, so the run
+//! between two operands is a field of its own — the file's `whitespace` node,
+//! read once or not at all — and a repetition of a rule that reads the trivia
+//! itself stands without one, since the trivia between two of its matches is
+//! an item of the repetition rather than a boundary the code lays down.
+//!
+//! The shapes an operand can hold are the shapes [`parserc`] already has: a
+//! a node of a rule the file names, [`Box`]ed where the node is of the tree —
+//! a cycle can only be built through a node, and the box is what makes the
+//! type finite — a [`Char`](parserc::syntax::Char) of one character, a field
+//! of `I` with the `keyword` of a word beside it, a [`Vec`] or an [`Option`] of a repetition, a tuple of a group, and the nested
+//! [`Or`](parserc::syntax::Or) of a choice the file left unnamed: the shape
+//! says what the group holds, and no name of the generator is in it. An
+//! operator of the grammar is never a field of its word: `concat` lays its
+//! operands down with no run between them, and `followed` and `except` are
+//! what the reader of the field they stand on runs beside the text it took.
+//!
+//! What no field can hold is refused rather than written wrong: a counted
+//! repetition of nodes, an operator inside a group, and a name asked for its
+//! text where a tuple answers with types.
+//!
 //! # Where the generated code differs from this crate's own
 //!
 //! [`lexer`] is written by hand and is tuned where a generated file
@@ -117,8 +143,10 @@
 //! A file that asks for something the generator does not write is refused, and
 //! never written wrong: an external the caller left unbound, a `whitespace` rule
 //! that denotes no set of characters, a name no Rust item can carry, a literal
-//! that spells no value, and any `syntax` rule, whose nodes are trees rather than
-//! text and are not generated yet. The precondition of [`Builder::build`] is that
+//! that spells no value, and a shape of a `syntax` rule no field of a node can
+//! hold — a counted repetition of nodes, an operator inside a group, or a name
+//! asked for its text where a tuple answers with types. The precondition of
+//! [`Builder::build`] is that
 //! [`analyze`](super::semantic::analyze) has already found nothing in the file;
 //! what these refusals guard is what a clean file can still ask for that no code
 //! answers, and they are the last line rather than the first.
@@ -204,12 +232,16 @@ where
     pub fn build(&self) -> Result<TokenStream, UnsynError> {
         let denotations = denotations(self.file);
         let nodes = node_rules(self.file);
+        let trivia = trivia_rule(self.file);
+        let syntaxes = syntax_rules(self.file);
 
         let mut generator = Generator {
             file: self.file,
             external: &self.external,
             denotations: &denotations,
             nodes: &nodes,
+            trivia,
+            syntaxes: &syntaxes,
             taken: HashSet::new(),
             helpers: Vec::new(),
             seq: 0,
@@ -220,6 +252,41 @@ where
 
         generator.crate_of()
     }
+}
+
+/// The name of the file's `whitespace` rule, which is the node every run of
+/// the trivia between the operands of a `syntax` sequence is read as.
+///
+/// A file without the declaration has no trivia, and the sequences of its
+/// nodes are written without a run between any two of their operands.
+fn trivia_rule<I>(file: &syntax::Crate<I>) -> Option<String>
+where
+    I: UnsynInput,
+{
+    file.items.iter().find_map(|item| {
+        let syntax::Item::Stmt(stmt) = item else {
+            return None;
+        };
+
+        matches!(stmt.decl(), Decl::Whitespace).then(|| stmt.ident.text())
+    })
+}
+
+/// The keys of the file's `syntax` rules, which a `Box` reaches.
+fn syntax_rules<I>(file: &syntax::Crate<I>) -> HashSet<String>
+where
+    I: UnsynInput,
+{
+    file.items
+        .iter()
+        .filter_map(|item| {
+            let syntax::Item::Stmt(stmt) = item else {
+                return None;
+            };
+
+            matches!(stmt.decl(), Decl::Syntax).then(|| external_key(stmt.ident.text().as_str()))
+        })
+        .collect()
 }
 
 /// How many times something is read, written as a number that is free to take the
@@ -283,7 +350,7 @@ where
 /// choice of characters, or as the text a removal is written over, the answer
 /// has to be the text and not a part of the tree, and the rule asked for in
 /// such a place is written as one field of that text after all. The whole file
-/// is read through until the two sets settle, since one rule written as text
+/// is read through until the shapes settle, since one rule written as text
 /// reads a choice whose other parts then have to be text too, and what is
 /// settled for one rule is a fact about the file rather than about the order
 /// the file declares its rules in.
@@ -291,8 +358,21 @@ fn node_rules<I>(file: &syntax::Crate<I>) -> HashSet<String>
 where
     I: UnsynInput,
 {
-    let mut nodes = HashSet::new();
-    let mut sequences = HashSet::new();
+    // The shape each `lexer` rule is written as, settled once over the whole
+    // file before any code is: a choice of names is an enum of nodes, and a
+    // sequence of more than one operand is a struct of fields; everything
+    // else is the text the rule read. The shape is then undone rule by rule
+    // wherever the code of a rule reads a name's answer back as text, and an
+    // undoing of one rule's shape is a change to what its own code reads —
+    // so the file is walked until the shapes hold still.
+    #[derive(Clone, Copy, PartialEq)]
+    enum Shape {
+        Text,
+        Fields,
+        Enum,
+    }
+
+    let mut shapes: HashMap<String, Shape> = HashMap::new();
 
     for item in &file.items {
         let syntax::Item::Stmt(stmt) = item else {
@@ -303,68 +383,71 @@ where
             continue;
         }
 
-        let key = external_key(stmt.ident.text().as_str());
+        let body = &stmt.definition.body;
 
-        if named_choice(&stmt.definition.body).is_some() {
-            nodes.insert(key);
-        } else if is_sequence(&stmt.definition.body) {
-            sequences.insert(key.clone());
-            nodes.insert(key);
-        }
+        let shape = if named_choice(body).is_some() {
+            Shape::Enum
+        } else if is_sequence(body) {
+            Shape::Fields
+        } else {
+            Shape::Text
+        };
+
+        shapes.insert(external_key(stmt.ident.text().as_str()), shape);
     }
 
     loop {
-        let mut forced = HashSet::new();
+        let mut forced: HashSet<String> = HashSet::new();
 
-        for item in &file.items {
-            let syntax::Item::Stmt(stmt) = item else {
+        for (key, shape) in &shapes {
+            if *shape == Shape::Text {
+                continue;
+            }
+
+            let Some(stmt) = file.items.iter().find_map(|item| match item {
+                syntax::Item::Stmt(stmt) => {
+                    (&external_key(stmt.ident.text().as_str()) == key).then_some(stmt)
+                }
+                _ => None,
+            }) else {
                 continue;
             };
 
-            if !matches!(stmt.decl(), Decl::Lexer) {
+            // A choice of names answers with the node of the name it chose;
+            // the names it chooses between are not asked for their text. A
+            // sequence answers with the node of its fields; the names its
+            // fields hold are not asked for their text either. What asks for
+            // text is everything else the code reads back: the arms of a
+            // folded choice, the members of a set read one character at a
+            // time, the operand a removal is written over, and the group
+            // whose whole answer is one name.
+            expr_forced(&stmt.definition.body, false, &mut forced);
+
+            if *shape == Shape::Enum {
+                // The enum's own alternatives are its variants, and what a
+                // variant reads is the node of the rule it names — never the
+                // text of it. The fold that made them one is a fold of types,
+                // which no answer of text is asked of.
                 continue;
             }
-
-            // A rule written as text reads its whole answer back as text, and
-            // a rule written as a sequence reads the parts it names back as
-            // parts: in both, every choice the body folds, every set the body
-            // lists as a choice of characters, and every removal written over
-            // a name asks that name for the text it read. A rule written as an
-            // enum of names is the one body that asks for nothing: its parts
-            // are the names, and no text of them is read back.
-            let key = external_key(stmt.ident.text().as_str());
-            let body = &stmt.definition.body;
-
-            if nodes.contains(&key) && !sequences.contains(&key) {
-                continue;
-            }
-
-            // A rule whose whole body is one name answers with that name, and
-            // a rule that is not written as a node answers with text: the
-            // name it reads has to answer with text too.
-            if body.is_single()
-                && let Some(element) = body
-                    .branches()
-                    .next()
-                    .expect("one branch")
-                    .elements()
-                    .next()
-                && matches!(
-                    element,
-                    syntax::ExprNoTopAlt::WithoutSuffix(syntax::ExprWithoutSuffix::Reference(_))
-                )
-            {
-                operand_forced(element, true, &mut forced);
-            }
-
-            expr_forced(body, false, &mut forced);
         }
 
-        let before = nodes.len();
-        nodes.retain(|rule| !forced.contains(rule));
+        let mut changed = false;
 
-        if nodes.len() == before {
-            return nodes;
+        for name in forced {
+            if let Some(shape) = shapes.get_mut(&name)
+                && *shape != Shape::Text
+            {
+                *shape = Shape::Text;
+                changed = true;
+            }
+        }
+
+        if !changed {
+            return shapes
+                .into_iter()
+                .filter_map(|(name, shape)| (shape != Shape::Text).then_some(name))
+                .collect();
         }
     }
 }
@@ -745,6 +828,16 @@ where
     /// reads, or a struct of the fields a sequence writes — rather than as the
     /// text they read.
     nodes: &'a HashSet<String>,
+    /// The name the file's `whitespace` rule gave the trivia, when there is one.
+    ///
+    /// The runs of the trivia between the operands of a `syntax` sequence are
+    /// fields of `Option<S<I>>` of the code, and this says what `S` is; a file
+    /// without the declaration has no trivia for a field to hold.
+    trivia: Option<String>,
+    /// The names of the file's `syntax` rules, whose nodes a `syntax` rule
+    /// reaches as a `Box` of itself: a cycle of the tree can only be built
+    /// through a node of the tree, and the box is what makes the type finite.
+    syntaxes: &'a HashSet<String>,
     /// The names of the functions the module has been given already.
     taken: HashSet<String>,
     /// The functions the rule being written has asked for, in the order asked.
@@ -785,8 +878,7 @@ where
     /// node its name declares.
     fn stmt(&mut self, stmt: &syntax::Stmt<I>) -> Result<Vec<TokenStream>, UnsynError> {
         let text = stmt.ident.text();
-        let span = stmt.ident.to_span();
-        let name = item_name(&text, span.clone())?;
+        let name = item_name(&text, stmt.ident.to_span())?;
         let mut allow = wants_allow(&text);
 
         self.rule = text.clone();
@@ -794,6 +886,15 @@ where
         self.helpers.clear();
         self.field_no = 0;
         self.field_names.clear();
+
+        // A `syntax` rule is the node its pattern writes: a choice of
+        // alternatives is an enum, a sequence is a struct, and every field is
+        // the shape its operand holds — a node, a box of a node, a list or an
+        // option of one, the trivia between two operands, or the text of what
+        // a punct or a call read.
+        if matches!(stmt.decl(), Decl::Syntax) {
+            return self.syntax_item(&text, stmt);
+        }
 
         // A rule that is a choice of names is a node, and the names it chooses
         // between were read on their own: nothing is asked of the body here, and
@@ -833,7 +934,7 @@ where
         let allow = allow.then(|| quote! { #[allow(non_camel_case_types)] });
 
         let code = match stmt.decl() {
-            Decl::Syntax => return Err(UnsynError::Build(BuildKind::Syntax(text), span)),
+            Decl::Syntax => unreachable!("a `syntax` rule is written by `syntax_item`"),
             Decl::Whitespace => self.whitespace(&text, stmt)?,
             Decl::Lexer => self.lexer_rule(&text, stmt)?,
         };
@@ -863,57 +964,9 @@ where
                     I: ::parserc::chars::CharsInput;
             },
             Rule::Fields { tuple, fields } => {
-                let decl = if tuple {
-                    let tys = fields.iter().map(|field| {
-                        let attr = &field.attr;
-                        let ty = &field.ty;
+                use quote::ToTokens as _;
 
-                        quote! { #attr pub #ty, }
-                    });
-
-                    quote! {
-                        pub struct #name<I>(
-                            #(#tys)*
-                        )
-                    }
-                } else {
-                    let decls = fields.iter().map(|field| {
-                        let attr = &field.attr;
-                        let name = field.name.as_ref().expect("a named struct");
-                        let ty = &field.ty;
-
-                        quote! {
-                            #attr
-                            pub #name: #ty,
-                        }
-                    });
-
-                    // A struct with braces settles its bounds before them.
-                    quote! {
-                        pub struct #name<I>
-                        where
-                            I: ::parserc::chars::CharsInput,
-                        {
-                            #(#decls)*
-                        }
-                    }
-                };
-
-                let where_ = if tuple {
-                    quote! {
-                        where
-                            I: ::parserc::chars::CharsInput;
-                    }
-                } else {
-                    quote! {}
-                };
-
-                quote! {
-                    #[derive(Debug, PartialEq, Eq, PartialOrd, Ord, Clone, ::parserc::syntax::Syntax)]
-                    #allow
-                    #decl
-                    #where_
-                }
+                struct_item(&name, &allow.to_token_stream(), tuple, &fields)
             }
         });
 
@@ -990,18 +1043,35 @@ where
         &mut self,
         branch: &syntax::OneOrMore<I, syntax::ExprNoTopAlt<I>>,
     ) -> Result<Rule, UnsynError> {
+        let fields = self.fields_from(branch)?;
+        let fields = self.finish_fields(fields);
+
+        Ok(Rule::Fields {
+            tuple: tuple_of(&fields),
+            fields,
+        })
+    }
+
+    /// The fields of a sequence of operands, before any of them is named.
+    fn fields_from(
+        &mut self,
+        branch: &syntax::OneOrMore<I, syntax::ExprNoTopAlt<I>>,
+    ) -> Result<Vec<Field>, UnsynError> {
         let mut fields = Vec::new();
 
         for element in branch.elements() {
             fields.extend(self.field_of(element)?);
         }
 
-        // A struct of nothing but nameless operands is a tuple of them: where
-        // they stand says what they are, and a name would only say it twice.
-        // Where a name reaches in, every other field takes its number.
-        let tuple = fields.iter().all(|field| field.name.is_none());
+        Ok(fields)
+    }
 
-        if !tuple {
+    /// The naming pass of a struct's fields: where none of them has a name
+    /// they stand in a tuple, and where one does every other takes its
+    /// number — `f1`, `f2`, onward — which is all a nameless field can be
+    /// called and all a named struct may call it.
+    fn finish_fields(&mut self, mut fields: Vec<Field>) -> Vec<Field> {
+        if !tuple_of(&fields) {
             for field in &mut fields {
                 if field.name.is_none() {
                     field.name = self.anonymous_name();
@@ -1009,7 +1079,7 @@ where
             }
         }
 
-        Ok(Rule::Fields { tuple, fields })
+        fields
     }
 
     /// The fields one operand of a sequence is written as.
@@ -1220,6 +1290,810 @@ where
         self.field_names
             .insert(base.clone())
             .then(|| Ident::new(&base, proc_macro2::Span::call_site()))
+    }
+
+    // -- syntax rules --------------------------------------------------------
+
+    /// The items of one `syntax` definition: the node its name declares.
+    ///
+    /// The root of the pattern decides the shape: a choice of alternatives is
+    /// an enum with one variant apiece, and a single alternative is a struct —
+    /// a tuple of its fields where none of them has a name. Each operand then
+    /// becomes one field of the shape it holds, and the run of the trivia
+    /// between two operands is a field of its own: the file's `whitespace`
+    /// node, read once or not at all.
+    fn syntax_item(
+        &mut self,
+        text: &str,
+        stmt: &syntax::Stmt<I>,
+    ) -> Result<Vec<TokenStream>, UnsynError> {
+        let name = item_name(text, stmt.ident.to_span())?;
+        let body = &stmt.definition.body;
+        let mut allow = wants_allow(text);
+
+        let item = if body.is_single() {
+            let branch = body.branches().next().expect("a pattern has a branch");
+            // A rule that is one alternative of one operand that is a name is
+            // not a struct of one field but that operand's own shape: the
+            // node reads as the node it reads, and the tree says nothing the
+            // name it holds does not.
+            let named = one_reference(branch);
+
+            let fields = if named.is_some() {
+                Vec::new()
+            } else {
+                self.branch_fields(branch)?
+            };
+
+            if let Some(ident) = named {
+                let ty = self.reference_type(ident)?;
+                let allow = allow.then(|| quote! { #[allow(non_camel_case_types)] });
+
+                quote! {
+                    #[derive(Debug, PartialEq, Eq, PartialOrd, Ord, Clone, ::parserc::syntax::Syntax)]
+                    #allow
+                    pub struct #name<I>(pub #ty)
+                    where
+                        I: ::parserc::chars::CharsInput;
+                }
+            } else {
+                let fields = self.finish_fields(fields);
+                let tuple = tuple_of(&fields);
+                let allow = allow.then(|| quote! { #[allow(non_camel_case_types)] });
+
+                struct_item(&name, &allow, tuple, &fields)
+            }
+        } else {
+            let mut variants = Vec::new();
+            let mut taken: HashSet<String> = HashSet::new();
+
+            for (i, branch) in body.branches().enumerate() {
+                self.field_no = 0;
+                self.field_names.clear();
+
+                // An alternative that is one name is that name's variant, and
+                // the node it reads is all the alternative says. Anything
+                // else is a variant of the fields its operands write.
+                let named = one_reference(branch);
+
+                let fields = if named.is_some() {
+                    Vec::new()
+                } else {
+                    self.branch_fields(branch)?
+                };
+
+                if let Some(ident) = named {
+                    let ty = self.reference_type(ident)?;
+                    let variant = item_name(ident.text().as_str(), ident.to_span())?;
+
+                    taken.insert(variant.to_string());
+                    variants.push(quote! { #variant ( #ty ) });
+
+                    continue;
+                }
+
+                let mut variant = self.variant_name(branch, i + 1)?;
+
+                if !taken.insert(variant.to_string()) {
+                    variant = Ident::new(&format!("F{}", i + 1), proc_macro2::Span::call_site());
+
+                    taken.insert(variant.to_string());
+                }
+
+                allow |= wants_allow(&variant.to_string());
+
+                let fields = self.finish_fields(fields);
+
+                let body = if tuple_of(&fields) {
+                    let tys = fields.iter().map(|field| {
+                        let attr = &field.attr;
+                        let ty = &field.ty;
+
+                        quote! { #attr #ty, }
+                    });
+
+                    quote! { ( #(#tys)* ) }
+                } else {
+                    let decls = fields.iter().map(|field| {
+                        let attr = &field.attr;
+                        let name = field.name.as_ref().expect("a named field");
+                        let ty = &field.ty;
+
+                        // Variant fields share the visibility of the enum.
+                        quote! { #attr #name: #ty, }
+                    });
+
+                    quote! { { #(#decls)* } }
+                };
+
+                variants.push(quote! { #variant #body });
+            }
+
+            let allow = allow.then(|| quote! { #[allow(non_camel_case_types)] });
+
+            quote! {
+                #[derive(Debug, PartialEq, Eq, PartialOrd, Ord, Clone, ::parserc::syntax::Syntax)]
+                #allow
+                pub enum #name<I>
+                where
+                    I: ::parserc::chars::CharsInput,
+                {
+                    #(#variants,)*
+                }
+            }
+        };
+
+        let mut items = std::mem::take(&mut self.helpers);
+        items.push(item);
+
+        Ok(items)
+    }
+
+    /// The name of a variant whose alternative is not one bare name: the one
+    /// word the alternative reads stands for the shape it makes, capitalized;
+    /// and where no word is to be had, the place of the alternative says it.
+    fn variant_name(
+        &self,
+        branch: &syntax::OneOrMore<I, syntax::ExprNoTopAlt<I>>,
+        place: usize,
+    ) -> Result<Ident, UnsynError> {
+        let word = branch.elements().find_map(|element| match element {
+            syntax::ExprNoTopAlt::WithSuffix(suffix) => match suffix {
+                syntax::ExprWithSuffix::Concat { keyword, .. } => {
+                    Some(keyword.1.as_str().to_owned())
+                }
+                syntax::ExprWithSuffix::Followed { keyword, .. } => {
+                    Some(keyword.1.as_str().to_owned())
+                }
+                syntax::ExprWithSuffix::Except { keyword, .. } => {
+                    Some(keyword.1.as_str().to_owned())
+                }
+                syntax::ExprWithSuffix::Grouped { suffix, .. } => match suffix {
+                    syntax::Suffix::Star(_)
+                    | syntax::Suffix::Question(_)
+                    | syntax::Suffix::Plus(_) => None,
+                    syntax::Suffix::Repeat(repeat) => Some(repeat.0.start.1.as_str().to_owned()),
+                },
+            },
+            syntax::ExprNoTopAlt::WithoutSuffix(syntax::ExprWithoutSuffix::Str(lit)) => {
+                // The value the literal spells names the variant, not the
+                // quotes it was written between.
+                let text: String = lit.chars().into_iter().collect();
+
+                text.chars()
+                    .next()
+                    .is_some_and(|c| c.is_alphabetic())
+                    .then_some(text)
+            }
+            _ => None,
+        });
+
+        Ok(match word {
+            Some(word) => item_name(&capitalize(&word), Span::None)?,
+            None => Ident::new(&format!("F{place}"), proc_macro2::Span::call_site()),
+        })
+    }
+
+    /// The fields one alternative writes: one per operand, with the run of
+    /// the trivia between two of them — unless the operand that follows is a
+    /// repetition that opens every match, the first included, with the run,
+    /// which then says the boundary on its own.
+    fn branch_fields(
+        &mut self,
+        branch: &syntax::OneOrMore<I, syntax::ExprNoTopAlt<I>>,
+    ) -> Result<Vec<Field>, UnsynError> {
+        let mut fields = Vec::new();
+        let mut first = true;
+
+        for element in branch.elements() {
+            if !first && self.trivia.is_some() && !swallows_junction(element) {
+                fields.push(self.trivia_field());
+            }
+
+            fields.extend(self.operand_fields(element)?);
+            first = false;
+        }
+
+        Ok(fields)
+    }
+
+    /// Whether a rule can match the trivia itself, which is what lets a
+    /// repetition of it stand without a run of its own between the matches:
+    /// the trivia between two of them is an item of the repetition rather
+    /// than a boundary the code lays down.
+    fn eats_trivia(&self, key: &str, seen: &mut HashSet<String>) -> bool {
+        let Some(trivia) = self.trivia.as_deref() else {
+            return false;
+        };
+
+        if external_key(trivia) == key {
+            return true;
+        }
+
+        if !seen.insert(key.to_owned()) {
+            return false;
+        }
+
+        let Some(body) = self.file.items.iter().find_map(|item| match item {
+            syntax::Item::Stmt(stmt) => {
+                (external_key(stmt.ident.text().as_str()) == *key).then_some(&stmt.definition.body)
+            }
+            _ => None,
+        }) else {
+            return false;
+        };
+
+        // A choice reads the trivia where one of its alternatives is nothing
+        // but the trivia, or a rule that reads it.
+        body.branches().any(|branch| {
+            let mut elements = branch.elements();
+
+            match (elements.next(), elements.next()) {
+                (
+                    Some(syntax::ExprNoTopAlt::WithoutSuffix(
+                        syntax::ExprWithoutSuffix::Reference(ident),
+                    )),
+                    None,
+                ) => self.eats_trivia(&external_key(ident.text().as_str()), seen),
+                _ => false,
+            }
+        })
+    }
+
+    /// Whether a repetition of the operand opens every match with the run of
+    /// the trivia: every one but a repetition of a rule that reads the trivia
+    /// itself.
+    fn repetition_leads(&self, target: &syntax::ExprWithoutSuffix<I>) -> bool {
+        let syntax::ExprWithoutSuffix::Reference(ident) = target else {
+            return true;
+        };
+
+        !self.eats_trivia(&external_key(ident.text().as_str()), &mut HashSet::new())
+    }
+
+    /// One field of an operand repeated: the shape of the operand wrapped in
+    /// the shape that reads it the bound over. Every match of a repetition
+    /// that may match nothing opens with the run of the trivia before it;
+    /// the first match of a repetition that must match one stands at the
+    /// boundary the before-run was said at, and the matches after it carry
+    /// their own. A repetition of several fields wraps the tuple they read
+    /// as, whose runs between them are already inside.
+    fn repetition_field(
+        &mut self,
+        bounds: (usize, Option<usize>),
+        inner: Vec<Field>,
+        leads: bool,
+    ) -> Field {
+        let types: Vec<TokenStream> = inner.into_iter().map(|field| field.ty).collect();
+
+        let ty = self.repetition_ty(bounds, types, leads);
+
+        Field {
+            name: None,
+            ty,
+            attr: None,
+        }
+    }
+
+    /// The types of an operand repeated, wrapped as `repetition_field` wraps
+    /// the fields.
+    fn repetition_type(
+        &mut self,
+        bounds: (usize, Option<usize>),
+        types: Vec<TokenStream>,
+        leads: bool,
+    ) -> TokenStream {
+        self.repetition_ty(bounds, types, leads)
+    }
+
+    fn repetition_ty(
+        &self,
+        bounds: (usize, Option<usize>),
+        types: Vec<TokenStream>,
+        leads: bool,
+    ) -> TokenStream {
+        let lead = (self.trivia.is_some() && leads).then(|| self.trivia_type());
+
+        let elem = |with_lead: bool| {
+            let mut parts: Vec<TokenStream> = Vec::new();
+
+            if with_lead {
+                parts.extend(lead.clone());
+            }
+
+            parts.extend(types.iter().cloned());
+
+            if parts.len() == 1 {
+                parts.pop().expect("one part of an element")
+            } else {
+                quote! { ( #(#parts,)* ) }
+            }
+        };
+
+        match bounds {
+            (0, None) => {
+                let e = elem(true);
+
+                quote! { ::std::vec::Vec<#e> }
+            }
+            (0, Some(1)) => {
+                let e = elem(true);
+
+                quote! { ::core::option::Option<#e> }
+            }
+            (1, None) => {
+                let first = elem(false);
+                let next = elem(true);
+
+                quote! { ( #first, ::std::vec::Vec<#next> ) }
+            }
+            _ => unreachable!("checked by the caller"),
+        }
+    }
+
+    /// The field of the run of the trivia between two operands: the file's
+    /// `whitespace` node, read once or not at all.
+    fn trivia_field(&self) -> Field {
+        Field {
+            name: None,
+            ty: self.trivia_type(),
+            attr: None,
+        }
+    }
+
+    /// The type of the run of the trivia: the file's `whitespace` node,
+    /// optional as the run between two operands is.
+    fn trivia_type(&self) -> TokenStream {
+        let s = self
+            .trivia
+            .as_deref()
+            .expect("a field of the trivia is only asked for where the file has it");
+
+        let name = item_name(s, Span::None).expect("the trivia rule was named once already");
+
+        quote! { ::core::option::Option<#name<I>> }
+    }
+
+    /// The fields one operand writes. An operator of the pattern level —
+    /// `concat`, `followed`, `except` — is data like any other operand at
+    /// this level: the word it reads stands between the operands on each
+    /// side of it, with a run of the trivia between them, which is exactly
+    /// what the sequence of three writes.
+    fn operand_fields(
+        &mut self,
+        operand: &syntax::ExprNoTopAlt<I>,
+    ) -> Result<Vec<Field>, UnsynError> {
+        let suffix = match operand {
+            syntax::ExprNoTopAlt::WithoutSuffix(atom) => return self.atom_fields(atom),
+            syntax::ExprNoTopAlt::WithSuffix(suffix) => suffix,
+        };
+
+        match suffix {
+            syntax::ExprWithSuffix::Grouped { target, suffix } => {
+                // A repetition repeats what its operand reads: the field of
+                // the operand wrapped in the shape that reads it the bound
+                // over. The mark itself is not data — unlike the three
+                // operator words, which the tree holds as fields of I.
+                let bounds = match suffix {
+                    syntax::Suffix::Star(_) => (0, None),
+                    syntax::Suffix::Question(_) => (0, Some(1)),
+                    syntax::Suffix::Plus(_) => (1, None),
+                    syntax::Suffix::Repeat(_) => {
+                        // A counted repetition of the tree level asks for a
+                        // bound no shape of `parserc` counts nodes against.
+                        return Err(self.unsupported(target.to_span()));
+                    }
+                };
+
+                let inner = self.atom_fields(target)?;
+                let leads = self.repetition_leads(target);
+
+                Ok(vec![self.repetition_field(bounds, inner, leads)])
+            }
+            // `concat` is an operator of the grammar and no word of the text:
+            // what it says is that the two operands it joins are read with
+            // nothing between them, so the fields of the two are written with
+            // no run of the trivia between them — and no field of a word,
+            // which the text of the language never holds.
+            syntax::ExprWithSuffix::Concat { target, suffix, .. } => {
+                let mut fields = self.atom_fields(target)?;
+
+                fields.extend(self.operand_fields(suffix)?);
+
+                Ok(fields)
+            }
+            // A `followed` reads the operand it follows and probes what comes
+            // after it without taking any of it: the field is the operand's,
+            // and the probe is what the field's reader runs beside.
+            syntax::ExprWithSuffix::Followed { target, suffix, .. } => {
+                let mut fields = self.atom_fields(target)?;
+
+                let Some(field) = (fields.len() == 1).then(|| fields.pop().expect("one field"))
+                else {
+                    return Err(self.unsupported(target.to_span()));
+                };
+
+                if field.attr.is_some() {
+                    return Err(self.unsupported(target.to_span()));
+                }
+
+                let ty = field.ty.clone();
+                let code = self.code_of_operand(suffix)?;
+                let probe = self.expr_of(code)?;
+                let read = self.probe_reader(&ty, probe, false);
+
+                Ok(vec![Field {
+                    name: field.name,
+                    ty,
+                    attr: Some(field_parser(&read.to_token_stream())),
+                }])
+            }
+            // An `except` reads the operand and refuses it where the tokens
+            // take the whole of what it read: the field is the operand's, and
+            // the refusal is what the field's reader runs over the text it
+            // took.
+            syntax::ExprWithSuffix::Except { target, tokens, .. } => {
+                let mut fields = self.atom_fields(target)?;
+
+                let Some(field) = (fields.len() == 1).then(|| fields.pop().expect("one field"))
+                else {
+                    return Err(self.unsupported(target.to_span()));
+                };
+
+                if field.attr.is_some() {
+                    return Err(self.unsupported(target.to_span()));
+                }
+
+                let mut token_fields = self.atom_fields(tokens)?;
+
+                let Some(token_field) =
+                    (token_fields.len() == 1).then(|| token_fields.pop().expect("one field"))
+                else {
+                    return Err(self.unsupported(tokens.to_span()));
+                };
+
+                if token_field.attr.is_some() {
+                    return Err(self.unsupported(tokens.to_span()));
+                }
+
+                let ty = field.ty.clone();
+                let read = self.probe_reader(&ty, token_field.ty, true);
+
+                Ok(vec![Field {
+                    name: field.name,
+                    ty,
+                    attr: Some(field_parser(&read.to_token_stream())),
+                }])
+            }
+        }
+    }
+
+    /// The function that reads one field and asks of the text beside it what
+    /// a `followed` or an `except` asks: the probe is run over a copy, and
+    /// what it reads is taken from nothing. An `except` refuses the field
+    /// where the tokens take the whole of what it read.
+    fn probe_reader(&mut self, ty: &TokenStream, probe: TokenStream, removal: bool) -> Ident {
+        let seq = self.seq;
+        self.seq += 1;
+
+        let read = self.unique(format!(
+            "read_{}_{}",
+            to_snake_case(&self.rule.clone()),
+            seq + 1
+        ));
+
+        let rule = self.rule.clone();
+
+        let body = if removal {
+            quote! {
+                let mut whole = input.clone();
+
+                let value = <#ty as ::parserc::syntax::Syntax<I>>::into_parser().parse(input)?;
+
+                let mut rest = whole.split_to(whole.len() - input.len());
+
+                if <#probe as ::parserc::syntax::Syntax<I>>::into_parser()
+                    .ok()
+                    .parse(&mut rest)?
+                    .is_some()
+                    && rest.is_empty()
+                {
+                    return Err(::parserc::Kind::Syntax(
+                        #rule,
+                        ::parserc::ControlFlow::Fatal,
+                        value.to_span(),
+                    )
+                    .into());
+                }
+
+                Ok(value)
+            }
+        } else {
+            quote! {
+                let value = <#ty as ::parserc::syntax::Syntax<I>>::into_parser().parse(input)?;
+
+                let mut rest = input.clone();
+
+                #probe.parse(&mut rest)?;
+
+                Ok(value)
+            }
+        };
+
+        self.helpers.push(quote! {
+            fn #read<I>(
+                input: &mut I,
+            ) -> ::core::result::Result<#ty, <I as ::parserc::Input>::Error>
+            where
+                I: ::parserc::chars::CharsInput,
+            {
+                use ::parserc::Parser as _;
+                use ::parserc::ToSpan as _;
+
+                #body
+            }
+        });
+
+        read
+    }
+
+    /// The fields one operand that stands alone writes: one, unless it is a
+    /// group of one alternative, whose fields the enclosing shape takes
+    /// inline; a group of several is one field of the choice of them.
+    fn atom_fields(
+        &mut self,
+        atom: &syntax::ExprWithoutSuffix<I>,
+    ) -> Result<Vec<Field>, UnsynError> {
+        if let syntax::ExprWithoutSuffix::Paren(group) = atom {
+            if group.body.is_single() {
+                let branch = group
+                    .body
+                    .branches()
+                    .next()
+                    .expect("a pattern has a branch");
+
+                return self.branch_fields(branch);
+            }
+
+            let ty = self.choice_type(&group.body)?;
+
+            return Ok(vec![Field {
+                name: None,
+                ty,
+                attr: None,
+            }]);
+        }
+
+        Ok(vec![self.syntax_atom_field(atom)?])
+    }
+
+    /// The field one operand that stands alone writes: the node of a name,
+    /// the character of a single one, the text of a word read by its keyword,
+    /// the text of a call and of one character of a set or its refusal.
+    fn syntax_atom_field(
+        &mut self,
+        atom: &syntax::ExprWithoutSuffix<I>,
+    ) -> Result<Field, UnsynError> {
+        match atom {
+            syntax::ExprWithoutSuffix::Reference(ident) => {
+                let ty = self.reference_type(ident)?;
+
+                Ok(Field {
+                    name: self.named_field(ident.text().as_str()),
+                    ty,
+                    attr: None,
+                })
+            }
+            syntax::ExprWithoutSuffix::Str(lit) => {
+                let chars = lit.chars();
+
+                match chars[..] {
+                    [c] => Ok(Field {
+                        name: None,
+                        ty: quote! { ::parserc::syntax::Char<I, #c> },
+                        attr: None,
+                    }),
+                    [] => Err(self.unsupported(lit.to_span())),
+                    _ => {
+                        let text: String = chars.into_iter().collect();
+
+                        Ok(Field {
+                            name: None,
+                            ty: quote! { I },
+                            attr: Some(quote! { #[parserc(keyword = #text)] }),
+                        })
+                    }
+                }
+            }
+            syntax::ExprWithoutSuffix::Unicode(lit) => {
+                let c = self.code_of(lit)?;
+
+                Ok(Field {
+                    name: None,
+                    ty: quote! { ::parserc::syntax::Char<I, #c> },
+                    attr: None,
+                })
+            }
+            syntax::ExprWithoutSuffix::Call(call) => {
+                let name = call.body.text();
+
+                let parser = self.external.get(&external_key(&name)).ok_or_else(|| {
+                    UnsynError::Build(
+                        BuildKind::External(self.rule.clone(), name.clone()),
+                        call.body.to_span(),
+                    )
+                })?;
+
+                Ok(Field {
+                    name: None,
+                    ty: quote! { I },
+                    attr: Some(field_parser(parser)),
+                })
+            }
+            syntax::ExprWithoutSuffix::Set(set) | syntax::ExprWithoutSuffix::Tilde(_, set) => {
+                // A set of the tree level reads one character of what its
+                // members denote, which is one test only while every member
+                // denotes characters; anything wider has no field to read
+                // into at this level.
+                let arms = set_arms(set, self.denotations)
+                    .ok_or_else(|| self.unsupported(atom.to_span()))?;
+
+                let pred = match atom {
+                    syntax::ExprWithoutSuffix::Tilde(..) => refused_pred(&arms),
+                    _ => class_pred(&arms),
+                };
+
+                Ok(Field {
+                    name: None,
+                    ty: quote! { I },
+                    attr: Some(field_parser(&quote! { ::parserc::next_if(#pred) })),
+                })
+            }
+            syntax::ExprWithoutSuffix::Paren(_) => {
+                unreachable!("a group is written by `atom_fields`")
+            }
+        }
+    }
+
+    /// The type a reference is read as: the node it names, boxed where the
+    /// node is of the tree — a cycle of the tree can only be built through a
+    /// node of the tree, and the box is what makes the type finite.
+    fn reference_type(&self, ident: &lexer::Ident<I>) -> Result<TokenStream, UnsynError> {
+        let text = ident.text();
+        let ty = item_name(&text, ident.to_span())?;
+
+        if self.syntaxes.contains(&external_key(&text)) {
+            Ok(quote! { Box<#ty<I>> })
+        } else {
+            Ok(quote! { #ty<I> })
+        }
+    }
+
+    /// The choice of the alternatives of a group: the nested [`Or`] of the
+    /// types of them, tried in the order the file wrote them. This is what
+    /// an unnamed middle choice is made of — the shape is the combinator's,
+    /// and no name of the generator is in it.
+    ///
+    /// [`Or`]: parserc::syntax::Or
+    fn choice_type(&mut self, body: &syntax::Expr<I>) -> Result<TokenStream, UnsynError> {
+        let mut types = Vec::new();
+
+        for branch in body.branches() {
+            types.push(self.branch_type(branch)?);
+        }
+
+        let mut types = types.into_iter();
+        let first = types.next().expect("a pattern has a branch");
+
+        Ok(types.fold(first, |choice, next| {
+            quote! { ::parserc::syntax::Or<#choice, #next> }
+        }))
+    }
+
+    /// The type one alternative of a group reads: the tuple its operands read
+    /// in order, with the runs of the trivia between them — or, where the
+    /// alternative is one operand of one type, that type itself.
+    fn branch_type(
+        &mut self,
+        branch: &syntax::OneOrMore<I, syntax::ExprNoTopAlt<I>>,
+    ) -> Result<TokenStream, UnsynError> {
+        let mut types = Vec::new();
+        let mut first = true;
+
+        for element in branch.elements() {
+            if !first && self.trivia.is_some() && !swallows_junction(element) {
+                types.push(self.trivia_type());
+            }
+
+            types.extend(self.operand_types(element)?);
+            first = false;
+        }
+
+        if types.len() == 1 {
+            return Ok(types.pop().expect("one type counted"));
+        }
+
+        Ok(quote! { ( #(#types,)* ) })
+    }
+
+    /// The types one operand of a group reads to, which is its fields' types
+    /// when they are all of a shape a tuple can hold: no field of a tuple
+    /// carries an attribute, so a punct of more than one character, a call,
+    /// and a set of more than one character's denoting have no place inside
+    /// a group of the tree, and a file that writes one is told so.
+    fn operand_types(
+        &mut self,
+        operand: &syntax::ExprNoTopAlt<I>,
+    ) -> Result<Vec<TokenStream>, UnsynError> {
+        let atom = match operand {
+            syntax::ExprNoTopAlt::WithoutSuffix(atom) => return self.atom_types(atom),
+            syntax::ExprNoTopAlt::WithSuffix(suffix) => suffix,
+        };
+
+        match atom {
+            syntax::ExprWithSuffix::Grouped { target, suffix } => {
+                let bounds = match suffix {
+                    syntax::Suffix::Star(_) => (0, None),
+                    syntax::Suffix::Question(_) => (0, Some(1)),
+                    syntax::Suffix::Plus(_) => (1, None),
+                    syntax::Suffix::Repeat(_) => {
+                        return Err(self.unsupported(target.to_span()));
+                    }
+                };
+
+                let inner = self.atom_types(target)?;
+                let leads = self.repetition_leads(target);
+
+                Ok(vec![self.repetition_type(bounds, inner, leads)])
+            }
+            syntax::ExprWithSuffix::Concat { target, suffix, .. } => {
+                let mut types = self.atom_types(target)?;
+
+                types.extend(self.operand_types(suffix)?);
+
+                Ok(types)
+            }
+            syntax::ExprWithSuffix::Followed { .. } | syntax::ExprWithSuffix::Except { .. } => {
+                Err(self.unsupported(atom.to_span()))
+            }
+        }
+    }
+
+    fn atom_types(
+        &mut self,
+        atom: &syntax::ExprWithoutSuffix<I>,
+    ) -> Result<Vec<TokenStream>, UnsynError> {
+        match atom {
+            syntax::ExprWithoutSuffix::Reference(ident) => Ok(vec![self.reference_type(ident)?]),
+            syntax::ExprWithoutSuffix::Str(lit) => match lit.chars()[..] {
+                [c] => Ok(vec![quote! { ::parserc::syntax::Char<I, #c> }]),
+                _ => Err(self.unsupported(lit.to_span())),
+            },
+            syntax::ExprWithoutSuffix::Unicode(lit) => {
+                let c = self.code_of(lit)?;
+
+                Ok(vec![quote! { ::parserc::syntax::Char<I, #c> }])
+            }
+            syntax::ExprWithoutSuffix::Paren(group) => {
+                if group.body.is_single() {
+                    let branch = group
+                        .body
+                        .branches()
+                        .next()
+                        .expect("a pattern has a branch");
+
+                    return self.branch_type(branch).map(|ty| vec![ty]);
+                }
+
+                self.choice_type(&group.body).map(|ty| vec![ty])
+            }
+            atom => Err(self.unsupported(atom.to_span())),
+        }
+    }
+
+    /// The report of a shape the syntax level does not write code for.
+    fn unsupported(&self, span: Span) -> UnsynError {
+        UnsynError::Build(BuildKind::Syntax(self.rule.clone()), span)
     }
 
     // -- expressions and statements -----------------------------------------
@@ -1668,6 +2542,124 @@ fn node_of(ty: &Ident) -> TokenStream {
     }
 }
 
+/// Whether an operand arrives with the run before it of its own: a
+/// repetition whose every match, the first included, opens with the optional
+/// trivia, which then says the boundary on its own.
+fn swallows_junction<I>(operand: &syntax::ExprNoTopAlt<I>) -> bool
+where
+    I: UnsynInput,
+{
+    match operand {
+        syntax::ExprNoTopAlt::WithSuffix(syntax::ExprWithSuffix::Grouped { suffix, .. }) => {
+            matches!(
+                suffix,
+                syntax::Suffix::Star(_) | syntax::Suffix::Question(_)
+            )
+        }
+        _ => false,
+    }
+}
+
+/// Whether a sequence of fields is nameless throughout, which is what lets
+/// them stand in a tuple where their places say what they are.
+fn tuple_of(fields: &[Field]) -> bool {
+    fields.iter().all(|field| field.name.is_none())
+}
+
+/// The one name an alternative that is nothing but a name holds, which is the
+/// variant the enum of a choice wears after it.
+fn one_reference<I>(
+    branch: &syntax::OneOrMore<I, syntax::ExprNoTopAlt<I>>,
+) -> Option<&lexer::Ident<I>>
+where
+    I: UnsynInput,
+{
+    let mut elements = branch.elements();
+
+    let (
+        Some(syntax::ExprNoTopAlt::WithoutSuffix(syntax::ExprWithoutSuffix::Reference(ident))),
+        None,
+    ) = (elements.next(), elements.next())
+    else {
+        return None;
+    };
+
+    Some(ident)
+}
+
+/// The word a pattern reads, as the name of the shape it makes: begun by an
+/// upper case letter, which is how the parts of a node are told from the
+/// node.
+fn capitalize(word: &str) -> String {
+    let mut chars = word.chars();
+
+    match chars.next() {
+        Some(first) => first.to_uppercase().chain(chars).collect(),
+        None => String::from("Empty"),
+    }
+}
+
+/// The struct one sequence of fields writes, shared by the two levels: a
+/// tuple where none of the fields has a name, and braces — with their bounds
+/// settled before them — where any one of them does.
+fn struct_item(
+    name: &Ident,
+    allow: &dyn quote::ToTokens,
+    tuple: bool,
+    fields: &[Field],
+) -> TokenStream {
+    let decl = if tuple {
+        let tys = fields.iter().map(|field| {
+            let attr = &field.attr;
+            let ty = &field.ty;
+
+            quote! { #attr pub #ty, }
+        });
+
+        quote! {
+            pub struct #name<I>(
+                #(#tys)*
+            )
+        }
+    } else {
+        let decls = fields.iter().map(|field| {
+            let attr = &field.attr;
+            let name = field.name.as_ref().expect("a named struct");
+            let ty = &field.ty;
+
+            quote! {
+                #attr
+                pub #name: #ty,
+            }
+        });
+
+        quote! {
+            pub struct #name<I>
+            where
+                I: ::parserc::chars::CharsInput,
+            {
+                #(#decls)*
+            }
+        }
+    };
+
+    let where_ = if tuple {
+        quote! {
+            where
+                I: ::parserc::chars::CharsInput;
+        }
+    } else {
+        quote! {}
+    };
+
+    quote! {
+        #[derive(Debug, PartialEq, Eq, PartialOrd, Ord, Clone, ::parserc::syntax::Syntax)]
+        #allow
+        #decl
+        #where_
+    }
+}
+
 /// The attribute that writes a field's reader beside the field.
 fn field_parser(parser: &TokenStream) -> TokenStream {
     quote! { #[parserc(parser = #parser)] }
@@ -1988,10 +2980,16 @@ mod tests {
     }
 
     #[test]
-    fn a_choice_of_names_is_written_as_a_node() {
-        let soup = code("lexer A -> 'a'; lexer B -> 'b'; lexer C -> A | B;");
+    fn a_syntax_choice_is_written_as_an_enum_and_a_sequence_as_a_struct() {
+        let soup = code("lexer A -> 'a'; lexer B -> 'b'; syntax C -> A | B;");
 
         assert!(soup.contains("pub enum C < I > where I : :: parserc :: chars :: CharsInput , { A (A < I >) , B (B < I >) , }"));
+
+        // A word of the alternative names the variant that reads it.
+        let soup = code("lexer A -> 'a'; syntax B -> A followed A | A except A;");
+
+        assert!(soup.contains("Followed"), "{soup}");
+        assert!(soup.contains("Except"), "{soup}");
     }
 
     #[test]
@@ -2087,8 +3085,11 @@ mod tests {
     }
 
     #[test]
-    fn a_syntax_rule_is_refused_until_its_nodes_are_written() {
-        let file = parse("lexer A -> 'a'; syntax B -> A;");
+    fn a_shape_of_the_tree_no_field_can_hold_is_refused() {
+        // A call of an external, a set of more than one character's denoting,
+        // and a counted bound have no type of `parserc` to stand in a group
+        // of the tree, and the file that writes one is told so.
+        let file = parse("lexer A -> 'a'; syntax B -> A{2};");
         let error = Builder::new(&file).build().unwrap_err();
 
         assert!(matches!(
