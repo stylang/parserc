@@ -119,6 +119,17 @@
       `the_generated_parser_reads_the_spec_it_was_generated_from`：生成的 parser
       解析 `unsyn.us` 全文到 EOF，且每个定义的名字 span 与手写树逐一相等
       ——自举第一个闭环。
-- [ ] **M7.5 visit 接口生成**：为生成的文件输出与手写 `visit.rs` 同构的
-      visitor（`visit_<node>` 钩子 + `walk_*`），使 semantic/codegen 两个 pass
-      可以跑在生成的树上；随后以生成的 parser 替换手写 parser 完成完全自举。
+- [x] **M7.5 visit 接口生成**：`build()` 在节点之后输出 `pub trait Visit` +
+      `pub mod walk`（syn 形状）：每个规则一个 `visit_<snake(规则名)>` 钩子
+      （默认走对应 `walk_`），叶结点统一走 `visit_text`。descents 不依赖额外
+      簿记——直接从已写好的字段类型 token 串解析回形状（`Vec/Option/tuple/
+      Or/Char/Box` 的严格文法，`ty_shape`），walk 即按形状下钻；Box 透传
+      （引用经 deref coercion）。visit 模块整体 `#[rustfmt::skip]` +
+      `#[allow(...)]`，保证 freshness 逐 token 一致。
+      新验收测试 `the_generated_visitor_hands_over_every_character_once`：
+      生成的 visitor 走生成的 parser 对 `unsyn.us` 的树，每个字符恰好交付
+      一次、顺序完整——与手写 visit 的不变量同源。
+- [ ] **M8 完全自举**：semantic/codegen 两个 pass 迁移到只经 visit 接口 +
+      值访问器读取树（不依赖具体节点类型），或以生成器再生一份自身
+      （generated-from-generated 恒等检验），以生成的 parser 替换手写
+      parser 解析 `.us` 文件。

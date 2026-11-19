@@ -402,6 +402,42 @@ fn the_generated_parser_reads_the_spec_it_was_generated_from() {
     );
 }
 
+/// The whole generated file walked by the whole generated visitor.
+///
+/// The visitor the generator writes descends through the tree the generated
+/// parser reads, and every character of the source is handed to exactly one
+/// `visit_text` — the same invariant the hand tree pins, asserted of the
+/// generated pair: nothing doubled, nothing dropped.
+#[test]
+fn the_generated_visitor_hands_over_every_character_once() {
+    use parserc::syntax::SyntaxInput as _;
+
+    use crate::generated::Visit as _;
+
+    const SOURCE: &str = include_str!("../unsyn.us");
+
+    struct Echo(String);
+
+    impl<'ast, I> crate::generated::Visit<'ast, I> for Echo
+    where
+        I: parserc::chars::CharsInput,
+    {
+        fn visit_text(&mut self, text: &'ast I) {
+            self.0.push_str(text.as_str());
+        }
+    }
+
+    let mut input = parserc::chars::TokenStream::<parserc::Kind>::from(SOURCE);
+    let tree = input
+        .parse::<crate::generated::Crate<parserc::chars::TokenStream<parserc::Kind>>>()
+        .expect("the generated parser reads the spec");
+
+    let mut echo = Echo(String::new());
+    echo.visit_crate(&tree);
+
+    assert_eq!(echo.0, SOURCE, "every character, exactly once, in order");
+}
+
 /// Rewrites the file the code is kept in, for when the generator changed.
 ///
 /// The file is written as the code comes out of the generator, in one line; run
@@ -421,7 +457,12 @@ fn the_generated_file_of_the_spec() {
             "//! The code of `unsyn.us`, as the generator writes it.\n\
                  //!\n\
                  //! This file is generated: see `tests/unsyn_us.rs`. Do not edit it.\n\
-                 #![allow(dead_code, clippy::manual_is_ascii_check, clippy::type_complexity)]\n\
+                 #![allow(
+    dead_code,
+    clippy::manual_is_ascii_check,
+    clippy::needless_borrow,
+    clippy::type_complexity
+)]\n\
                  {}\n",
             code_of_the_spec()
         ),

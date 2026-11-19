@@ -94,6 +94,14 @@
 //! repetition of nodes, an operator inside a group, and a name asked for its
 //! text where a tuple answers with types.
 //!
+//! Beside the nodes the build writes a visitor: one hook per rule descending
+//! through the walk of it, and one hook for the text every leaf ends with,
+//! in the shape of [`syn`]'s. The descents are read back from the shapes of
+//! the fields themselves, so the visitor is a second view of the same code
+//! and can never claim a tree the nodes do not hold.
+//!
+//! [`syn`]: https://docs.rs/syn/latest/syn/visit/index.html
+//!
 //! # Where the generated code differs from this crate's own
 //!
 //! [`lexer`] is written by hand and is tuned where a generated file
@@ -154,7 +162,7 @@
 use std::collections::{HashMap, HashSet};
 
 use parserc::{Span, syntax::Syntax};
-use proc_macro2::{Ident, Literal, TokenStream};
+use proc_macro2::{Ident, Literal, TokenStream, TokenTree};
 use quote::{ToTokens, quote};
 use unicode_ident::{is_xid_continue, is_xid_start};
 
@@ -248,9 +256,13 @@ where
             field_no: 0,
             field_names: HashSet::new(),
             rule: String::new(),
+            descriptors: Vec::new(),
         };
 
-        generator.crate_of()
+        let items = generator.crate_of()?;
+        let visit = generator.visit_items();
+
+        Ok(quote! { #items #visit })
     }
 }
 
@@ -852,6 +864,9 @@ where
     field_names: HashSet<String>,
     /// The rule being written, which is what a refusal is reported against.
     rule: String,
+    /// The shape of every node the module has been written for, in the order
+    /// the file declared them, which is what the visitor walks them with.
+    descriptors: Vec<(Ident, NodeDesc)>,
 }
 
 impl<'a, I> Generator<'a, I>
@@ -925,6 +940,25 @@ where
                 }
             };
 
+            self.descriptors.push((
+                name.clone(),
+                NodeDesc::Enum {
+                    variants: variants
+                        .iter()
+                        .map(|variant| VariantDesc {
+                            ident: variant.clone(),
+                            body: Box::new(NodeDesc::Fields {
+                                tuple: true,
+                                fields: vec![FieldDesc {
+                                    name: None,
+                                    ty: quote! { #variant<I> },
+                                }],
+                            }),
+                        })
+                        .collect(),
+                },
+            ));
+
             let mut items = std::mem::take(&mut self.helpers);
             items.push(enum_item);
 
@@ -938,6 +972,23 @@ where
             Decl::Whitespace => self.whitespace(&text, stmt)?,
             Decl::Lexer => self.lexer_rule(&text, stmt)?,
         };
+
+        self.descriptors.push((
+            name.clone(),
+            match &code {
+                Rule::Field(_) | Rule::Read(_) | Rule::TakeWhile(_) => NodeDesc::Text,
+                Rule::Fields { tuple, fields } => NodeDesc::Fields {
+                    tuple: *tuple,
+                    fields: fields
+                        .iter()
+                        .map(|field| FieldDesc {
+                            name: field.name.clone(),
+                            ty: field.ty.clone(),
+                        })
+                        .collect(),
+                },
+            },
+        ));
 
         let mut items = std::mem::take(&mut self.helpers);
         items.push(match code {
@@ -1329,6 +1380,17 @@ where
                 let ty = self.reference_type(ident)?;
                 let allow = allow.then(|| quote! { #[allow(non_camel_case_types)] });
 
+                self.descriptors.push((
+                    name.clone(),
+                    NodeDesc::Fields {
+                        tuple: true,
+                        fields: vec![FieldDesc {
+                            name: None,
+                            ty: ty.clone(),
+                        }],
+                    },
+                ));
+
                 quote! {
                     #[derive(Debug, PartialEq, Eq, PartialOrd, Ord, Clone, ::parserc::syntax::Syntax)]
                     #allow
@@ -1341,9 +1403,18 @@ where
                 let tuple = tuple_of(&fields);
                 let allow = allow.then(|| quote! { #[allow(non_camel_case_types)] });
 
+                self.descriptors.push((
+                    name.clone(),
+                    NodeDesc::Fields {
+                        tuple,
+                        fields: desc_fields(&fields),
+                    },
+                ));
+
                 struct_item(&name, &allow, tuple, &fields)
             }
         } else {
+            let mut variant_descs = Vec::new();
             let mut variants = Vec::new();
             let mut taken: HashSet<String> = HashSet::new();
 
@@ -1368,6 +1439,14 @@ where
 
                     taken.insert(variant.to_string());
                     variants.push(quote! { #variant ( #ty ) });
+
+                    variant_descs.push(VariantDesc {
+                        ident: variant,
+                        body: Box::new(NodeDesc::Fields {
+                            tuple: true,
+                            fields: vec![FieldDesc { name: None, ty }],
+                        }),
+                    });
 
                     continue;
                 }
@@ -1407,9 +1486,24 @@ where
                 };
 
                 variants.push(quote! { #variant #body });
+
+                variant_descs.push(VariantDesc {
+                    ident: variant.clone(),
+                    body: Box::new(NodeDesc::Fields {
+                        tuple: tuple_of(&fields),
+                        fields: desc_fields(&fields),
+                    }),
+                });
             }
 
             let allow = allow.then(|| quote! { #[allow(non_camel_case_types)] });
+
+            self.descriptors.push((
+                name.clone(),
+                NodeDesc::Enum {
+                    variants: variant_descs,
+                },
+            ));
 
             quote! {
                 #[derive(Debug, PartialEq, Eq, PartialOrd, Ord, Clone, ::parserc::syntax::Syntax)]
@@ -2490,6 +2584,83 @@ where
         })
     }
 
+    // -- the visitor ---------------------------------------------------------
+
+    /// The visitor of the module: one hook per rule, each descending through
+    /// the walk of it unless a visitor says otherwise, and one hook for the
+    /// text every leaf ends with — the same shape the hand tree's visitor
+    /// has, built from the shapes the file declared and nothing else.
+    fn visit_items(&mut self) -> TokenStream {
+        use quote::format_ident;
+
+        let mut hooks = Vec::new();
+        let mut walks = Vec::new();
+        let mut names = Vec::new();
+
+        for (rule, desc) in std::mem::take(&mut self.descriptors).iter() {
+            let snake = to_snake_case(&rule.to_string());
+            let visit = format_ident!("visit_{}", snake);
+            let walk = format_ident!("walk_{}", snake);
+            let body = walk_body(rule, desc);
+
+            names.push(rule.clone());
+            hooks.push(quote! {
+                #[doc = concat!("The node of the rule `", stringify!(#rule), "`.")]
+                fn #visit(&mut self, node: &'ast #rule<I>) {
+                    walk::#walk(self, node)
+                }
+            });
+            walks.push(quote! {
+                #[doc = concat!("Descend through the node of `", stringify!(#rule), "`.")]
+                pub fn #walk<'ast, I, V>(v: &mut V, node: &'ast #rule<I>)
+                where
+                    I: ::parserc::chars::CharsInput,
+                    V: ?Sized + Visit<'ast, I>,
+                {
+                    #body
+                }
+            });
+        }
+
+        quote! {
+            /// The visitor of the file's nodes, in the shape of `syn`'s: one
+            /// method per rule descending through the walk of it unless a
+            /// visitor says otherwise, and one method for the text that every
+            /// walk ends with.
+            ///
+            /// [`syn`]: https://docs.rs/syn/latest/syn/visit/index.html
+            #[rustfmt::skip]
+            pub trait Visit<'ast, I>
+            where
+                I: ::parserc::chars::CharsInput,
+            {
+                /// The text of one token, which is the leaf every descent
+                /// hands over.
+                fn visit_text(&mut self, _text: &'ast I) {}
+
+                #(#hooks)*
+            }
+
+            /// The descents of the visitor, one per rule, public so that a
+            /// method which does its own work can still hand the children to
+            /// the visitor below it.
+            ///
+            /// The module is machine-written; the skip keeps the formatter
+            /// from rewriting the file into tokens the generator would not
+            /// have written.
+            #[rustfmt::skip]
+            #[allow(clippy::needless_borrow, clippy::possible_missing_else)]
+            pub mod walk {
+                // The list keeps the order the file declared its rules in,
+                // which is the order the walks below read them.
+                #[rustfmt::skip]
+                use super::{Visit, #(#names),*};
+
+                #(#walks)*
+            }
+        }
+    }
+
     /// A name for a function of the module, which no other function of it has.
     fn unique(&mut self, base: String) -> Ident {
         let mut name = base.clone();
@@ -2520,6 +2691,29 @@ enum Rule {
         /// The fields, in the order the operands were written.
         fields: Vec<Field>,
     },
+}
+
+/// The shape of a written node, which is what the visitor walks it with.
+enum NodeDesc {
+    /// The node is one field of the text it read.
+    Text,
+    /// The node is a struct of fields, named or tuple.
+    Fields { tuple: bool, fields: Vec<FieldDesc> },
+    /// The node is an enum of alternatives.
+    Enum { variants: Vec<VariantDesc> },
+}
+
+/// One field of a described node.
+struct FieldDesc {
+    name: Option<Ident>,
+    ty: TokenStream,
+}
+
+/// One alternative of a described enum, named what the code named it and
+/// holding the fields the alternative writes.
+struct VariantDesc {
+    ident: Ident,
+    body: Box<NodeDesc>,
 }
 
 /// One field of the struct a sequence came out as.
@@ -2558,6 +2752,343 @@ where
         }
         _ => false,
     }
+}
+
+/// The statements that walk one node, handing each part to the visitor.
+fn walk_body(rule: &Ident, desc: &NodeDesc) -> TokenStream {
+    match desc {
+        NodeDesc::Text => quote! { v.visit_text(&node.0); },
+        NodeDesc::Fields { tuple, fields } => {
+            let mut steps = Vec::new();
+
+            for (i, field) in fields.iter().enumerate() {
+                let acc = match &field.name {
+                    Some(name) if !*tuple => quote! { &node.#name },
+                    _ => {
+                        let index = Literal::usize_unsuffixed(i);
+
+                        quote! { &node.#index }
+                    }
+                };
+
+                steps.push(walk_code(&ty_shape(&field.ty), &acc));
+            }
+
+            quote! { #(#steps)* }
+        }
+        NodeDesc::Enum { variants } => {
+            let arms = variants.iter().map(|variant| {
+                let ident = &variant.ident;
+
+                match variant.body.as_ref() {
+                    NodeDesc::Fields {
+                        tuple: true,
+                        fields,
+                    } if fields.len() == 1 => {
+                        let step = walk_code(&ty_shape(&fields[0].ty), &quote! { part });
+
+                        quote! {
+                            #rule::#ident(part) => { #step }
+                        }
+                    }
+                    NodeDesc::Fields { tuple, fields } => {
+                        let (binds, steps) = if *tuple {
+                            let binds: Vec<TokenStream> = (0..fields.len())
+                                .map(|i| {
+                                    let name = quote::format_ident!("part{}", i);
+
+                                    quote! { #name }
+                                })
+                                .collect();
+
+                            let steps: Vec<TokenStream> = binds
+                                .iter()
+                                .zip(fields)
+                                .map(|(bind, field)| {
+                                    walk_code(&ty_shape(&field.ty), &quote! { #bind })
+                                })
+                                .collect();
+
+                            (binds, steps)
+                        } else {
+                            let binds: Vec<TokenStream> = fields
+                                .iter()
+                                .filter_map(|field| field.name.as_ref())
+                                .map(|name| quote! { #name })
+                                .collect();
+
+                            let steps: Vec<TokenStream> = fields
+                                .iter()
+                                .map(|field| {
+                                    let name = field.name.as_ref().expect("a named variant");
+
+                                    walk_code(&ty_shape(&field.ty), &quote! { #name })
+                                })
+                                .collect();
+
+                            (binds, steps)
+                        };
+
+                        let pattern = if *tuple {
+                            quote! { #rule::#ident( #(#binds,)* ) }
+                        } else {
+                            quote! { #rule::#ident { #(#binds,)* .. } }
+                        };
+
+                        quote! {
+                            #pattern => { #(#steps)* }
+                        }
+                    }
+                    _ => unreachable!("an alternative is always a struct"),
+                }
+            });
+
+            quote! {
+                match node {
+                    #(#arms)*
+                }
+            }
+        }
+    }
+}
+
+/// The descent through one value of one shape. The expression reached the
+/// value by reference, and every step hands the next one the same way.
+/// The descent through one value of one shape. `acc` is an expression that
+/// reaches the value by reference — a borrow of a field, a binding from a
+/// pattern or a loop — and every step keeps the next one there: a place
+/// borrowed through a reference, a binding passed under the rule that
+/// borrow-through-reference already is, and a box of a node read as the
+/// node, which is what reaching a node by reference through its box
+/// already says.
+fn walk_code(shape: &TyShape, acc: &TokenStream) -> TokenStream {
+    use quote::format_ident;
+
+    match shape {
+        TyShape::Text => quote! { v.visit_text(#acc); },
+        TyShape::Char => quote! { v.visit_text(&(#acc).0); },
+        TyShape::Rule(name) => {
+            let visit = format_ident!("visit_{}", to_snake_case(&name.to_string()));
+
+            quote! { v.#visit(#acc); }
+        }
+        TyShape::Boxed(inner) => walk_code(inner, acc),
+        TyShape::Opt(inner) => {
+            let step = walk_code(inner, &quote! { inner });
+
+            quote! {
+                if let Some(inner) = #acc {
+                    #step
+                }
+            }
+        }
+        TyShape::VecOf(inner) => {
+            let step = walk_code(inner, &quote! { inner });
+
+            quote! {
+                for inner in #acc {
+                    #step
+                }
+            }
+        }
+        TyShape::Tuple(parts) => {
+            let steps: Vec<TokenStream> = parts
+                .iter()
+                .enumerate()
+                .map(|(i, part)| {
+                    let index = Literal::usize_unsuffixed(i);
+
+                    walk_code(part, &quote! { &(#acc).#index })
+                })
+                .collect();
+
+            quote! { #(#steps)* }
+        }
+        TyShape::Choice(first, second) => {
+            let a = walk_code(first, &quote! { first });
+            let b = walk_code(second, &quote! { second });
+
+            quote! {
+                match #acc {
+                    ::parserc::syntax::Or::First(first) => { #a }
+                    ::parserc::syntax::Or::Second(second) => { #b }
+                }
+            }
+        }
+    }
+}
+
+/// The described shape of a written list of fields.
+fn desc_fields(fields: &[Field]) -> Vec<FieldDesc> {
+    fields
+        .iter()
+        .map(|field| FieldDesc {
+            name: field.name.clone(),
+            ty: field.ty.clone(),
+        })
+        .collect()
+}
+
+/// The shape of a type the generator wrote, read back from the tokens of it
+/// for the visitor to walk. Every type the syntax level emits is one of
+/// these shapes, and nothing else is ever asked.
+enum TyShape {
+    /// One field of the input: the text of a word, a call, a class.
+    Text,
+    /// One character, read by `Char` and holding its text in the one field.
+    Char,
+    /// The node of a rule the file declares.
+    Rule(Ident),
+    /// A box of one shape, a list or an option of one, a tuple of several,
+    /// and the nested choice of two.
+    Boxed(Box<TyShape>),
+    Opt(Box<TyShape>),
+    VecOf(Box<TyShape>),
+    Tuple(Vec<TyShape>),
+    Choice(Box<TyShape>, Box<TyShape>),
+}
+
+/// The tokens of a written type, read as a `TyShape`.
+fn ty_shape(ty: &TokenStream) -> TyShape {
+    let tokens = flatten(ty.clone());
+
+    // A tuple is one parenthesised group and nothing else.
+    if tokens.len() == 1
+        && let TokenTree::Group(group) = &tokens[0]
+        && group.delimiter() == proc_macro2::Delimiter::Parenthesis
+    {
+        return TyShape::Tuple(
+            split_trees(flatten(group.stream()))
+                .iter()
+                .map(|part| ty_shape_of_slice(part.as_slice()))
+                .collect(),
+        );
+    }
+
+    // A path, its last segment opening a generic list at most once. The
+    // angle brackets are plain puncts to a token stream, so the list is cut
+    // by counting them.
+    let mut open = None;
+    let mut depth = 0usize;
+    let mut close = tokens.len();
+
+    for (i, token) in tokens.iter().enumerate() {
+        if let TokenTree::Punct(punct) = token {
+            match punct.as_char() {
+                '<' => {
+                    if depth == 0 {
+                        open = Some(i);
+                    }
+
+                    depth += 1;
+                }
+                '>' => {
+                    depth -= 1;
+
+                    if depth == 0 {
+                        close = i;
+                        break;
+                    }
+                }
+                _ => {}
+            }
+        }
+    }
+
+    let path = &tokens[..open.unwrap_or(tokens.len())];
+    let parts: Vec<Vec<TokenTree>> = match open {
+        Some(k) => split_trees(tokens[k + 1..close].to_vec()),
+        None => Vec::new(),
+    };
+
+    let mut name = String::new();
+
+    for token in path {
+        if let TokenTree::Ident(ident) = token {
+            if !name.is_empty() {
+                name.push_str("::");
+            }
+
+            name.push_str(&ident.to_string());
+        }
+    }
+
+    let mut parts = parts.into_iter();
+
+    match (name.as_str(), parts.len()) {
+        ("I", 0) => TyShape::Text,
+        ("Box", 1) => TyShape::Boxed(Box::new(ty_shape_of_slice(&parts.next().unwrap()))),
+        ("std::vec::Vec", 1) => TyShape::VecOf(Box::new(ty_shape_of_slice(&parts.next().unwrap()))),
+        ("core::option::Option", 1) => {
+            TyShape::Opt(Box::new(ty_shape_of_slice(&parts.next().unwrap())))
+        }
+        ("parserc::syntax::Char", _) => TyShape::Char,
+        ("parserc::syntax::Or", 2) => {
+            let first = ty_shape_of_slice(&parts.next().unwrap());
+            let second = ty_shape_of_slice(&parts.next().unwrap());
+
+            TyShape::Choice(Box::new(first), Box::new(second))
+        }
+        (last, 1) => TyShape::Rule(Ident::new(
+            last.rsplit("::")
+                .next()
+                .expect("one segment of a written type"),
+            proc_macro2::Span::call_site(),
+        )),
+        (name, n) => {
+            unreachable!("no type the generator writes looks like {name} with {n}")
+        }
+    }
+}
+
+fn ty_shape_of_slice(tokens: &[TokenTree]) -> TyShape {
+    ty_shape(&TokenStream::from_iter(tokens.iter().cloned()))
+}
+
+/// The trees of a stream, with the invisible groups the macros leave opened.
+fn flatten(ty: TokenStream) -> Vec<TokenTree> {
+    let mut out = Vec::new();
+
+    for token in ty {
+        match token {
+            TokenTree::Group(group) if group.delimiter() == proc_macro2::Delimiter::None => {
+                out.extend(flatten(group.stream()));
+            }
+            other => out.push(other),
+        }
+    }
+
+    out
+}
+
+/// The comma-separated parts of a generic list, cut at the commas that stand
+/// at the bracket depth of the list itself.
+fn split_trees(mut tokens: Vec<TokenTree>) -> Vec<Vec<TokenTree>> {
+    let mut parts: Vec<Vec<TokenTree>> = Vec::new();
+    let mut current: Vec<TokenTree> = Vec::new();
+    let mut depth = 0usize;
+
+    for token in tokens.drain(..) {
+        if let TokenTree::Punct(punct) = &token {
+            match punct.as_char() {
+                '<' => depth += 1,
+                '>' => depth -= 1,
+                ',' if depth == 0 => {
+                    parts.push(std::mem::take(&mut current));
+                    continue;
+                }
+                _ => {}
+            }
+        }
+
+        current.push(token);
+    }
+
+    if !current.is_empty() {
+        parts.push(current);
+    }
+
+    parts
 }
 
 /// Whether a sequence of fields is nameless throughout, which is what lets
