@@ -271,6 +271,17 @@ pub enum LintKind {
         "this `|` names no node of the tree; write the choice as a whole definition or as a rule of its own"
     )]
     UnnamedAlternative,
+    /// A choice at the root of a right side whose alternatives are not all of
+    /// one sort: some write a single field of the node, some write several.
+    ///
+    /// The node is an enum of the first level either way, and that is all the
+    /// first level can settle — the parts a complex alternative writes belong
+    /// to no left side and name nothing, so a variant of it is told apart by
+    /// its place rather than by its meaning.
+    #[error(
+        "this choice mixes alternatives that write one field with alternatives that write several; the node names only its first level, and the parts of the wider alternatives name nothing"
+    )]
+    MixedAlternative,
 }
 
 /// One [`LintKind`] and the place in the file that says it.

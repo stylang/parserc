@@ -285,17 +285,45 @@
           比对从来没走到 `RawIdent`——手写侧读成一整段文本、生成侧读成
           “sigil + 名字节点”，用 `syntax r#where -> 'a';` 一探就 `EQ false`。
           已修并新增 `a_name_written_raw_is_two_parts_in_both_trees` 钉住。
-    - [ ] **M8.2b-7 剩下的唯一根因：lexer 侧“字面量选择”不成 enum**。
-          仍为单字段文本但 spec 写了多个顶层备选的规则，只剩四个：
-          `AsciiEscape`（6 备选，首备选是 3 子表达式序列）、`BlockComment`
-          （3 备选，首备选是 4 子表达式序列）、`LeadingKeywords`（3）、
-          `FollowingKeywords`（3）。原因：`named_choice` 只认“备选全是裸名
-          引用”，字面量选择就不算。`syntax` 侧已经会对字面量选择产 enum
-          （`ExprWithoutSuffix` 7 变体、`Suffix` 4、`RepeatBound` 3、`Item` 3），
-          所以缺的是把同一机制用到 `lexer` 规则。
-          连带影响：`LeadingKeywords` 变 enum 后 `Stmt::decl()` 可以从变体而
-          不是从关键字文本得到 `Decl`（目前这个映射在 `syntax.rs:746`，是
-          M8.2c 要去掉的手写侧假设之一）。
+    - [x] **M8.2b-7 lexer 侧 root-or 一律成 enum + 混合备选警告**：用户定的硬
+          规则：**除非右侧是一个基础 literal 表达式，否则第一层必须是 struct
+          fields 或 enum**；多种复杂表达式混合时，该原则只适用于第一层，
+          并给出警告。
+
+          生成器：`node_rules` 的形状判定从 `named_choice(body).is_some()`
+          改为 `!body.is_single()` —— 只要根上是选择就成 enum，不管备选是
+          名字、字面量还是序列；`stmt()` 里的 lexer enum 分支从“只能装名字
+          备选”扩展为与 `syntax_item` 同构的通用版（名字备选 → `Variant(Ty)`，
+          字面量备选 → 由词命名，其余 → `branch fields` + `F{n}` 兑底）。
+          `named_choice` 关心被删（其功能已被逐项 `one_reference` 覆盖）。
+
+          警告：新 `LintKind::MixedAlternative`，在 `visit_expr` 根层
+          (`expr_depth == 0`) 统计各备选写字段数：全部一个或全部多个 → 不警告；
+          两种混在一起 → 警告。判据 `writes_one_field`：单个元素且为
+          Reference/Str/Unicode/Set。**注意一个名字引用不管它指向的规则多宽都
+          算窄**（变体只装那个节点一个字段），所以 `A | 'c'` 不警告，
+          `'a' 'b' | 'c'` 警告。
+          `unsyn.us` 命中 4 处（`RepeatBound`、`ExprWithoutSuffix`、
+          `AsciiEscape`、`BlockComment`），已钉住计数。
+
+          生成侧结果：`LeadingKeywords`/`FollowingKeywords` → enum(3)，变体名与
+          手写侧完全一致（`Lexer/Syntax/Whitespace`、`Concat/Except/Followed`）；
+          `AsciiEscape` → enum(6)（首个备选是 3 字段 struct 变体）；
+          `BlockComment` → enum(3)（F1 是 4 字段 tuple 变体）。
+
+          验收发现：`lexer A -> 'a' | 'b'` 的变体现在叫 `A`/`B`（由词命名），
+          而不是 `F1`/`F2` —— 现有 `variant_name` 规则自然覆到 lexer 层，
+          不是 regression。`the_trivia_of_a_lexer_rule_is_not_taken` 已按新形状
+          重写（包含“单个字面量仍是 1 字段”的反例）。
+
+          **尚未完的一层**：手写侧的 `BlockComment`/`InnerBlockDoc`/
+          `OuterBlockDoc`/`BlockCommentOrDoc` 还是单字段文本（本轮 M8.2b-4
+          改的），而生成侧现在分别是 enum(3)/3 字段/4 字段/enum(3)。两边
+          事件序列仍然相等（`visit_text` 不被记录，且注释内部结构两侧都
+          不可达），所以 `two_trees` 全绿——但字段结构不等，M8.2d 换 AST 时
+          必须先把这四个同步回去（且比 M8.2b-4 更简单：生成侧的 head/body
+          已经是纯文本字段，不再需要手写侧那三个自造名 enum）。
+    - [ ] **M8.2b-8 手写侧注释家族回同步**：见上条末尾。
   - [ ] **M8.2b-6 转义类型收尾（外观性）**：`AsciiEscape`（enum）与
         `UnicodeEscape`（`Vec<EscapeDigit>`）仍是结构化类型，但 `LitStr` 的
         body 变成文本后它们已经**不可达**——两个树的 walk 都不会走到，

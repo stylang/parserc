@@ -308,39 +308,6 @@ fn external_key(name: &str) -> String {
 
 /// The alternatives of a rule that is nothing but a choice of other rules by name.
 ///
-/// What such a rule says is *which* of the rules it names was read, and the text
-/// it took does not say that: `r#foo` read raw and `foo` read plain are both names,
-/// and only the alternative they came through tells them apart. The rule therefore
-/// comes out as a node with one part per name rather than as the text it read,
-/// which is what [`named_choice_rules`] collects the names of.
-///
-/// Anything else is not that shape, and `None` says so: an alternative that is a
-/// sequence, a single operand that is a literal or a set, and a choice of one are
-/// all rules whose text is all they are.
-fn named_choice<I>(body: &syntax::Expr<I>) -> Option<Vec<&lexer::Ident<I>>>
-where
-    I: UnsynInput,
-{
-    let mut names = Vec::new();
-
-    for branch in body.branches() {
-        let mut elements = branch.elements();
-
-        let (Some(one), None) = (elements.next(), elements.next()) else {
-            return None;
-        };
-
-        let syntax::ExprNoTopAlt::WithoutSuffix(syntax::ExprWithoutSuffix::Reference(ident)) = one
-        else {
-            return None;
-        };
-
-        names.push(ident);
-    }
-
-    (names.len() >= 2).then_some(names)
-}
-
 /// The rules of `file` that are written as a node rather than as the text they
 /// read.
 ///
@@ -391,11 +358,16 @@ where
 
         let body = &stmt.expr;
 
-        let shape = if named_choice(body).is_some() {
+        let shape = if !body.is_single() {
+            // A choice is an enum of one variant per alternative, whether the
+            // alternatives are names, words, or whole sequences of either.
             Shape::Enum
         } else if is_sequence(body) {
             Shape::Fields
         } else {
+            // One plain operand — a word, a set, a call of an external — is the
+            // text of the token it read, and is the one shape that is not made
+            // of parts the first level could have written as fields.
             Shape::Text
         };
 
@@ -930,21 +902,87 @@ where
             return self.syntax_item(&text, stmt);
         }
 
-        // A rule that is a choice of names is a node, and the names it chooses
-        // between were read on their own: nothing is asked of the body here, and
-        // the part of each alternative is the node that alternative names. Which
-        // rules are of that shape was settled over the whole file first, since a
-        // rule asked for among the parts of another is not written as a node.
-        if self.nodes.contains(&external_key(&text))
-            && let Some(names) = named_choice(&stmt.expr)
-        {
+        // A `lexer` rule that is a choice of alternatives is an enum with one
+        // variant apiece, exactly as a `syntax` choice is: the first level of a
+        // right side says what the node is made of, and a choice says variants
+        // however plain or compound the alternatives are. Which rules are
+        // nodes at all was settled over the whole file first, since a rule
+        // asked for among the parts of another is not written as one.
+        if self.nodes.contains(&external_key(&text)) && !stmt.expr.is_single() {
             let mut variants = Vec::new();
+            let mut variant_descs = Vec::new();
+            let mut taken: HashSet<String> = HashSet::new();
 
-            for ident in names {
-                let name = ident.text();
-                let variant = item_name(&name, ident.to_span())?;
-                allow |= wants_allow(&name);
-                variants.push(variant);
+            for (i, branch) in stmt.expr.branches().enumerate() {
+                self.field_no = 0;
+                self.field_names.clear();
+
+                // An alternative that is one name is that name's variant, and
+                // the node it reads is all the alternative says. Anything
+                // else is a variant of the fields its operands write.
+                if let Some(ident) = one_reference(branch) {
+                    let ty = self.reference_type(ident)?;
+                    let variant = item_name(ident.text().as_str(), ident.to_span())?;
+
+                    allow |= wants_allow(ident.text().as_str());
+                    taken.insert(variant.to_string());
+                    variants.push(quote! { #variant ( #ty ) });
+
+                    variant_descs.push(VariantDesc {
+                        ident: variant,
+                        body: Box::new(NodeDesc::Fields {
+                            tuple: true,
+                            fields: vec![FieldDesc { name: None, ty }],
+                        }),
+                    });
+
+                    continue;
+                }
+
+                let mut variant = self.variant_name(branch, i + 1)?;
+
+                if !taken.insert(variant.to_string()) {
+                    variant = Ident::new(&format!("F{}", i + 1), proc_macro2::Span::call_site());
+
+                    taken.insert(variant.to_string());
+                }
+
+                allow |= wants_allow(&variant.to_string());
+
+                let fields = self.fields_from(branch)?;
+                let fields = self.finish_fields(fields);
+                let tuple = tuple_of(&fields);
+
+                let body = if tuple {
+                    let tys = fields.iter().map(|field| {
+                        let attr = &field.attr;
+                        let ty = &field.ty;
+
+                        quote! { #attr #ty, }
+                    });
+
+                    quote! { ( #(#tys)* ) }
+                } else {
+                    let decls = fields.iter().map(|field| {
+                        let attr = &field.attr;
+                        let name = field.name.as_ref().expect("a named field");
+                        let ty = &field.ty;
+
+                        quote! { #attr #name: #ty, }
+                    });
+
+                    quote! { { #(#decls)* } }
+                };
+
+                variants.push(quote! { #variant #body });
+
+                variant_descs.push(VariantDesc {
+                    ident: variant.clone(),
+                    body: Box::new(NodeDesc::Fields {
+                        tuple,
+                        fields: desc_fields(&fields),
+                    }),
+                });
             }
 
             let allow = allow.then(|| quote! { #[allow(non_camel_case_types)] });
@@ -955,26 +993,14 @@ where
                 where
                     I: ::parserc::chars::CharsInput,
                 {
-                    #( #variants ( #variants<I> ), )*
+                    #( #variants ),*
                 }
             };
 
             self.descriptors.push((
                 name.clone(),
                 NodeDesc::Enum {
-                    variants: variants
-                        .iter()
-                        .map(|variant| VariantDesc {
-                            ident: variant.clone(),
-                            body: Box::new(NodeDesc::Fields {
-                                tuple: true,
-                                fields: vec![FieldDesc {
-                                    name: None,
-                                    ty: quote! { #variant<I> },
-                                }],
-                            }),
-                        })
-                        .collect(),
+                    variants: variant_descs,
                 },
             ));
 
@@ -3751,11 +3777,29 @@ mod tests {
         ));
         assert!(!soup.contains("whole . split_to"));
 
-        // A rule that is one expression keeps the text of the expression it is.
+        // A choice of alternatives is an enum of one variant apiece even when
+        // every alternative is one plain character: the first level of a right
+        // side says what the node is made of, and a choice says variants. The
+        // word each alternative reads names its variant.
         let soup = code("lexer A -> 'a' | 'b';");
+        assert!(
+            soup.contains(
+                "pub enum A < I > where I : :: parserc :: chars :: CharsInput , { \
+                 A (# [parserc (parser = :: parserc :: next ('a'))] I ,) , \
+                 B (# [parserc (parser = :: parserc :: next ('b'))] I ,) }"
+            ),
+            "{soup}"
+        );
+
+        // Only a single operand is the text of the token it read.
+        let soup = code("lexer A -> 'ab';");
         assert!(has(
             &soup,
-            quote! { ::parserc::next('a').or(::parserc::next('b')) }
+            quote! {
+                pub struct A<I>(#[parserc(parser = ::parserc::keyword("ab"))] pub I)
+                where
+                    I: ::parserc::chars::CharsInput;
+            }
         ));
     }
 

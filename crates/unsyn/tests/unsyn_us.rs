@@ -277,11 +277,23 @@ mod and_it_reads {
 
     #[test]
     fn a_comment_closes_the_one_it_opened() {
+        // A comment that nests is the rule's first alternative, which is the
+        // four sub-expressions the production writes: the opening, its head,
+        // the body after the head, and the closing that belongs to this opening.
+        let BlockComment::F1(open, head, body, close) =
+            parse::<BlockComment<_>>("/* a /* b */ c */").expect("a nested comment")
+        else {
+            panic!("a comment that nests is not the rule's first alternative");
+        };
+
         assert_eq!(
-            parse::<BlockComment<_>>("/* a /* b */ c */")
-                .expect("a nested comment")
-                .0
-                .as_str(),
+            format!(
+                "{}{}{}{}",
+                open.as_str(),
+                head.as_str(),
+                body.as_str(),
+                close.as_str()
+            ),
             "/* a /* b */ c */"
         );
     }
