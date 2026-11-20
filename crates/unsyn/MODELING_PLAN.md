@@ -321,13 +321,23 @@
           不可达），所以 `two_trees` 全绿——但字段结构不等，M8.2d 换 AST 时
           必须先把这四个同步回去（且比 M8.2b-4 更简单：生成侧的 head/body
           已经是纯文本字段，不再需要手写侧那三个自造名 enum）。
-    - [x] **M8.2b-7b 两条 lint 的关系：合并失败，改为分开但共用判据**：
-          上一小节把警告并入 `UnnamedAlternative` 的尝试被**仓库里已有的
-          测试** `a_choice_inside_a_group_names_no_node_and_says_so` 推反：
-          `syntax A -> ( 'a' | 'b' ) 'c';` 在新判据下不再报警（`'a'`/`'b'`
-          都是可命名的词），但那个组仍然**不产生任何节点** —— 这才是
-          `UnnamedAlternative` 要说的事。“变体有没有名字”与“根本有没有
-          节点”是两件正交的事，合并会丢覆盖。
+    - [x] **M8.2b-7b 无名部分收成一个 lint**：上一小节写的“合并失败，改为两个
+          kind”是错的：把“判据不能共用”误成了“kind 不能共用”。
+          最终：**一个 `LintKind::UnnamedAlternative`，两个触发点**，消息统一
+          为“这一处命名不了 → 写成一条自己的规则，或以一个词开头”，因为两者
+          确实是同一个动作。`MixedAlternative` 与 `UnnamedVariant` 删除。
+
+          两个触发点问的不是同一个问题，所以必须分开判：
+          - `expr_depth > 0` 且根上有选择 → 整个选择不产生**任何节点**（与
+            它的备选能不能命名无关），按选择报一次；
+          - `expr_depth == 0` 且有选择 → 选择确实成了 enum，但某个备选给不出
+            名字，按**每个备选**报一次（span 落在该备选开头 `branch_head`）。
+          第二条的命名判据仍与生成器**共用一个函数**（`names_its_variant` =
+          `one_reference` + `variant_word`），否则警告会承诺一个代码拒写的名字。
+
+          计数：`unsyn.us` 仍为 25 = 组里 7 + 根上 18，已合并钉住（单一数字，
+          成因列在注释里）。`lexer A -> [LF] | [LF]` 的断言维持“只排
+          除命名类报告”，因为现在两者同 kind，不能再靠 kind 区分。
 
           最终形式（两个 kind，各管一件事，但**名字判据只写一份**）：
           - `UnnamedAlternative`：`expr_depth > 0` 且根上有选择 → 按**整个

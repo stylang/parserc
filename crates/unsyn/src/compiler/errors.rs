@@ -282,24 +282,20 @@ pub enum LintKind {
     /// node; inside a group the choice belongs to no left side, so it becomes
     /// no node of the tree at all and whatever reads the tree can only tell its
     /// parts apart by their shape.
+    /// A part of a pattern that becomes no named node of the tree.
+    ///
+    /// Two ways lead there, and they are told as one report because they say
+    /// one thing and are fixed by one act: a choice written inside a group
+    /// belongs to no left side, so it becomes no node at all, and an
+    /// alternative of the whole of a right side that names no rule and reads no
+    /// word gives its variant nothing to be called but its place, `F1`, `F2`.
+    /// Either way the file is asked to write the nameless part as a rule of its
+    /// own, whose left side then names it — or to begin it with a word of the
+    /// language, which the variant can wear.
     #[error(
-        "this `|` names no node of the tree; write the choice as a whole definition or as a rule of its own"
+        "this names no node of the tree; write it as a rule of its own, or begin it with a word of the language"
     )]
     UnnamedAlternative,
-    /// One alternative of a choice at the root of a right side that names no
-    /// rule and reads no word the generator could call its variant by.
-    ///
-    /// The choice does become a node here, which is what tells this report
-    /// apart from
-    /// [`UnnamedAlternative`](Self::UnnamedAlternative): the harm is not that
-    /// there is no node but that this one part of it comes out named `F1`,
-    /// `F2`, by its place rather than by what it reads. Naming the word as a
-    /// rule of its own, or beginning the alternative with a word, is what
-    /// settles it.
-    #[error(
-        "this alternative names no rule and reads no word, so its variant is called by its place; write it as a rule of its own, or begin it with a word"
-    )]
-    UnnamedVariant,
 }
 
 /// One [`LintKind`] and the place in the file that says it.

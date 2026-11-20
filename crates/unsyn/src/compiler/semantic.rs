@@ -722,27 +722,29 @@ impl<'ast, I: UnsynInput> Visit<'ast, I> for Checker<'ast, I> {
     }
 
     fn visit_expr(&mut self, node: &'ast syntax::Expr<I>) {
-        // An `|` says which of the node's alternatives was read only where the
-        // alternatives are the whole of a right side; a choice written inside a
-        // group belongs to no left side, and so becomes no node of the tree at
-        // all — however well its alternatives could have been named. That is
-        // one harm, and it is told once for the choice, at the choice.
+        // A part of the pattern that ends up with no name is told the same way
+        // wherever it came from, and there are two ways, which ask different
+        // questions and are therefore asked apart.
+        //
+        // A choice written below the whole of a right side belongs to no left
+        // side, so it becomes no node of the tree at all — however well its
+        // alternatives could have been named. That is a property of the choice
+        // as a whole, so it is told once, at the choice.
         if self.expr_depth > 0 && !node.is_single() {
             self.diagnostics
                 .lint(LintKind::UnnamedAlternative, node.to_span());
         }
 
-        // Where the choice *is* the whole of a right side it does become an
-        // enum, and a different harm is possible: an alternative that names no
-        // rule and reads no word gives its own variant nothing to be called but
-        // its place. The question is the one the generator answers when it
-        // names a variant, asked here from the same function so that the
+        // A choice at the whole of a right side does become an enum, and cannot
+        // come out nameless as a whole; what may come out nameless is one of
+        // its variants. The question is the one the generator answers when it
+        // names a variant, and it is asked from the same function, so the
         // warning cannot promise a name the code then declines to write.
         if self.expr_depth == 0 && !node.is_single() {
             for branch in node.branches() {
                 if !codegen::names_its_variant(branch) {
                     self.diagnostics
-                        .lint(LintKind::UnnamedVariant, codegen::branch_head(branch));
+                        .lint(LintKind::UnnamedAlternative, codegen::branch_head(branch));
                 }
             }
         }
@@ -1374,13 +1376,17 @@ lexer B -> A | '/*' A;
         // alternatives of a pattern says nothing about either. A set names no
         // word, though, so the two alternatives are each told for that — which
         // is a different report and does not speak to the members.
+        // Only the members of one set are compared, and the same name twice in
+        // two alternatives of a pattern says nothing about either. A set names
+        // no word, so each of the two alternatives is also told for that — the
+        // one report the file earns besides, and nothing about the members.
         let report = report("lexer LF -> U+000A; lexer A -> [LF] | [LF];");
         assert_eq!(report.errors, Vec::new());
         assert_eq!(
             report
                 .lints
                 .iter()
-                .filter(|lint| !matches!(lint.kind, LintKind::UnnamedVariant))
+                .filter(|lint| !matches!(lint.kind, LintKind::UnnamedAlternative))
                 .collect::<Vec<_>>(),
             Vec::<&crate::compiler::errors::Lint>::new(),
             "the members of the two sets are no business of each other"
@@ -1492,7 +1498,7 @@ lexer B -> A | '/*' A;
         );
         assert_eq!(
             lints("lexer C -> ['*'-'/'] | 'c';"),
-            [LintKind::UnnamedVariant],
+            [LintKind::UnnamedAlternative],
             "a set names nothing"
         );
 
@@ -1501,32 +1507,35 @@ lexer B -> A | '/*' A;
         // of them is told twice.
         assert_eq!(
             lints("lexer C -> ['*'-'/'] | ['0'-'9'] | 'c';"),
-            [LintKind::UnnamedVariant, LintKind::UnnamedVariant]
+            [LintKind::UnnamedAlternative, LintKind::UnnamedAlternative]
         );
     }
 
     #[test]
-    fn the_nameless_parts_of_the_spec_are_pinned_by_kind() {
-        // Both counts are pinned, and apart, because they are two different
-        // things to fix: a `|` written inside a group makes no node at all,
-        // while an alternative of a root choice that offers no word leaves the
-        // node it does make with a variant called by its place.
-        let lints = report(include_str!("../../unsyn.us")).lints;
-
-        let unnamed = lints
+    fn the_nameless_parts_of_the_spec_are_pinned() {
+        // One report for one statement — a part of the tree with no name —
+        // reached from two places, and the count of both is pinned together so
+        // that a new nameless part shows up here rather than only as an `F7` in
+        // the code a build writes.
+        //
+        // Seven of these are the choices written inside groups, each told at
+        // the choice; eighteen are alternatives of a root choice that offer
+        // neither a rule nor a word, each told at the alternative — six of
+        // `AsciiEscape`, three each of `BlockComment`, `ExprWithoutSuffix` and
+        // `Suffix`, two of `RepeatBound`, one of `ExprWithSuffix`.
+        //
+        // What is not among them is `Range`, whose second variant the generator
+        // does call `F2`: both of its alternatives offer the word `concat`, and
+        // it is the second of two that wanted the same name that loses it. That
+        // is a short of the naming scheme, not of the file, and telling the
+        // author to fix it would be telling them to fix what they wrote well.
+        let unnamed = report(include_str!("../../unsyn.us"))
+            .lints
             .iter()
             .filter(|lint| lint.kind == LintKind::UnnamedAlternative)
             .count();
-        let variants = lints
-            .iter()
-            .filter(|lint| lint.kind == LintKind::UnnamedVariant)
-            .count();
 
-        assert_eq!(unnamed, 7, "the choices of unsyn.us written inside groups");
-        assert_eq!(
-            variants, 18,
-            "the alternatives of unsyn.us that name nothing: 6 of AsciiEscape, 3 each of BlockComment, ExprWithoutSuffix and Suffix, 2 of RepeatBound, 1 of ExprWithSuffix"
-        );
+        assert_eq!(unnamed, 25, "the parts of unsyn.us that name no node");
     }
 
     #[test]
