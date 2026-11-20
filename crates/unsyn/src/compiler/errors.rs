@@ -286,12 +286,26 @@ pub enum LintKind {
     ///
     /// Two ways lead there, and they are told as one report because they say
     /// one thing and are fixed by one act: a choice written inside a group
-    /// belongs to no left side, so it becomes no node at all, and an
-    /// alternative of the whole of a right side that names no rule and reads no
-    /// word gives its variant nothing to be called but its place, `F1`, `F2`.
-    /// Either way the file is asked to write the nameless part as a rule of its
-    /// own, whose left side then names it — or to begin it with a word of the
-    /// language, which the variant can wear.
+    /// belongs to no left side, so it becomes no node at all, and an alternative
+    /// of the whole of a right side that names no rule and reads no word gives
+    /// its variant nothing to be called but its place, `F1`, `F2`. Either way
+    /// the file is asked to write the nameless part as a rule of its own, whose
+    /// left side then names it — or to begin it with a word of the language,
+    /// which the variant can wear.
+    ///
+    /// Neither is asked of a group inside a `lexer` rule, which owes no name:
+    /// the code reads what such a group matched as one run of text and keeps no
+    /// part of it, so there is no node there to name. Asking for one would turn
+    /// a token into a list of nodes, which is not what a terminal is for. A
+    /// `lexer` rule is still asked about the alternatives of its whole right
+    /// side, which do become the variants of an enum.
+    ///
+    /// An alternative of one operand is told only where it meant a name and did
+    /// not get one. A `*`, a `'\n'` or a set reads no word, and there is nothing
+    /// inside a single operand for a reader to tell apart, so its place says all
+    /// a name would; two alternatives that both reach for the same word are a
+    /// different matter, whatever their size, since one of them is left named by
+    /// nothing but where it was written.
     #[error(
         "this names no node of the tree; write it as a rule of its own, or begin it with a word of the language"
     )]

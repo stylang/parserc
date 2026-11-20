@@ -302,7 +302,12 @@ fn count(n: usize) -> Literal {
 }
 
 /// The key an external is bound under: its name, of the sigil a raw name wears.
-fn external_key(name: &str) -> String {
+///
+/// A name written `r#gen` and a name written `gen` are one name to the file, to
+/// the analyzer and to the builder that binds an external, so every place a
+/// rule is looked up by its name goes through here. Only the *spelling* a node
+/// and a diagnostic wear keeps the sigil.
+pub(crate) fn external_key(name: &str) -> String {
     name.strip_prefix("r#").unwrap_or(name).to_owned()
 }
 
@@ -311,14 +316,12 @@ fn external_key(name: &str) -> String {
 /// The word one alternative of a choice offers as its variant's name, when it
 /// offers one.
 ///
-/// A joining says the word it joins with, a bounded repetition says the brace
-/// it opens with, and a literal says the character it spells — provided that
-/// character begins with a letter, since a variant is named as an identifier
-/// and `*` is not one. Anything else offers nothing, and `None` says so: the
-/// generator then calls the variant by its place, which is what
-/// [`names_its_variant`] exists for the analyzer to ask the same question.
-///
-/// [`names_its_variant`]: crate::compiler::codegen::names_its_variant
+/// A joining says the word it joins with, a literal says the character it
+/// spells — provided that character begins with a letter, since a variant is
+/// named as an identifier and `*` is not one. A quantity operator, braced or
+/// not, says no word at all. Anything else offers nothing, and `None` says so:
+/// the generator then calls the variant by its place, which is what
+/// [`variant_names`] asks about for the whole choice.
 pub(crate) fn variant_word<I>(
     branch: &syntax::OneOrMore<I, syntax::ExprNoTopAlt<I>>,
 ) -> Option<String>
@@ -331,10 +334,13 @@ where
             syntax::ExprWithSuffix::Followed { keyword, .. } => Some(keyword.0.as_str().to_owned()),
             syntax::ExprWithSuffix::Except { keyword, .. } => Some(keyword.0.as_str().to_owned()),
             syntax::ExprWithSuffix::Grouped { suffix, .. } => match suffix {
-                syntax::Suffix::Star(_) | syntax::Suffix::Question(_) | syntax::Suffix::Plus(_) => {
-                    None
-                }
-                syntax::Suffix::Repeat(repeat) => Some(repeat.open.0.as_str().to_owned()),
+                // A brace opens a bound and is punctuation, not a word: like
+                // the three operators beside it, it offers no name, and
+                // offering one would be offering a name no item can wear.
+                syntax::Suffix::Star(_)
+                | syntax::Suffix::Question(_)
+                | syntax::Suffix::Plus(_)
+                | syntax::Suffix::Repeat(_) => None,
             },
         },
         syntax::ExprNoTopAlt::WithoutSuffix(syntax::ExprWithoutSuffix::Str(lit)) => {
@@ -366,17 +372,87 @@ where
         .map_or(Span::None, |element| element.to_span())
 }
 
-/// Whether one alternative names its own variant: by the rule it names, or by
-/// the word it reads.
+/// The identifier a name the generator wrote itself names.
 ///
-/// This is the one question the generator answers when it names a variant, put
-/// here so that the analyzer's warning and the generated code cannot part
-/// company on which alternatives are nameless.
-pub(crate) fn names_its_variant<I>(branch: &syntax::OneOrMore<I, syntax::ExprNoTopAlt<I>>) -> bool
+/// The shapes of the written types are read back out of the tokens the
+/// generator made, and a name written raw comes back with its sigil still on
+/// it — `r#gen`, not `gen`. An identifier is worn bare and spelled raw, so the
+/// two are told apart here rather than assumed.
+fn written_name(text: &str) -> Ident {
+    match text.strip_prefix("r#") {
+        Some(bare) => Ident::new_raw(bare, proc_macro2::Span::call_site()),
+        None => Ident::new(text, proc_macro2::Span::call_site()),
+    }
+}
+
+/// The word each alternative of a choice offers its variant, before any of it
+/// is settled: `None` where the alternative reads nothing an item could be
+/// called by.
+///
+/// This is the half of [`variant_names`] that says what the file wrote rather
+/// than what the generator finally wore. A word offered and then lost to
+/// another alternative is still a word the author meant, and a caller that
+/// cannot tell the two apart cannot tell an operand that reads no word from a
+/// name that was taken.
+pub(crate) fn variant_offers<I>(expr: &syntax::Expr<I>) -> Vec<Option<String>>
 where
     I: UnsynInput,
 {
-    one_reference(branch).is_some() || variant_word(branch).is_some()
+    expr.branches()
+        .map(|branch| {
+            // A single rule names its variant by the rule; anything else offers
+            // the word it reads, if it reads one at all.
+            match one_reference(branch) {
+                Some(ident) => Some(ident.text()),
+                None => variant_word(branch).map(|word| capitalize(&word)),
+            }
+        })
+        .collect()
+}
+
+/// The name each alternative of a choice gives its variant, in the order the
+/// choice wrote them; `None` is an alternative the generator can only call by
+/// its place.
+///
+/// An alternative names its variant by the rule it reaches, or failing that by
+/// the word it reads; a word no item can wear, and a word another alternative
+/// wore first, are both as good as no word. This is the naming the generator
+/// does, in one place, and the analyzer asks the same function — so a warning
+/// can neither promise a name the code declines to write nor stay silent about
+/// one the code declines.
+pub(crate) fn variant_names<I>(expr: &syntax::Expr<I>) -> Vec<Option<String>>
+where
+    I: UnsynInput,
+{
+    let mut taken: HashSet<String> = HashSet::new();
+    let mut names = Vec::new();
+
+    for candidate in variant_offers(expr) {
+        // A word is the variant's name only where an item can wear it and no
+        // alternative wore it first; failing either, the variant is called by
+        // its place, and this says so rather than inventing a name.
+        let name = match candidate {
+            Some(word) if is_item_name(&word) && taken.insert(word.clone()) => Some(word),
+            _ => None,
+        };
+
+        names.push(name);
+    }
+
+    names
+}
+
+/// The identifier the variant of one alternative wears: the name
+/// [`variant_names`] settled on for it, or its place where that settled none.
+///
+/// [`variant_names`] has already said whether the word is one an item can wear
+/// and whether another alternative wore it first, so the only answer left here
+/// is the identifier itself.
+fn variant_ident(names: &[Option<String>], index: usize) -> Result<Ident, UnsynError> {
+    Ok(match names.get(index) {
+        Some(Some(word)) => item_name(word, Span::None)?,
+        _ => Ident::new(&format!("F{}", index + 1), proc_macro2::Span::call_site()),
+    })
 }
 
 /// The rules of `file` that are written as a node rather than as the text they
@@ -1007,7 +1083,10 @@ where
         if self.nodes.contains(&external_key(&text)) && !stmt.expr.is_single() {
             let mut variants = Vec::new();
             let mut variant_descs = Vec::new();
-            let mut taken: HashSet<String> = HashSet::new();
+            // The names are settled for the whole choice before any of them is
+            // worn, since which of two alternatives that offer one word gets it
+            // is a question about the choice and not about either alternative.
+            let names = variant_names(&stmt.expr);
 
             for (i, branch) in stmt.expr.branches().enumerate() {
                 self.field_no = 0;
@@ -1018,10 +1097,9 @@ where
                 // else is a variant of the fields its operands write.
                 if let Some(ident) = one_reference(branch) {
                     let ty = self.reference_type(ident)?;
-                    let variant = item_name(ident.text().as_str(), ident.to_span())?;
+                    let variant = variant_ident(&names, i)?;
 
-                    allow |= wants_allow(ident.text().as_str());
-                    taken.insert(variant.to_string());
+                    allow |= wants_allow(&variant.to_string());
                     variants.push(quote! { #variant ( #ty ) });
 
                     variant_descs.push(VariantDesc {
@@ -1035,13 +1113,7 @@ where
                     continue;
                 }
 
-                let mut variant = self.variant_name(branch, i + 1)?;
-
-                if !taken.insert(variant.to_string()) {
-                    variant = Ident::new(&format!("F{}", i + 1), proc_macro2::Span::call_site());
-
-                    taken.insert(variant.to_string());
-                }
+                let variant = variant_ident(&names, i)?;
 
                 allow |= wants_allow(&variant.to_string());
 
@@ -1332,10 +1404,19 @@ where
             // generator once.
             let field_name = self.named_field(&name);
 
+            // What the reference reads is the node it names, boxed where that
+            // node is one the tree can only be built through a pointer: a
+            // `syntax` rule reached from another is the shape of the recursion,
+            // and `Paren` and `Suffixed` both write it. A `Vec` is finite
+            // whatever it holds, so a repetition wants no box inside it; an
+            // `Option` is as wide as what it holds, so the box a rule wanted
+            // alone is wanted there too.
+            let held = self.reference_type(ident)?;
+
             let (field_ty, attr) = match bounds {
-                None => (quote! { #ty<I> }, None),
+                None => (held.clone(), None),
                 Some((0, None)) => (quote! { ::std::vec::Vec<#ty<I>> }, None),
-                Some((0, Some(1))) => (quote! { ::core::option::Option<#ty<I>> }, None),
+                Some((0, Some(1))) => (quote! { ::core::option::Option<#held> }, None),
                 Some((at_least, at_most)) => {
                     let read = self.bounded_reader(&ty, at_least, at_most);
 
@@ -1562,7 +1643,10 @@ where
         } else {
             let mut variant_descs = Vec::new();
             let mut variants = Vec::new();
-            let mut taken: HashSet<String> = HashSet::new();
+            // The names are settled for the whole choice before any of them is
+            // worn, since which of two alternatives that offer one word gets it
+            // is a question about the choice and not about either alternative.
+            let names = variant_names(body);
 
             for (i, branch) in body.branches().enumerate() {
                 self.field_no = 0;
@@ -1581,9 +1665,9 @@ where
 
                 if let Some(ident) = named {
                     let ty = self.reference_type(ident)?;
-                    let variant = item_name(ident.text().as_str(), ident.to_span())?;
+                    let variant = variant_ident(&names, i)?;
 
-                    taken.insert(variant.to_string());
+                    allow |= wants_allow(&variant.to_string());
                     variants.push(quote! { #variant ( #ty ) });
 
                     variant_descs.push(VariantDesc {
@@ -1597,13 +1681,7 @@ where
                     continue;
                 }
 
-                let mut variant = self.variant_name(branch, i + 1)?;
-
-                if !taken.insert(variant.to_string()) {
-                    variant = Ident::new(&format!("F{}", i + 1), proc_macro2::Span::call_site());
-
-                    taken.insert(variant.to_string());
-                }
+                let variant = variant_ident(&names, i)?;
 
                 allow |= wants_allow(&variant.to_string());
 
@@ -1667,22 +1745,6 @@ where
         items.push(item);
 
         Ok(items)
-    }
-
-    /// The name of a variant whose alternative is not one bare name: the one
-    /// word the alternative reads stands for the shape it makes, capitalized;
-    /// and where no word is to be had, the place of the alternative says it.
-    fn variant_name(
-        &self,
-        branch: &syntax::OneOrMore<I, syntax::ExprNoTopAlt<I>>,
-        place: usize,
-    ) -> Result<Ident, UnsynError> {
-        let word = variant_word(branch);
-
-        Ok(match word {
-            Some(word) => item_name(&capitalize(&word), Span::None)?,
-            None => Ident::new(&format!("F{place}"), proc_macro2::Span::call_site()),
-        })
     }
 
     /// The fields one alternative writes: one per operand, with the run of
@@ -3266,11 +3328,10 @@ fn ty_shape(ty: &TokenStream) -> TyShape {
 
             TyShape::Choice(Box::new(first), Box::new(second))
         }
-        (last, 1) => TyShape::Rule(Ident::new(
+        (last, 1) => TyShape::Rule(written_name(
             last.rsplit("::")
                 .next()
                 .expect("one segment of a written type"),
-            proc_macro2::Span::call_site(),
         )),
         (name, n) => {
             unreachable!("no type the generator writes looks like {name} with {n}")
@@ -3470,19 +3531,28 @@ fn reader(read: &Ident, stmts: &[TokenStream]) -> TokenStream {
 /// before a word of Rust is an item written the same way, and a rule written plain
 /// is plain. What is no name at all is refused rather than mended, since a name the
 /// file could not be read as holding is not a name the code should invent.
-fn item_name(text: &str, span: Span) -> Result<Ident, UnsynError> {
+/// Whether a word is one an item of Rust can wear.
+///
+/// This is the test [`item_name`] makes, on its own, so that a caller holding
+/// only a candidate word — a variant's, before the code that would wear it is
+/// written — can ask whether there is one to wear.
+fn is_item_name(text: &str) -> bool {
     let base = text.strip_prefix("r#").unwrap_or(text);
     let mut chars = base.chars();
 
-    let named = match chars.next() {
+    match chars.next() {
         // A lone underscore is a name the reader accepts and no item can wear.
         None => false,
         Some(first) => {
             !(base == "_") && (first == '_' || is_xid_start(first)) && chars.all(is_xid_continue)
         }
-    };
+    }
+}
 
-    if !named {
+fn item_name(text: &str, span: Span) -> Result<Ident, UnsynError> {
+    let base = text.strip_prefix("r#").unwrap_or(text);
+
+    if !is_item_name(text) {
         return Err(UnsynError::Build(BuildKind::Name(text.to_owned()), span));
     }
 
@@ -3553,6 +3623,7 @@ mod tests {
     use parserc::{Input, syntax::SyntaxInput};
 
     use super::*;
+    use crate::compiler::errors::{LintKind, SemanticsKind};
     use crate::compiler::input::TokenStream as Spec;
     use crate::compiler::semantic;
 
@@ -3958,6 +4029,96 @@ mod tests {
 
         assert!(soup.contains("fn read_abc_1"));
         assert!(soup.contains("fn read_abc_2"));
+    }
+
+    #[test]
+    fn a_bound_offers_no_word_for_its_variant() {
+        // `{2}` is punctuation and not a word, so the alternative that carries
+        // it names its variant nothing — which is what used to hand the
+        // generator a name no item could wear and refuse the whole build with
+        // `BuildKind::Name`.
+        //
+        // It is not told, though: the alternative is one operand, so its place
+        // in the choice says everything a name would.
+        let soup = code("lexer A -> 'x'{2} | 'y';");
+
+        assert!(soup.contains("pub enum A"), "{soup}");
+        assert!(
+            soup.contains("F1"),
+            "the bounded alternative is called by its place"
+        );
+        assert!(soup.contains("Y"), "the word still names its variant");
+
+        assert_eq!(
+            semantic::analyze(&parse("lexer A -> 'x'{2} | 'y';"))
+                .lints
+                .iter()
+                .filter(|lint| lint.kind == LintKind::UnnamedAlternative)
+                .count(),
+            0,
+            "an alternative of one operand keeps its place to itself"
+        );
+    }
+
+    #[test]
+    fn two_alternatives_that_want_one_name_do_not_both_wear_it() {
+        // Two alternatives that reach the same rule are a choice the second of
+        // which has no name left. Written as the same name twice the enum would
+        // not be Rust at all, so the second is called by its place — and the
+        // file is told, since a variant called `F2` is a part of the tree that
+        // says nothing.
+        let soup = code("lexer X -> 'x'; lexer A -> X | X;");
+        assert!(
+            soup.contains("X (X < I >) , F2 (X < I >)"),
+            "the second alternative wears its place: {soup}"
+        );
+
+        assert_eq!(
+            semantic::analyze(&parse("lexer X -> 'x'; lexer A -> X | X;"))
+                .lints
+                .iter()
+                .filter(|lint| lint.kind == LintKind::UnnamedAlternative)
+                .count(),
+            1,
+            "the alternative left without a name is told"
+        );
+    }
+
+    #[test]
+    fn a_name_written_raw_and_one_written_plain_are_one_name() {
+        // `r#gen` and `gen` are one name to the file: the sigil says how the
+        // name is spelled, not which name it is. A second definition of one
+        // name is a collision, and the collision is reported whatever sigil
+        // the second of the two wears.
+        let tree = {
+            let mut input = Spec::from("lexer gen -> 'a'; lexer r#gen -> 'b';");
+
+            input
+                .parse::<syntax::Crate<_>>()
+                .expect("two names is a file of the language")
+        };
+        let report = semantic::analyze(&tree);
+
+        assert!(
+            matches!(
+                report.errors.as_slice(),
+                [UnsynError::Semantics(SemanticsKind::NameCollision(_), _)]
+            ),
+            "one name written two ways is still defined twice: {:?}",
+            report.errors
+        );
+
+        // And the item is written with the sigil it was written with, which is
+        // the only way Rust has of naming an item `gen`. What the visitor reads
+        // back out of that spelling is the name bare — and reading it back
+        // through `Ident::new`, which refuses a name wearing a sigil, is the
+        // panic this pins.
+        let soup = code("lexer r#gen -> 'a';");
+        assert!(soup.contains("pub struct r#gen"), "{soup}");
+        assert!(
+            soup.contains("fn visit_gen"),
+            "the visitor of a raw name is the name bare: {soup}"
+        );
     }
 
     #[test]

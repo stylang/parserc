@@ -277,22 +277,22 @@ mod and_it_reads {
 
     #[test]
     fn a_comment_closes_the_one_it_opened() {
-        // A comment that nests is the rule's first alternative, which is the
-        // four sub-expressions the production writes: the opening, its head,
-        // the body after the head, and the closing that belongs to this opening.
-        let BlockComment::F1(open, head, body, close) =
+        // A comment that nests is the rule's body, which is the four
+        // sub-expressions the production writes: the opening, its head, the
+        // runs after the head, and the closing that belongs to this opening.
+        let BlockComment::BlockCommentBody(body) =
             parse::<BlockComment<_>>("/* a /* b */ c */").expect("a nested comment")
         else {
-            panic!("a comment that nests is not the rule's first alternative");
+            panic!("a comment that nests is not the rule's body");
         };
 
         assert_eq!(
             format!(
                 "{}{}{}{}",
-                open.as_str(),
-                head.as_str(),
-                body.as_str(),
-                close.as_str()
+                body.0.as_str(),
+                body.1.as_str(),
+                body.2.as_str(),
+                body.3.as_str()
             ),
             "/* a /* b */ c */"
         );
@@ -413,7 +413,7 @@ fn the_generated_parser_reads_the_spec_it_was_generated_from() {
         })
         .collect();
 
-    assert_eq!(hand_names.len(), 40, "every definition of the spec");
+    assert_eq!(hand_names.len(), 50, "every definition of the spec");
     assert_eq!(
         generated_names, hand_names,
         "the same definitions, where they were written"
@@ -479,7 +479,8 @@ fn the_generated_file_of_the_spec() {
     dead_code,
     clippy::manual_is_ascii_check,
     clippy::needless_borrow,
-    clippy::type_complexity
+    clippy::type_complexity,
+    clippy::enum_variant_names
 )]\n\
                  {}\n",
             code_of_the_spec()

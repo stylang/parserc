@@ -355,6 +355,14 @@ struct Checker<'ast, I> {
     /// names the node the definition declares; every deeper `|` is written
     /// inside a group and names nothing.
     expr_depth: usize,
+    /// Whether the definition being visited is a node of the tree.
+    ///
+    /// A `lexer` rule is read as the one token it spells: what its pattern
+    /// reaches is thrown away once it has bounded the run, and the rule's own
+    /// name is what the tree says about it. A `syntax` rule is read as a node,
+    /// whose every part the tree keeps and has to name. The difference decides
+    /// whether a part of a pattern that reads no word costs the tree anything.
+    holds_node: bool,
     /// The input the tree was read from, a piece of which every node holds.
     _input: PhantomData<&'ast I>,
 }
@@ -371,6 +379,7 @@ impl<'ast, I: UnsynInput> Checker<'ast, I> {
             ranges: Vec::new(),
             bounds: Vec::new(),
             expr_depth: 0,
+            holds_node: true,
             _input: PhantomData,
         }
     }
@@ -573,7 +582,12 @@ impl<'ast, I: UnsynInput> Checker<'ast, I> {
         let mut seen: BTreeMap<String, Span> = BTreeMap::new();
 
         for rule in rules {
-            if let Some(previous) = seen.insert(rule.name.clone(), rule.span.clone()) {
+            // `r#gen` and `gen` are one name worn two ways, so a file that
+            // declares both declares one name twice — which is what this is
+            // looking for, and what the bare text alone would have let pass.
+            if let Some(previous) =
+                seen.insert(codegen::external_key(&rule.name), rule.span.clone())
+            {
                 self.diagnostics.push(UnsynError::Semantics(
                     SemanticsKind::NameCollision(previous),
                     rule.span.clone(),
@@ -605,12 +619,14 @@ impl<'ast, I: UnsynInput> Checker<'ast, I> {
         let mut first: BTreeMap<String, &Rule> = BTreeMap::new();
 
         for rule in rules {
-            first.entry(rule.name.clone()).or_insert(rule);
+            first
+                .entry(codegen::external_key(&rule.name))
+                .or_insert(rule);
         }
 
         for rule in rules {
             for mention in &rule.body.uses {
-                let Some(defined) = first.get(&mention.name) else {
+                let Some(defined) = first.get(&codegen::external_key(&mention.name)) else {
                     self.diagnostics.push(UnsynError::Semantics(
                         SemanticsKind::UndefinedSymbol(mention.name.clone()),
                         mention.span.clone(),
@@ -634,7 +650,7 @@ impl<'ast, I: UnsynInput> Checker<'ast, I> {
                 // which is then the tree's own field and not a separator.
                 if rule.kind == Decl::Syntax
                     && !mention.alone
-                    && Some(mention.name.as_str()) == trivia.as_deref()
+                    && trivia.as_deref() == Some(codegen::external_key(&mention.name).as_str())
                 {
                     self.diagnostics.lint(
                         LintKind::RedundantSeparator(mention.name.clone()),
@@ -660,12 +676,21 @@ impl<'ast, I: UnsynInput> Checker<'ast, I> {
         let mut first: BTreeMap<String, &Rule> = BTreeMap::new();
 
         for rule in rules {
-            first.entry(rule.name.clone()).or_insert(rule);
+            first
+                .entry(codegen::external_key(&rule.name))
+                .or_insert(rule);
         }
 
         for (name, definition) in &first {
             let mut reached: BTreeSet<String> = BTreeSet::new();
-            let mut to_visit: Vec<String> = definition.body.heads.iter().cloned().collect();
+            // Walked by the meaning of each name, which is the only spelling
+            // the map above answers to.
+            let mut to_visit: Vec<String> = definition
+                .body
+                .heads
+                .iter()
+                .map(|head| codegen::external_key(head))
+                .collect();
 
             while let Some(current) = to_visit.pop() {
                 if !reached.insert(current.clone()) {
@@ -709,7 +734,15 @@ impl<'ast, I: UnsynInput> Visit<'ast, I> for Checker<'ast, I> {
     }
 
     fn visit_stmt(&mut self, node: &'ast syntax::Stmt<I>) {
+        // Whether the parts of this definition's pattern have to be named is
+        // settled before the pattern is walked, because the pattern is where
+        // the question is asked.
+        let held = self.holds_node;
+        self.holds_node = matches!(node.decl(), Decl::Syntax);
+
         walk::walk_stmt(self, node);
+
+        self.holds_node = held;
 
         let body = self.take_one();
 
@@ -722,27 +755,52 @@ impl<'ast, I: UnsynInput> Visit<'ast, I> for Checker<'ast, I> {
     }
 
     fn visit_expr(&mut self, node: &'ast syntax::Expr<I>) {
-        // A part of the pattern that ends up with no name is told the same way
-        // wherever it came from, and there are two ways, which ask different
-        // questions and are therefore asked apart.
-        //
         // A choice written below the whole of a right side belongs to no left
-        // side, so it becomes no node of the tree at all — however well its
+        // side, so it becomes no node of the tree — however well its
         // alternatives could have been named. That is a property of the choice
         // as a whole, so it is told once, at the choice.
-        if self.expr_depth > 0 && !node.is_single() {
+        //
+        // Only a rule that makes a node is asked. Within a `lexer` rule the
+        // code reads what a group matched as one run of text and keeps no part
+        // of it, which is why a string literal's body and a block comment's are
+        // a field of `I` and not a list of nodes: there is nothing in the tree
+        // for the group to have been named for. A `lexer` rule is still asked
+        // about the alternatives of its whole right side, which do become the
+        // variants of an enum — see below.
+        if self.holds_node && self.expr_depth > 0 && !node.is_single() {
             self.diagnostics
                 .lint(LintKind::UnnamedAlternative, node.to_span());
         }
 
-        // A choice at the whole of a right side does become an enum, and cannot
-        // come out nameless as a whole; what may come out nameless is one of
-        // its variants. The question is the one the generator answers when it
-        // names a variant, and it is asked from the same function, so the
-        // warning cannot promise a name the code then declines to write.
+        // A choice at the whole of a right side does become an enum, in a
+        // `lexer` rule as much as in a `syntax` one, and cannot come out
+        // nameless as a whole; what may come out nameless is one of its
+        // variants. The naming is asked of the same function the generator
+        // names variants with, so the warning can neither promise a name the
+        // code declines to write nor stay silent about one the code declines —
+        // including a name another alternative wore first, which is a way of
+        // having none that only the whole choice can see.
+        //
+        // Only an alternative with parts is told for reading no word. A single
+        // operand is the whole of its variant, so the place it holds in the
+        // choice says everything a name would: there is nothing inside it for a
+        // reader to tell apart, and the value it reads stands on the face of
+        // the tree wherever the variant is matched. A word cannot be had from a
+        // `*`, a `'\n'` or a set, and making the author name each of those
+        // would be making them name a rule that has no parts.
+        //
+        // A name the alternative did offer and lost to another is a different
+        // case, whatever its size: the author wrote a word here, two
+        // alternatives wrote the same one, and only the whole choice can see
+        // that one of them goes unnamed.
         if self.expr_depth == 0 && !node.is_single() {
-            for branch in node.branches() {
-                if !codegen::names_its_variant(branch) {
+            let names = codegen::variant_names(node);
+            let offers = codegen::variant_offers(node);
+
+            for ((branch, name), offer) in node.branches().zip(names).zip(offers) {
+                let part = branch.elements().count() > 1;
+
+                if name.is_none() && (part || offer.is_some()) {
                     self.diagnostics
                         .lint(LintKind::UnnamedAlternative, codegen::branch_head(branch));
                 }
@@ -1121,8 +1179,6 @@ mod tests {
         // The spec is the largest file this pass has to take, and the only one
         // whose every name, range, set and repetition is written on purpose: an
         // error about any of it is a fault of this pass and not of the file.
-        // What the file does earn is the lints of the choices it writes inside
-        // its groups, which no rule of its own names.
         assert_eq!(
             report(include_str!("../../unsyn.us")).errors,
             Vec::new(),
@@ -1487,55 +1543,77 @@ lexer B -> A | '/*' A;
             "a sequence that ends in a name still names its variant"
         );
 
-        // An alternative whose every literal begins past the alphabet gives
-        // the generator nothing to call the variant but its place. A name is
-        // enough however wide the rule it names is, and a word is enough
-        // however many operands stand around it.
+        // A name is enough however wide the rule it names is, and a word is
+        // enough however many operands stand around it.
         assert_eq!(
             lints("lexer A -> _; lexer _ -> ['a'-'z']; lexer C -> A | 'c';"),
             Vec::new(),
             "a name and a word both say a variant"
         );
+
+        // What is told is an alternative written of more than one operand and
+        // offering no word: the variant holds parts, and nothing about it says
+        // which part is which. The word is sought in every operand, so a single
+        // alphabetic literal anywhere in the sequence is enough to name it.
         assert_eq!(
-            lints("lexer C -> ['*'-'/'] | 'c';"),
+            lints("lexer C -> ['*'-'/'] 'c' | 'd';"),
+            Vec::new(),
+            "one word among the operands says which variant it is"
+        );
+        assert_eq!(
+            lints("lexer C -> ['*'-'/'] '!' | 'd';"),
             [LintKind::UnnamedAlternative],
-            "a set names nothing"
+            "parts that all read past the alphabet name nothing"
         );
 
-        // One report per unnamed alternative, not one per choice: the author
-        // is shown the alternative that gives nothing, and a choice with two
-        // of them is told twice.
+        // A single operand is exempt. A `*`, a `'\n'`, a set and a reference
+        // all read no word, and there is nothing inside one operand for a
+        // reader to tell apart, so its place in the choice is the whole of what
+        // a name would have said. Naming each of these would be naming a rule
+        // that has no parts.
         assert_eq!(
-            lints("lexer C -> ['*'-'/'] | ['0'-'9'] | 'c';"),
+            lints("lexer C -> ['*'-'/'] | 'c';"),
+            Vec::new(),
+            "one operand keeps its place to itself"
+        );
+        assert_eq!(
+            lints("lexer C -> '*' | '?' | '+';"),
+            Vec::new(),
+            "three operands that read no word are still three operands"
+        );
+
+        // A word the author did offer and lost to another alternative is a
+        // different matter, whatever the size of the alternative: one of the
+        // two is left named by nothing but where it was written, and only the
+        // whole choice can see that it was meant to have a name.
+        assert_eq!(
+            lints("lexer A -> 'x'; lexer C -> A | A;"),
+            [LintKind::UnnamedAlternative],
+            "the second of two alternatives reaching one rule has no name left"
+        );
+
+        // One report per such alternative, not one per choice.
+        assert_eq!(
+            lints("lexer C -> ['*'-'/'] '!' | ['0'-'9'] '?';"),
             [LintKind::UnnamedAlternative, LintKind::UnnamedAlternative]
         );
     }
 
     #[test]
-    fn the_nameless_parts_of_the_spec_are_pinned() {
-        // One report for one statement — a part of the tree with no name —
-        // reached from two places, and the count of both is pinned together so
-        // that a new nameless part shows up here rather than only as an `F7` in
-        // the code a build writes.
-        //
-        // Seven of these are the choices written inside groups, each told at
-        // the choice; eighteen are alternatives of a root choice that offer
-        // neither a rule nor a word, each told at the alternative — six of
-        // `AsciiEscape`, three each of `BlockComment`, `ExprWithoutSuffix` and
-        // `Suffix`, two of `RepeatBound`, one of `ExprWithSuffix`.
-        //
-        // What is not among them is `Range`, whose second variant the generator
-        // does call `F2`: both of its alternatives offer the word `concat`, and
-        // it is the second of two that wanted the same name that loses it. That
-        // is a short of the naming scheme, not of the file, and telling the
-        // author to fix it would be telling them to fix what they wrote well.
-        let unnamed = report(include_str!("../../unsyn.us"))
-            .lints
-            .iter()
-            .filter(|lint| lint.kind == LintKind::UnnamedAlternative)
-            .count();
-
-        assert_eq!(unnamed, 25, "the parts of unsyn.us that name no node");
+    fn the_spec_names_every_part_it_writes() {
+        // The spec is the file this pass is judged on, and the one whose every
+        // rule was written on purpose. A lint against it is therefore a fault
+        // of the file and not of the pass: either a choice left inside a group
+        // of a node, which becomes no node of the tree, or an alternative of
+        // parts left with no word to be called its variant, which becomes an
+        // `F7` in the code a build writes. A file that describes a language
+        // should not leave either of those about itself, and this is the gate
+        // that keeps it so: every rule that answers one is named.
+        assert_eq!(
+            lints(include_str!("../../unsyn.us")),
+            Vec::new(),
+            "the spec names the whole of its own tree"
+        );
     }
 
     #[test]
@@ -1572,11 +1650,32 @@ lexer B -> A | '/*' A;
             [LintKind::UnnamedAlternative, LintKind::UnnamedAlternative]
         );
 
-        // The level of the rule says nothing about the judgment: what a lexer
-        // writes inside its groups is as unnamed as what a node writes.
+        // A `lexer` rule is not asked, because the code it is written as keeps
+        // no node there: a group inside a terminal is read as the one run of
+        // text its alternatives made, which is what a string literal's body and
+        // a block comment's are in the tree. Naming the group would make a rule
+        // of it, and a rule is a node — so the name the warning would ask for is
+        // a name that turns one token into a list of them, which is not what a
+        // terminal is for.
         assert_eq!(
             lints("lexer A -> 'x' ( 'a' | 'b' )* ;"),
-            [LintKind::UnnamedAlternative]
+            Vec::new(),
+            "a group inside a terminal becomes no node, so it owes no name"
+        );
+
+        // A `lexer` rule is still asked about the alternatives of its whole
+        // right side, which do become the variants of an enum.
+        assert_eq!(
+            lints("lexer A -> ['*'-'/'] '!' | ['0'-'9'] '?';"),
+            [LintKind::UnnamedAlternative, LintKind::UnnamedAlternative],
+            "two variants of parts that read no word are told twice"
+        );
+
+        // A word anywhere in the sequence is enough, however wide it is: the
+        // variant then says which form it is, and no name was owed.
+        assert_eq!(
+            lints("lexer A -> ['*'-'/'] 'x' | ['0'-'9'] 'y';"),
+            Vec::new()
         );
     }
 

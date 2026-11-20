@@ -54,13 +54,17 @@ lexer LitStr ->
 lexer QuoteEscape -> '\\\'';
 
 lexer AsciiEscape ->
-      '\\x' OctDigit HexDigit
+      AsciiHexEscape
     | '\\n'
     | '\\r'
     | '\\t'
     | '\\\\'
     | '\\0'
     ;
+
+/// The escape of a code of seven bits, spelled by the two hex digits after
+/// its marker.
+lexer AsciiHexEscape -> '\\x' OctDigit HexDigit;
 
 lexer UnicodeEscape ->
     '\\u{' HexDigit{1, 6} '}'
@@ -75,12 +79,23 @@ lexer LitDec -> DecDigit ( DecDigit | '_' )*;
 lexer LitUnicode -> 'U+' concat HexDigit{4};
 
 lexer BlockComment ->
-      '/*'
-        ( ~['*','!','/*'] | '**' | BlockCommentOrDoc )
-        ( BlockCommentOrDoc | ~['/*','*/'] )*
-      '*/'
+      BlockCommentBody
     | '/**/'
     | '/***/'
+    ;
+
+/// A block comment that holds something: what it opens with, the one run that
+/// cannot begin its end, then as many nested comments and further runs as it
+/// takes, and the end itself.
+///
+/// The rule is a definition of its own because it is the one form of a comment
+/// written of more than one operand; the two beside it are empty, and read as
+/// the two words they are.
+lexer BlockCommentBody ->
+    '/*'
+      ( ~['*','!','/*'] | '**' | BlockCommentOrDoc )
+      ( BlockCommentOrDoc | ~['/*','*/'] )*
+    '*/'
     ;
 
 lexer InnerLineDoc -> '//!' ~[LF,CR]*;
@@ -118,14 +133,34 @@ syntax ExprNoTopAlt -> ExprWithSuffix | ExprWithoutSuffix;
 syntax Set -> '[' ( SetItem ',' )* SetItem? ']';
 
 syntax ExprWithoutSuffix ->
-      '~' Set
-    | '<' Ident '>'
-    | '(' Expr ')'
+      NegatedSet
+    | Call
+    | Paren
     | Set
     | LitStr
     | LitUnicode
     | Ident
     ;
+
+/// The characters a set does not denote, which is how a pattern asks for one
+/// character by refusing every other.
+/// 
+/// A rule of its own because the refusal is a node of the tree: the operand
+/// the reader picks out of it is the set, and the `~` that says so stands
+/// beside it. Called a negated set rather than a complement because what it
+/// denotes is a set of characters by another spelling and nothing more.
+syntax NegatedSet -> '~' Set;
+
+/// An external the caller of the parser binds, named between `<` and `>`.
+/// 
+/// The name here is not a rule of the file, and so names no definition; the
+/// node it reads is the caller's, and this rule holds the pair of brackets
+/// and the name between them.
+syntax Call -> '<' Ident '>';
+
+/// An expression grouped so that it may stand as one operand, take a suffix
+/// as one, or be joined to another as one.
+syntax Paren -> '(' Expr ')';
 
 /// How many times an operand is read: as many as please, at most once, at
 /// least once, or a bounded number of times.
@@ -137,26 +172,50 @@ syntax Suffix ->
     ;
 
 syntax ExprWithSuffix ->
-      ExprWithoutSuffix Suffix
+      Suffixed
     | ExprWithoutSuffix 'concat' ExprNoTopAlt
     | ExprWithoutSuffix 'followed' ExprNoTopAlt
     | ExprWithoutSuffix 'except' ExprWithoutSuffix
     ;
 
+/// An operand with one of the quantity operators written after it.
+/// 
+/// The three keywords beside it join, look past or take away, and each says
+/// which by the word it reads. This one reads no word, only the operator
+/// written as a mark, so it is the rule that has to say what it is.
+syntax Suffixed -> ExprWithoutSuffix Suffix;
+
 /// The bounds a repetition is written with, which the reader of a pattern has
 /// to tell apart: a number above, a number below, or a number of times.
 syntax RepeatBound ->
-      ',' LitDec
-    | LitDec ',' LitDec?
+      RangeTo
+    | RangeFrom
     | LitDec
     ;
+
+/// `,n`: a bound above, over a bound below that was left off.
+syntax RangeTo -> ',' LitDec;
+
+/// `n,m` or `n,`: a bound below, and the bound above it where one was written.
+syntax RangeFrom -> LitDec ',' LitDec?;
 
 syntax Repeat -> '{' RepeatBound '}';
 
 syntax Range ->
-      LitUnicode concat '-' concat LitUnicode
-    | LitStr concat '-' concat LitStr
+      UnicodeRange
+    | StrRange
     ;
+
+/// A range whose two ends are both written as code points.
+/// 
+/// The two forms of a range reach for the same word, `concat`, so one of them
+/// would be left named by its place alone; naming both says which end of a
+/// range each was written from.
+syntax UnicodeRange -> LitUnicode concat '-' concat LitUnicode;
+
+/// A range whose two ends are both written as characters.
+syntax StrRange -> LitStr concat '-' concat LitStr;
+
 
 syntax SetItem ->
       Range

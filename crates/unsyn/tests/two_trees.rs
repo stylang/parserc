@@ -14,15 +14,24 @@
 //! text on either side, and the comparison of two spans needs no
 //! normalization at all.
 //!
-//! There is no third thing the two trees settle differently. The hand tree
-//! once kept parts — the digits of a number, the escapes of a string, the
-//! nesting of a block comment — where the generated code reads one token of
-//! text, and every one of those has now been given up, because no rule of the
-//! language names them and no pass asks them. What is left is the two trees
-//! saying the same rules over the same text, with nothing done to either
-//! sequence on the way to the comparison — which is what the passes that come
-//! after the parser need of either tree, and what the next step of the
-//! bootstrap builds on.
+//! There is no third thing the two trees settle differently *in what they
+//! record*. The hand tree once kept parts — the digits of a number, the
+//! escapes of a string, the nesting of a block comment — where the generated
+//! code reads one token of text, and every one of those has now been given up,
+//! because no rule of the language names them and no pass asks them.
+//!
+//! What the two trees do settle differently is named, and counted, by
+//! [`the_parity_reaches_every_rule_of_either_tree`]. The spec now gives ten
+//! parts of a pattern a left side of their own — `NegatedSet`, `Call`, `Paren`,
+//! `Suffixed`, `RangeTo`, `RangeFrom`, `UnicodeRange`, `StrRange`,
+//! `AsciiHexEscape` and `BlockCommentBody` — so the generated tree has a node,
+//! and so a visitor hook, where the hand tree still writes the same shape
+//! inline as the fields of a variant. The recorder below can only compare what
+//! it is told to record, and the generated half of the table has no hand hook
+//! to answer it yet; those ten are left out of the comparison and pinned by
+//! that test so that the gap is a number in the file rather than a silence in
+//! the result. Closing it is a matter of giving the hand tree the ten rules as
+//! rules, which is the step this test will then stop needing.
 
 use parserc::Span;
 
@@ -45,10 +54,15 @@ macro_rules! recorder {
         $name:ident: $visit:path, $bound:path, $skip:path, $swalk:path,
         [ $(fn $hook:ident: $ty:path => $step:path),* $(,)? ]
     ) => {
-        $(#[$meta])*
-        #[derive(Default)]
+        $(#[$meta])*#[derive(Default)]
         struct $name {
             events: Vec<Event>,
+        }
+
+        impl $name {
+            /// The hooks this recorder records, which is the whole of what the
+            /// parity it reaches covers.
+            const HOOKS: &'static [&'static str] = &[$(stringify!($hook)),*];
         }
 
         impl<'ast, I> $visit for $name
@@ -346,4 +360,91 @@ fn a_name_written_raw_is_two_parts_in_both_trees() {
     );
 
     assert_one_sequence(&generated, &hand, source);
+}
+
+/// The rules the two trees settle differently, in the one thing the parity
+/// above can see: which hooks its recorders reach.
+///
+/// A recorder compares only what it is told to record, so a node the generated
+/// half does not record is a node the comparison says nothing about — and the
+/// silence would read as agreement. This names the silence.
+///
+/// Ten of these are the parts of a pattern the spec gave a left side of their
+/// own, so that the generated tree holds each as a node while the hand tree
+/// still writes the same shape as the fields of a variant. Two are deliberate:
+/// the text a walk ends with, which is the leaf and names no rule, and the
+/// trivia `S`, which both trees walk and neither records.
+///
+/// When the hand tree is given the ten as rules, the last quarter of this test
+/// is what says so, and the hooks belong in the table beside the parity.
+#[test]
+fn the_parity_reaches_every_rule_of_either_tree() {
+    let kept = std::fs::read_to_string(concat!(
+        env!("CARGO_MANIFEST_DIR"),
+        "/tests/generated/unsyn_us.rs"
+    ))
+    .expect("the kept file should be readable");
+
+    let file = syn::parse_str::<syn::File>(&kept).expect("the kept file is Rust");
+
+    // Every hook the visitor the generated file ships declares.
+    let trait_hooks = file
+        .items
+        .iter()
+        .find_map(|item| match item {
+            syn::Item::Trait(each) if each.ident == "Visit" => Some(each),
+            _ => None,
+        })
+        .expect("the generated file ships a Visit trait")
+        .items
+        .iter()
+        .filter_map(|entry| match entry {
+            syn::TraitItem::Fn(each) => Some(each.sig.ident.to_string()),
+            _ => None,
+        })
+        .collect::<Vec<_>>();
+
+    let unrecorded = trait_hooks
+        .iter()
+        .filter(|hook| !Generated::HOOKS.contains(&hook.as_str()))
+        .collect::<Vec<_>>();
+
+    let expected = [
+        "visit_text",
+        "visit_s",
+        "visit_negated_set",
+        "visit_call",
+        "visit_paren",
+        "visit_suffixed",
+        "visit_range_to",
+        "visit_range_from",
+        "visit_unicode_range",
+        "visit_str_range",
+        "visit_ascii_hex_escape",
+        "visit_block_comment_body",
+    ];
+
+    for hook in expected {
+        assert!(
+            unrecorded.contains(&&hook.to_owned()),
+            "{} should be a hook the parity does not reach: {unrecorded:?}",
+            hook
+        );
+    }
+
+    assert_eq!(
+        unrecorded.len(),
+        expected.len(),
+        "the parity leaves a rule out that this test does not name: {unrecorded:?}"
+    );
+
+    // None of the ten is a hook the hand tree has and the table leaves out,
+    // which would be a plain fault of the table rather than a difference
+    // between the trees.
+    for hook in expected {
+        assert!(
+            !Hand::HOOKS.contains(&hook),
+            "the hand tree reaches {hook}, so the parity should compare it"
+        );
+    }
 }

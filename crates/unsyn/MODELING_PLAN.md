@@ -380,6 +380,43 @@
         那三个自造名 enum；手写侧只需把四个类型改成同形的
         enum/多字段 tuple，加上 `took_text` 一类“读节点取它的文本”的辅助，
         并改掉 `walk_block_comment` 等四处下钻。
+    - [x] **M8.2b-9 spec 零 lint + lint 判据收窄**：本轮把 `unsyn.us` 做到
+          `UnnamedAlternative` 归零，并落成新测试
+          `semantic::tests::the_spec_names_every_part_it_writes`。
+        - 判据收窄两处，都由生成器实际行为反推，不是为了让 spec 过关：
+          1. 根层候选只有「多子表达式且无词」才报（单子操作候选如 `'*'`、
+             `'\n'`、集合，其 variant 内部无结构，位置即全部信息）；
+             但「给了词却被别的候选抢走」（重名冲突）不论大小都报 —— 为此
+             拆出 `codegen::variant_offers`（作者写了什么）与
+             `variant_names`（最终穿了什么）。
+          2. `lexer` 规则内部的嵌套 group 不报：实测生成器把 lexer 规则里的
+             group 折叠成一个 `I` 文本字段（`text_of`），根本不产生节点，
+             所以那里没有东西欠名字。把这条加门之前我先按 A 方案提了 15 条
+             规则，结果 `two_trees` 三条红 —— 因为「给 lexer 子式起名」会把
+             一个 token 变成节点列表，这正是 token 不该有的形状。已回退。
+        - 最终只新增 10 条具名规则（8 条 syntax + 2 条 lexer 的 root-or 多段
+          候选：`AsciiHexEscape`、`BlockCommentBody`），spec 从 40 条到 50 条，
+          lint 从 26 到 0。rules 计数：1 whitespace / 26 lexer / 23 syntax。
+        - 顺带修 codegen 真 bug：`atom_field`（序列字段）以前直接写 `#ty<I>`
+          而不走 `reference_type`，于是不 boxed 的自引用字段会让
+          `Suffixed -> ExprWithoutSuffix Suffix`、`Paren -> '(' Expr ')'`
+          生成 infinite-size 类型。现走同一入口；`Vec` 内不需要 box，
+          `Option` 内需要（宽度同内容）。
+        - 新增 `codegen::written_name`：访客从写出的 token 回读名字时，
+          `r#` 拼写必须用 `Ident::new_raw`，否则 `Ident::new("r#gen")` panic。
+    - [ ] **M8.2b-10 two_trees 的比较有洞（本轮发现，未修）**：`recorder!` 只
+          实现表里列出的 hook，没列的走生成 trait 的 default（下钻但不记录）。
+          spec 新命名的 10 个规则在生成侧各有一个 hook，手写侧没有对应类型，
+          所以它们被静默跳过 —— `two_trees` 全绿并不证明这 10 处同形。
+          已把洞钉住：`Generated`/`Hand` 各自导出 `HOOKS`，新测试
+          `the_parity_reaches_every_rule_of_either_tree` 从 kept 文件的 `Visit`
+          trait 反读全部 hook，断言未记录的恰是 10 个命名规则 + `visit_text`
+          + `visit_s`，并且断言手写侧一个都没有（手写侧一旦补上，这个测试就
+          会要求把它们加进比较表）。修法是 b-8/b-10 一起做：手写侧补这 10 个
+          类型（`NegatedSet`/`Call`/`Paren`/`Suffixed`/`RangeTo`/`RangeFrom`/
+          `UnicodeRange`/`StrRange`/`AsciiHexEscape`/`BlockCommentBody`），
+          并把 `ExprWithoutSuffix::Tilde/Call/Paren`、`ExprWithSuffix::Grouped`、
+          `RepeatBound::*`、`Range::*` 的内联字段改成对这些类型的引用。
 - [ ] **M8.2c codegen 去类型化**：`Builder::new` 改收类型无关的视图
   （definitions / branches / operands / atoms / quantity / bound / value /
   text / span），52 个函数签名重指向；删 `ty_shape` 的字符串回转，改为在

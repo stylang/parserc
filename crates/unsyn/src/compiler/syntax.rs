@@ -1189,10 +1189,10 @@ mod tests {
             })
             .collect::<Vec<_>>();
 
-        // One `whitespace`, twenty-four `lexer` and fifteen `syntax` rules.
-        assert_eq!(statements.len(), 40);
-        assert_eq!(statements.iter().filter(|k| *k == "lexer").count(), 24);
-        assert_eq!(statements.iter().filter(|k| *k == "syntax").count(), 15);
+        // One `whitespace`, twenty-six `lexer` and twenty-three `syntax` rules.
+        assert_eq!(statements.len(), 50);
+        assert_eq!(statements.iter().filter(|k| *k == "lexer").count(), 26);
+        assert_eq!(statements.iter().filter(|k| *k == "syntax").count(), 23);
         assert_eq!(statements.iter().filter(|k| *k == "whitespace").count(), 1);
 
         // Every one of them is named, which is what says that a rule of the spec
@@ -1206,7 +1206,7 @@ mod tests {
             })
             .collect::<Vec<_>>();
 
-        assert_eq!(names.len(), 40, "a definition without a name");
+        assert_eq!(names.len(), 50, "a definition without a name");
         for name in [
             "S",
             "IdentOrKeyword",
