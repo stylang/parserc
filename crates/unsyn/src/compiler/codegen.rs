@@ -818,37 +818,62 @@ fn one_char(chars: Vec<char>) -> Option<char> {
     }
 }
 
-/// The test of a character that a class of these arms is.
-fn pred_body(arms: &[Arm]) -> TokenStream {
-    if arms.is_empty() {
-        // A class of nothing, which no character passes, and which a `matches!` of
-        // no arms cannot even be written as.
-        return quote! { false };
-    }
+/// The test a class of characters is written as: the name of its parameter,
+/// and the body that decides it.
+///
+/// `accepts` says which of the two tests is being written — whether the class
+/// itself is what a character must fit, or the characters it refuses. A class
+/// of nothing passes nothing, and a refusal of nothing passes everything: the
+/// two answers are opposite, and that is the whole reason they are settled
+/// here once rather than at each place a class is read.
+///
+/// Whether a class of nothing can reach a build at all is the analyzer's
+/// decision, not this one: `[]` and `~[]` both earn
+/// [`EmptySet`](super::errors::SemanticsKind::EmptySet), which is fatal. The
+/// answer is written for the case nonetheless, so that a file which ever got
+/// past that gate without the refusal would still be given a test that means
+/// what the class means, and not a `matches!` of no arms, which is not Rust.
+fn char_test(arms: &[Arm], accepts: bool) -> (TokenStream, TokenStream) {
+    // The two are asked at once because they are one decision: a body that
+    // never reads the character wants a name it will not use, and an ignored
+    // name is a warning in the file a build writes.
+    let (param, body) = if arms.is_empty() {
+        let nothing = if accepts {
+            quote! { false }
+        } else {
+            quote! { true }
+        };
 
-    let arms = arms.iter().copied().map(Arm::to_pattern);
-    quote! { matches!(c, #(#arms)|*) }
+        (quote! { _c }, nothing)
+    } else {
+        let patterns = arms.iter().copied().map(Arm::to_pattern);
+        let class = quote! { matches!(c, #(#patterns)|*) };
+
+        let body = if accepts {
+            class
+        } else {
+            quote! { !(#class) }
+        };
+
+        (quote! { c }, body)
+    };
+
+    (param, body)
 }
 
 /// The closure a repetition of a class of these arms asks its items to fit.
 fn class_pred(arms: &[Arm]) -> TokenStream {
-    let body = pred_body(arms);
+    let (param, body) = char_test(arms, true);
 
-    match arms.is_empty() {
-        true => quote! { |_c: char| false },
-        false => quote! { |c: char| #body },
-    }
+    quote! { |#param: char| #body }
 }
 
-/// The closure a repetition of what a class of these arms refuses asks its items
-/// to fit.
+/// The closure a repetition of what a class of these arms refuses asks its
+/// items to fit.
 fn refused_pred(arms: &[Arm]) -> TokenStream {
-    let body = pred_body(arms);
+    let (param, body) = char_test(arms, false);
 
-    match arms.is_empty() {
-        true => quote! { |_c: char| true },
-        false => quote! { |c: char| !(#body) },
-    }
+    quote! { |#param: char| #body }
 }
 
 // ---------------------------------------------------------------------------
@@ -1148,12 +1173,7 @@ where
         })?;
 
         let pred = self.unique(format!("is_{}", to_snake_case(text)));
-        let body = pred_body(&arms);
-        let arg = if arms.is_empty() {
-            quote! { _c }
-        } else {
-            quote! { c }
-        };
+        let (arg, body) = char_test(&arms, true);
 
         self.helpers.push(quote! {
             #[inline]
@@ -3843,6 +3863,43 @@ mod tests {
                     I: ::parserc::chars::CharsInput;
             }
         ));
+    }
+
+    #[test]
+    fn a_class_of_nothing_is_answered_once_and_opposite_ways() {
+        // The analyzer refuses a class of nothing before any code is written, so
+        // these are the one place the answer lives — and the two answers must
+        // not be the same, which is the ease in which they would be mixed up
+        // if each caller settled it for itself.
+        assert_eq!(
+            class_pred(&[]).to_string().replace(' ', ""),
+            "|_c:char|false"
+        );
+        assert_eq!(
+            refused_pred(&[]).to_string().replace(' ', ""),
+            "|_c:char|true"
+        );
+
+        // A class of one arm reads the character, and its refusal is the same
+        // test with the answer turned over — not a different one.
+        let one = [Arm::Char('a')];
+
+        assert_eq!(
+            class_pred(&one).to_string().replace(' ', ""),
+            "|c:char|matches!(c,'a')"
+        );
+        assert_eq!(
+            refused_pred(&one).to_string().replace(' ', ""),
+            "|c:char|!(matches!(c,'a'))"
+        );
+
+        // A range of arms is joined by `|`, and the parameter is read, not
+        // ignored, as soon as there is anything to compare.
+        let two = [Arm::Char('a'), Arm::Range('0', '9')];
+        assert_eq!(
+            class_pred(&two).to_string().replace(' ', ""),
+            "|c:char|matches!(c,'a'|'0'..='9')"
+        );
     }
 
     #[test]
