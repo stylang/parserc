@@ -108,12 +108,6 @@
 //! [`lexer`] is written by hand and is tuned where a generated file
 //! is merely correct. The differences that remain are deliberate:
 //!
-//! - [`BlockCommentOrDoc`](super::lexer::BlockCommentOrDoc) is an enum of the three
-//!   rules it names, where the generator writes it as the text it read: the hand-
-//!   written rule reaches it from among the alternatives of `BlockComment`, where
-//!   the two sides of a `.or()` have to answer with one type — and the generator
-//!   lets that question decide, while the hand file answers it by naming the
-//!   node anyway.
 //! - The hand file gives the parts of a rule names that say what they hold —
 //!   `open`, `head`, `tail` — where the generator has only the file to go by and
 //!   says `f1`, `f2`, and the rule's own name. A group of a right side that the

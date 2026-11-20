@@ -856,24 +856,12 @@ impl<I: UnsynInput> InnerLineDoc<I> {
     }
 }
 
-/// The body of an [`OuterLineDoc`]: the one character its group asks for first
-/// and the run that follows it, named by the hand tree for the group the spec
-/// leaves unnamed.
-#[derive(Debug, PartialEq, Eq, PartialOrd, Ord, Clone, Syntax)]
-#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
-pub struct LineDocBody<I>
-where
-    I: UnsynInput,
-{
-    /// The `~['/']`: one character that is no slash.
-    #[parserc(parser = next_if(|c: char| c != '/'))]
-    pub first: I,
-    /// The `~[LF,CR]*` after it, taken in one piece as the inner document's is.
-    #[parserc(take_while = stays_on_the_line)]
-    pub rest: I,
-}
-
 /// A line document that describes the definition after it.
+///
+/// The body is one run of text, as the generated code reads it: the rule asks
+/// for it at most once, and what it holds is a character that is no slash
+/// followed by the rest of the line — a run the tree keeps whole, because a
+/// document is trivia and nothing asks it for its pieces.
 #[derive(Debug, PartialEq, Eq, PartialOrd, Ord, Clone, Syntax)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct OuterLineDoc<I>
@@ -883,10 +871,34 @@ where
     /// The `///` that opens the document.
     #[parserc(keyword = "///", map_err = SyntaxKind::OuterLineDoc.map())]
     pub open: I,
-    /// The body, optional as the rule writes it: the fourth `/` is refused by
-    /// `~['/']`, which leaves the option unfilled, and what stands after the
-    /// document is for the file to say.
-    pub body: Option<LineDocBody<I>>,
+    /// The body, empty when the rule's one optional group is not filled: the
+    /// fourth `/` is refused by what the group asks first, which leaves the
+    /// body unfilled, and what stands after the document is for the file to
+    /// say.
+    #[parserc(parser = read_outer_line_doc_body)]
+    pub body: I,
+}
+
+/// Reads the one optional group of [`OuterLineDoc`] as a run of text.
+///
+/// The group is optional as a whole, so a body that does not begin is no error
+/// and the run it would have made is empty.
+fn read_outer_line_doc_body<I>(input: &mut I) -> Result<I, <I as Input>::Error>
+where
+    I: UnsynInput,
+{
+    let mut whole = input.clone();
+    let before = input.len();
+
+    let body = |input: &mut I| {
+        next_if(|c: char| c != '/').parse(input)?;
+        take_while(stays_on_the_line).parse(input)?;
+        Ok(())
+    };
+
+    _ = body.ok().parse(input)?;
+
+    Ok(whole.split_to(before - input.len()))
 }
 
 impl<I: UnsynInput> OuterLineDoc<I> {
@@ -895,10 +907,7 @@ impl<I: UnsynInput> OuterLineDoc<I> {
     pub fn text(&self) -> String {
         let mut text = String::from(self.open.as_str());
 
-        if let Some(body) = &self.body {
-            text.push_str(body.first.as_str());
-            text.push_str(body.rest.as_str());
-        }
+        text.push_str(self.body.as_str());
 
         text
     }
@@ -974,251 +983,214 @@ where
     plain_refusing(input, &[], &["/*", "*/"])
 }
 
-/// The `( ~['*','!','/*'] | '**' | BlockCommentOrDoc )` that opens the body of a
-/// [`BlockComment`].
+/// The whole of a block comment: the body form, or one of the two closed forms.
 ///
-/// The group names no rule of the spec, which is what the analyzer's
-/// [`UnnamedAlternative`](super::errors::LintKind::UnnamedAlternative) lint says
-/// of a file that writes one; the hand tree names it here.
-#[derive(Debug, PartialEq, Eq, PartialOrd, Ord, Clone, Syntax)]
-#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
-pub enum BlockCommentHead<I>
+/// The alternatives come in the order the spec writes them. `/***/` is still
+/// read whole, because the body form takes `/*`, the two stars of its head and
+/// the closing that follows them, which is five characters — so the shorter
+/// closed form never wins the text the longer one means.
+fn read_block_comment<I>(input: &mut I) -> Result<I, <I as Input>::Error>
 where
     I: UnsynInput,
 {
-    /// One character of the text of the body.
-    Plain(#[parserc(parser = head_plain)] I),
-    /// `'**'`, which is the empty comment's second star and the nesting
-    /// document's, taken as text of the comment because neither of the two
-    /// other arms of the group can begin with a `*`.
-    StarStar(#[parserc(keyword = "**", map_err = SyntaxKind::BlockComment.map())] I),
-    /// A group nested here, which needs a closing of its own.
-    Nested(Box<BlockCommentOrDoc<I>>),
+    read_block_comment_body
+        .or(keyword("/**/").map_err(SyntaxKind::BlockComment.map()))
+        .or(keyword("/***/").map_err(SyntaxKind::BlockComment.map()))
+        .parse(input)
 }
 
-/// The `( ~['*','/*'] | BlockCommentOrDoc )` that opens the body of an
-/// [`OuterBlockDoc`], named by the hand tree as the comment's head is.
-#[derive(Debug, PartialEq, Eq, PartialOrd, Ord, Clone, Syntax)]
-#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
-pub enum OuterBlockDocHead<I>
+/// Reads the first alternative of [`BlockComment`]: the opening, the head, the
+/// body and the closing of one comment.
+fn read_block_comment_body<I>(input: &mut I) -> Result<I, <I as Input>::Error>
 where
     I: UnsynInput,
 {
-    /// One character of the text of the body.
-    Plain(#[parserc(parser = outer_head_plain)] I),
-    /// A group nested here.
-    Nested(Box<BlockCommentOrDoc<I>>),
+    let mut whole = input.clone();
+    let before = input.len();
+
+    keyword("/*")
+        .parse(input)
+        .map_err(SyntaxKind::BlockComment.map())?;
+
+    // The head: one character that is no star, no bang and opens no group; the
+    // two stars of a comment that closes at once; or a group of its own.
+    head_plain
+        .or(keyword("**").map_err(SyntaxKind::BlockComment.map()))
+        .or(<BlockCommentOrDoc<I>>::into_parser().map(|node| node.0))
+        .parse(input)?;
+
+    // The body, until the group that closes here arrives.
+    loop {
+        let part = <BlockCommentOrDoc<I>>::into_parser()
+            .map(|node| node.0)
+            .or(tail_plain)
+            .ok()
+            .parse(input)?;
+
+        if part.is_none() {
+            break;
+        }
+    }
+
+    keyword("*/")
+        .parse(input)
+        .map_err(SyntaxKind::BlockComment.map())?;
+
+    Ok(whole.split_to(before - input.len()))
 }
 
-/// The `( BlockCommentOrDoc | ~['/*','*/'] )` that fills the body of all three
-/// block rules, named once for the three because the three write it the same.
-#[derive(Debug, PartialEq, Eq, PartialOrd, Ord, Clone, Syntax)]
-#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
-pub enum BlockCommentTail<I>
+/// Reads [`InnerBlockDoc`]: its opening, a body of groups and text, and the
+/// closing of its own.
+fn read_inner_block_doc<I>(input: &mut I) -> Result<I, <I as Input>::Error>
 where
     I: UnsynInput,
 {
-    /// A group nested here.
-    Nested(Box<BlockCommentOrDoc<I>>),
-    /// One character of the text of the body.
-    Plain(#[parserc(parser = tail_plain)] I),
-}
+    let mut whole = input.clone();
+    let before = input.len();
 
-impl<I: UnsynInput> BlockCommentHead<I> {
-    /// The text the head read.
-    pub fn text(&self) -> String {
-        match self {
-            BlockCommentHead::Plain(text) => text.as_str().to_owned(),
-            BlockCommentHead::StarStar(text) => text.as_str().to_owned(),
-            BlockCommentHead::Nested(group) => group.text(),
+    keyword("/*!")
+        .parse(input)
+        .map_err(SyntaxKind::InnerBlockDoc.map())?;
+
+    loop {
+        let part = <BlockCommentOrDoc<I>>::into_parser()
+            .map(|node| node.0)
+            .or(tail_plain)
+            .ok()
+            .parse(input)?;
+
+        if part.is_none() {
+            break;
         }
     }
+
+    keyword("*/")
+        .parse(input)
+        .map_err(SyntaxKind::InnerBlockDoc.map())?;
+
+    Ok(whole.split_to(before - input.len()))
 }
 
-impl<I: UnsynInput> OuterBlockDocHead<I> {
-    /// The text the head read.
-    pub fn text(&self) -> String {
-        match self {
-            OuterBlockDocHead::Plain(text) => text.as_str().to_owned(),
-            OuterBlockDocHead::Nested(group) => group.text(),
+/// Reads [`OuterBlockDoc`]: its opening of three, the head that is never a third
+/// star, the body, and the closing.
+fn read_outer_block_doc<I>(input: &mut I) -> Result<I, <I as Input>::Error>
+where
+    I: UnsynInput,
+{
+    let mut whole = input.clone();
+    let before = input.len();
+
+    keyword("/**")
+        .parse(input)
+        .map_err(SyntaxKind::OuterBlockDoc.map())?;
+
+    outer_head_plain
+        .or(<BlockCommentOrDoc<I>>::into_parser().map(|node| node.0))
+        .parse(input)?;
+
+    loop {
+        let part = <BlockCommentOrDoc<I>>::into_parser()
+            .map(|node| node.0)
+            .or(tail_plain)
+            .ok()
+            .parse(input)?;
+
+        if part.is_none() {
+            break;
         }
     }
+
+    keyword("*/")
+        .parse(input)
+        .map_err(SyntaxKind::OuterBlockDoc.map())?;
+
+    Ok(whole.split_to(before - input.len()))
 }
 
-impl<I: UnsynInput> BlockCommentTail<I> {
-    /// The text the part of the body read.
-    pub fn text(&self) -> String {
-        match self {
-            BlockCommentTail::Nested(group) => group.text(),
-            BlockCommentTail::Plain(text) => text.as_str().to_owned(),
-        }
-    }
+/// Reads [`BlockCommentOrDoc`], the one rule that nests.
+///
+/// The order is the order of the spec, and it matters only for `/***`, where a
+/// comment and an outer document both begin with the three characters and the
+/// fourth decides: the comment is read first, and the text an outer document
+/// would have taken is refused, so the choice settles on the comment.
+fn read_block_comment_or_doc<I>(input: &mut I) -> Result<I, <I as Input>::Error>
+where
+    I: UnsynInput,
+{
+    <BlockComment<I>>::into_parser()
+        .map(|node| node.0)
+        .or(<OuterBlockDoc<I>>::into_parser().map(|node| node.0))
+        .or(<InnerBlockDoc<I>>::into_parser().map(|node| node.0))
+        .parse(input)
 }
 
 /// A block comment, which nests and is closed by the `*/` of its own opening.
 ///
-/// The alternatives are tried in the order they are written, and the two closed
-/// forms come in the order the reading needs rather than the order the spec
-/// writes them: `/***/` opens as the body of two stars that never finds a
-/// closing, so the five-character form has to be answered before the four of
-/// `/**/`, which is its own head. The three write the same text at the front,
-/// and the longest reading is the one that was meant.
+/// The comment is one token of text, as the generated code reads it: what a
+/// pass asks of a comment is nothing at all — it is trivia — and the parts the
+/// hand tree used to keep were only how the reading found the closing that
+/// belongs to this opening.
 #[derive(Debug, PartialEq, Eq, PartialOrd, Ord, Clone, Syntax)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
-#[parserc(map_err = SyntaxKind::BlockComment.map())]
-pub enum BlockComment<I>
+pub struct BlockComment<I>(#[parserc(parser = read_block_comment)] pub I)
 where
-    I: UnsynInput,
-{
-    /// The whole of the rule's first alternative: the body, its head and its
-    /// closing, between the `/*` and the `*/`.
-    Group {
-        /// The `/*` that opens the comment.
-        #[parserc(keyword = "/*", map_err = SyntaxKind::BlockComment.map())]
-        open: I,
-        /// What opens the body, of one of the three shapes the rule writes.
-        head: BlockCommentHead<I>,
-        /// The body after its head, every part of it a nested group or one
-        /// character of text.
-        tail: Vec<BlockCommentTail<I>>,
-        /// The `*/` that closes the comment, which is asked for exactly where
-        /// the body ends and says itself what was missing there.
-        #[parserc(keyword = "*/", map_err = SyntaxKind::BlockComment.map())]
-        close: I,
-    },
-    /// `'/***/'`, which the rule writes third.
-    Star(#[parserc(keyword = "/***/", map_err = SyntaxKind::BlockComment.map())] I),
-    /// `'/**/'`, which the rule writes second.
-    Empty(#[parserc(keyword = "/**/", map_err = SyntaxKind::BlockComment.map())] I),
-}
-
-impl<I: UnsynInput> BlockComment<I> {
-    /// The text of the comment, as it was written.
-    pub fn text(&self) -> String {
-        match self {
-            BlockComment::Group {
-                open,
-                head,
-                tail,
-                close,
-            } => {
-                let mut text = String::from(open.as_str());
-
-                text.push_str(&head.text());
-
-                for part in tail {
-                    text.push_str(&part.text());
-                }
-
-                text.push_str(close.as_str());
-                text
-            }
-            BlockComment::Star(token) | BlockComment::Empty(token) => token.as_str().to_owned(),
-        }
-    }
-}
+    I: UnsynInput;
 
 /// A block document that describes the file it is written in.
 #[derive(Debug, PartialEq, Eq, PartialOrd, Ord, Clone, Syntax)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
-pub struct InnerBlockDoc<I>
+pub struct InnerBlockDoc<I>(#[parserc(parser = read_inner_block_doc)] pub I)
 where
-    I: UnsynInput,
-{
-    /// The `/*!` that opens the document.
-    #[parserc(keyword = "/*!", map_err = SyntaxKind::InnerBlockDoc.map())]
-    pub open: I,
-    /// The body: nested groups and text, until the closing arrives.
-    pub tail: Vec<BlockCommentTail<I>>,
-    /// The `*/` that closes the document.
-    #[parserc(keyword = "*/", map_err = SyntaxKind::InnerBlockDoc.map())]
-    pub close: I,
-}
-
-impl<I: UnsynInput> InnerBlockDoc<I> {
-    /// The text of the document, as it was written.
-    pub fn text(&self) -> String {
-        let mut text = String::from(self.open.as_str());
-
-        for part in &self.tail {
-            text.push_str(&part.text());
-        }
-
-        text.push_str(self.close.as_str());
-        text
-    }
-}
+    I: UnsynInput;
 
 /// A block document that describes the definition after it.
 ///
 /// The opening of three refuses what the head set keeps out of the body, which
 /// is what leaves `/**/` and `/***/` to the block comment: an opening of three
-/// is a comment that closes at once, and not an empty document. The same set is
-/// what keeps `/** a */` out of the comment, whose head can only open with a
-/// text that is no star, two stars, or a group of its own.
+/// is a comment that closes at once, and not an empty document.
 #[derive(Debug, PartialEq, Eq, PartialOrd, Ord, Clone, Syntax)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
-pub struct OuterBlockDoc<I>
+pub struct OuterBlockDoc<I>(#[parserc(parser = read_outer_block_doc)] pub I)
 where
-    I: UnsynInput,
-{
-    /// The `/**` that opens the document.
-    #[parserc(keyword = "/**", map_err = SyntaxKind::OuterBlockDoc.map())]
-    pub open: I,
-    /// What opens the body, which is never a third star.
-    pub head: OuterBlockDocHead<I>,
-    /// The body after its head.
-    pub tail: Vec<BlockCommentTail<I>>,
-    /// The `*/` that closes the document.
-    #[parserc(keyword = "*/", map_err = SyntaxKind::OuterBlockDoc.map())]
-    pub close: I,
+    I: UnsynInput;
+
+/// A block group, which is the one rule that nests: a comment may hold a
+/// document, and a document may hold a comment.
+#[derive(Debug, PartialEq, Eq, PartialOrd, Ord, Clone, Syntax)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+pub struct BlockCommentOrDoc<I>(#[parserc(parser = read_block_comment_or_doc)] pub I)
+where
+    I: UnsynInput;
+
+/// The text of a block group, as it was written.
+///
+/// The four forms answer for their text the same way, so this is what each
+/// `text` of the family is.
+impl<I: UnsynInput> BlockComment<I> {
+    /// The text of the comment, as it was written.
+    pub fn text(&self) -> String {
+        self.0.as_str().to_owned()
+    }
+}
+
+impl<I: UnsynInput> InnerBlockDoc<I> {
+    /// The text of the document, as it was written.
+    pub fn text(&self) -> String {
+        self.0.as_str().to_owned()
+    }
 }
 
 impl<I: UnsynInput> OuterBlockDoc<I> {
     /// The text of the document, as it was written.
     pub fn text(&self) -> String {
-        let mut text = String::from(self.open.as_str());
-
-        text.push_str(&self.head.text());
-
-        for part in &self.tail {
-            text.push_str(&part.text());
-        }
-
-        text.push_str(self.close.as_str());
-        text
+        self.0.as_str().to_owned()
     }
-}
-
-/// A block group, which is the one rule that nests: a comment may hold a
-/// document, and a document may hold a comment.
-///
-/// The order is the order of the spec. It matters only for `/***`, where a block
-/// comment and an outer document both begin with the `/`, `*`, `*` and the fourth
-/// character decides: the comment is read first, and refuses what an outer
-/// document would have taken, so the choice settles on the comment.
-#[derive(Debug, PartialEq, Eq, PartialOrd, Ord, Clone, Syntax)]
-#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
-pub enum BlockCommentOrDoc<I>
-where
-    I: UnsynInput,
-{
-    /// A `/*` group.
-    Block(BlockComment<I>),
-    /// A `/**` group.
-    Outer(OuterBlockDoc<I>),
-    /// A `/*!` group.
-    Inner(InnerBlockDoc<I>),
 }
 
 impl<I: UnsynInput> BlockCommentOrDoc<I> {
     /// The text of the group, as it was written.
     pub fn text(&self) -> String {
-        match self {
-            BlockCommentOrDoc::Block(comment) => comment.text(),
-            BlockCommentOrDoc::Outer(doc) => doc.text(),
-            BlockCommentOrDoc::Inner(doc) => doc.text(),
-        }
+        self.0.as_str().to_owned()
     }
 }
 
@@ -1355,6 +1327,13 @@ mod tests {
     }
 
     impl ToText for OuterBlockDoc<TokenStream<'_>> {
+        #[inline]
+        fn text(&self) -> String {
+            self.text()
+        }
+    }
+
+    impl ToText for BlockCommentOrDoc<TokenStream<'_>> {
         #[inline]
         fn text(&self) -> String {
             self.text()
@@ -1736,14 +1715,16 @@ mod tests {
     #[test]
     fn an_unterminated_group_is_answered_by_no_form_of_its_rule() {
         // The comment is a choice of three forms, and none of them is what the
-        // text turns out to hold: the refusal comes back as the choice that
-        // was never fulfilled, where the opening was read.
+        // text turns out to hold: the refusal is the longest form the rule
+        // could have been, which is what the generated reading of the same
+        // rule answers too — the two now report the same place, and differ
+        // only in that the hand file names what it expected.
         assert_eq!(
             parse::<BlockComment<_>>("/* a "),
             Err(UnsynError::Syntax(
                 SyntaxKind::BlockComment,
                 ControlFlow::Recovable,
-                Span::Range(0..1)
+                Span::Range(0..5)
             ))
         );
 
@@ -1774,5 +1755,35 @@ mod tests {
         }
 
         assert!(parse::<BlockCommentOrDoc<_>>("// a").is_err());
+    }
+
+    /// What the two document forms do with a group nested in them, pinned here
+    /// before the reading of a block group collapses into text: the tree will
+    /// not say these parts again, so this is where the language says what it
+    /// accepts.
+    #[test]
+    fn a_document_holds_the_group_it_nests_and_closes_once() {
+        for source in [
+            "/** outer /* nested */ doc */",
+            "/** two /* a */ /* b */ */",
+            "/*! inner /* x */ doc */",
+            "/*! inner /*! no */ */",
+            "/** a /* b /* c */ d */ e */",
+        ] {
+            assert_eq!(
+                parse::<BlockCommentOrDoc<_>>(source).map(|node| text(&node)),
+                Ok(source.to_string()),
+                "{source}"
+            );
+        }
+
+        // The opening of three stars is the comment's, and the document of the
+        // same opening never sees the fourth character.
+        assert_eq!(text(&parse::<BlockComment<_>>("/***/").unwrap()), "/***/");
+        assert!(parse::<OuterBlockDoc<_>>("/***/").is_err());
+
+        // A nested group that closes the outer one leaves nothing to close the
+        // rest with, so no form of the rule holds.
+        assert!(parse::<BlockCommentOrDoc<_>>("/** a /* b */").is_err());
     }
 }

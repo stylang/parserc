@@ -135,12 +135,14 @@
       手写侧已改为生成侧的 junction 模型（终端只持有自己的文本，操作数之间的
       run 是序列的显式 `Option<S<I>>` 字段），所以两棵树的 span **直接相等**，
       不再有任何归一化：不裁空白，不过滤空 span。
-      仅剩一件投影，且它是真实的形状差异：生成侧降级为文本的规则
+      当时仅剩一件投影，且它是真实的形状差异：生成侧降级为文本的规则
       （non_keyword_ident / lit_str / lit_unicode / unicode_escape /
       ascii_escape / block_comment 家族）其内部子事件在生成树中不存在，
       手写序列按区间栈投影掉。其余 900+ 事件严格相等：规则、顺序、区间
       完全一致。`TEXT_INTERIORS` 列的是「生成代码按文本读取的规则」全集，
       而非今日 `unsyn.us` 恰好触及的子集，规范变化时投影仍然成立。
+      （**后续**：M8.2b 把左边那侧的自造名节点全部去掉后，这件投影已
+      整体删除，见下方 M8.2b 验收条目。）
 - [ ] **M8.2 完全自举**：以生成的 parser 替换手写 parser，形成编译自身的闭环。
       审计结论（三份调查）：`semantic.rs` 的语义逻辑本身已与类型无关（lattice /
       区间代数 / 名字解析 / 递归 worklist 全跑在 `Vec<Rule>` + `String` 上），
@@ -208,14 +210,47 @@
           新增 `a_block_comment_is_read_as_parts_by_one_tree_and_as_text_by_the_other`：
           `unsyn.us` 全用行文档，永远走不到注释家族，所以主对等测试对它是
           空转；这个测试用含 `/*! /* */ */` 与 `/** /* nested */ */` 的源把
-          差异固定下来，口头上写明“今天靠投影才通过”面不是已收敛。
-    - [ ] **M8.2b-4 注释/文档家族**（未完成）：手写侧仍有
-          `BlockCommentHead` / `BlockCommentTail` / `OuterBlockDocHead` /
-          `LineDocBody` 四个自造名节点，生成侧把 `BlockComment` /
-          `InnerBlockDoc` / `OuterBlockDoc` / `BlockCommentOrDoc` 读成不透明
-          文本。需要手写侧改用递归下降 reader（嵌套计数的逻辑今日靠
-          derive + head/tail enum 表达）。这一步做完，`TEXT_INTERIORS` 可
-          整体删除，两树事件序列完全裸相等。
+          差异固定下来，口头上写明“今天靠投影才通过”而不是已收敛。
+    - [x] **M8.2b-4 注释/文档家族**：手写侧 `BlockComment` / `InnerBlockDoc` /
+          `OuterBlockDoc` / `BlockCommentOrDoc` 均改为单字段不透明文本，
+          手写 reader (`read_block_comment_body` / `read_block_comment` /
+          `read_inner_block_doc` / `read_outer_block_doc` /
+          `read_block_comment_or_doc`) 逐字对齐生成侧的 `read_block_comment_*`
+          组合子顺序；删 `BlockCommentHead` / `OuterBlockDocHead` /
+          `BlockCommentTail` / `LineDocBody` 四个自造名类型及对应钩子。
+          `OuterLineDoc.body` 也从 `Option<LineDocBody>` 改为可空文本段（对齐
+          `read_outer_line_doc_2`）。
+
+          **手术前先加了特征测试** `a_document_holds_the_group_it_nests_and_
+          closes_once`（多位计数那个同类做法）钉住“接受什么语言”，改完它仍然
+          绿——说明只有形状变了，语言没变。
+
+          过程中用探针确认了两件之前不确定事：
+          1. `/** x /***/ */` 两侧**同样**失败（嵌入的 `/***/` 偷走外层
+             closing）——这是共享的语法限制，不是对等差异，也不是本步要修的；
+          2. `/***/` 单独作为 `BlockComment` 两侧都读成 5 个字符（不是生成侧
+             先把 `/**/` 抢走），所以 spec 里 `/**/` 在 `/***/` 之前不构成
+             LL 缺陷——先前手写注释里“必须换页”的说法是错的，已改。
+
+          报错 span 变了一处（唯一预期内的行为变化）：未闭合注释从
+          `0..1`（“选择未满足处”）变成 `0..5`（“能读到的最长形式”），
+          因为生成侧就是 `0..5`，手写侧现在跟它一致；已更新
+          `an_unterminated_group_is_answered_by_no_form_of_its_rule` 并写明理由。
+
+    - [x] **M8.2b 验收达成：归一化降为零**。`two_trees` 的 `TEXT_INTERIORS`
+          区间栈投影已**整体删除**，`both_trees()` 现在就是“两边各自记录事件
+          序列”，`assert_one_sequence()` 直接比较——无任何裁削、无任何过滤。
+          钩子集：生成侧 41 个是手写侧 62 个的**严格子集**，多出的 21 个
+          = 20 个 punct 终端（两个 pass 对其类型引用站点为 0，记录器也不记）
+          + `visit_escape_digit`（在 `UnicodeEscape` 内部，而 `LitStr` 已是
+          文本，故两侧都不可达）。
+          注释家族测试改名为 `a_block_comment_is_one_token_of_text_in_both_trees`，
+          它现在是断言“无投影也相等”的正向用例。
+    - [ ] **M8.2b-6 转义类型收尾（外观性）**：`AsciiEscape`（enum）与
+          `UnicodeEscape`（`Vec<EscapeDigit>`）仍是结构化类型，但 `LitStr` 的
+          body 变成文本后它们已经**不可达**——两个树的 walk 都不会走到，
+          因此不再是对等差异，只是手写侧多余的种类。可顺手改成不透明
+          文本并删 `EscapeDigit`，也可以不做。
   - [ ] **M8.2b-6 转义类型收尾（外观性）**：`AsciiEscape`（enum）与
         `UnicodeEscape`（`Vec<EscapeDigit>`）仍是结构化类型，但 `LitStr` 的
         body 变成文本后它们已经**不可达**——两个树的 walk 都不会走到，

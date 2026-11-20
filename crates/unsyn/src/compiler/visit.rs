@@ -293,7 +293,7 @@ where
     //
     // A lexer rule keeps the text it matched and not the tokens its right side
     // was written out of, so every walk here is a call to `visit_text` and
-    // nothing else — except the three rules that are nothing but a choice of
+    // nothing else — except the two rules that are nothing but a choice of
     // other rules, which are enums and so are descended into.
     // -----------------------------------------------------------------------
 
@@ -407,26 +407,6 @@ where
         walk::walk_block_comment(self, node);
     }
 
-    /// The `( ~['*','!','/*'] | '**' | BlockCommentOrDoc )` that opens a
-    /// [`BlockComment`](lexer::BlockComment) body, named by the hand tree for
-    /// the group the spec leaves unnamed.
-    fn visit_block_comment_head(&mut self, node: &'ast lexer::BlockCommentHead<I>) {
-        walk::walk_block_comment_head(self, node);
-    }
-
-    /// The `( BlockCommentOrDoc | ~['/*','*/'] )` that fills the body of all
-    /// three block rules, named once for the three by the hand tree.
-    fn visit_block_comment_tail(&mut self, node: &'ast lexer::BlockCommentTail<I>) {
-        walk::walk_block_comment_tail(self, node);
-    }
-
-    /// The `( ~['*','/*'] | BlockCommentOrDoc )` that opens an
-    /// [`OuterBlockDoc`](lexer::OuterBlockDoc) body, named by the hand tree for
-    /// the group the spec leaves unnamed.
-    fn visit_outer_block_doc_head(&mut self, node: &'ast lexer::OuterBlockDocHead<I>) {
-        walk::walk_outer_block_doc_head(self, node);
-    }
-
     /// `lexer BlockCommentOrDoc -> BlockComment | OuterBlockDoc | InnerBlockDoc;`
     fn visit_block_comment_or_doc(&mut self, node: &'ast lexer::BlockCommentOrDoc<I>) {
         walk::walk_block_comment_or_doc(self, node);
@@ -445,12 +425,6 @@ where
     /// `lexer OuterLineDoc -> '///' ( ~['/'] ~[LF,CR]* )?;`
     fn visit_outer_line_doc(&mut self, node: &'ast lexer::OuterLineDoc<I>) {
         walk::walk_outer_line_doc(self, node);
-    }
-
-    /// The `( ~['/'] ~[LF,CR]* )` of [`OuterLineDoc`](lexer::OuterLineDoc), a
-    /// group the spec leaves unnamed and the hand tree names for it.
-    fn visit_line_doc_body(&mut self, node: &'ast lexer::LineDocBody<I>) {
-        walk::walk_line_doc_body(self, node);
     }
 
     /// `lexer OuterBlockDoc -> '/**' … '*/';`
@@ -981,91 +955,30 @@ pub mod walk {
         walk_hex_digit, HexDigit;
     }
 
-    // The block rules are modelled as the shapes their right sides write, down
-    // to the nested group each of them may hold.
+    // A block comment and the two block documents are one token of text each:
+    // the nesting the reading has to count is how the closing that belongs to
+    // an opening is found, and nothing the tree would keep of it is a rule the
+    // spec names.
 
     pub fn walk_block_comment<'ast, I: UnsynInput, V: ?Sized + Visit<'ast, I>>(
         v: &mut V,
         node: &'ast lexer::BlockComment<I>,
     ) {
-        match node {
-            lexer::BlockComment::Group {
-                open,
-                head,
-                tail,
-                close,
-            } => {
-                v.visit_text(open);
-                v.visit_block_comment_head(head);
-
-                for part in tail {
-                    v.visit_block_comment_tail(part);
-                }
-
-                v.visit_text(close);
-            }
-            lexer::BlockComment::Star(token) | lexer::BlockComment::Empty(token) => {
-                v.visit_text(token)
-            }
-        }
-    }
-
-    pub fn walk_block_comment_head<'ast, I: UnsynInput, V: ?Sized + Visit<'ast, I>>(
-        v: &mut V,
-        node: &'ast lexer::BlockCommentHead<I>,
-    ) {
-        match node {
-            lexer::BlockCommentHead::Plain(text) => v.visit_text(text),
-            lexer::BlockCommentHead::StarStar(text) => v.visit_text(text),
-            lexer::BlockCommentHead::Nested(group) => v.visit_block_comment_or_doc(group),
-        }
-    }
-
-    pub fn walk_block_comment_tail<'ast, I: UnsynInput, V: ?Sized + Visit<'ast, I>>(
-        v: &mut V,
-        node: &'ast lexer::BlockCommentTail<I>,
-    ) {
-        match node {
-            lexer::BlockCommentTail::Nested(group) => v.visit_block_comment_or_doc(group),
-            lexer::BlockCommentTail::Plain(text) => v.visit_text(text),
-        }
+        v.visit_text(&node.0);
     }
 
     pub fn walk_inner_block_doc<'ast, I: UnsynInput, V: ?Sized + Visit<'ast, I>>(
         v: &mut V,
         node: &'ast lexer::InnerBlockDoc<I>,
     ) {
-        v.visit_text(&node.open);
-
-        for part in &node.tail {
-            v.visit_block_comment_tail(part);
-        }
-
-        v.visit_text(&node.close);
+        v.visit_text(&node.0);
     }
 
     pub fn walk_outer_block_doc<'ast, I: UnsynInput, V: ?Sized + Visit<'ast, I>>(
         v: &mut V,
         node: &'ast lexer::OuterBlockDoc<I>,
     ) {
-        v.visit_text(&node.open);
-        v.visit_outer_block_doc_head(&node.head);
-
-        for part in &node.tail {
-            v.visit_block_comment_tail(part);
-        }
-
-        v.visit_text(&node.close);
-    }
-
-    pub fn walk_outer_block_doc_head<'ast, I: UnsynInput, V: ?Sized + Visit<'ast, I>>(
-        v: &mut V,
-        node: &'ast lexer::OuterBlockDocHead<I>,
-    ) {
-        match node {
-            lexer::OuterBlockDocHead::Plain(text) => v.visit_text(text),
-            lexer::OuterBlockDocHead::Nested(group) => v.visit_block_comment_or_doc(group),
-        }
+        v.visit_text(&node.0);
     }
 
     pub fn walk_inner_line_doc<'ast, I: UnsynInput, V: ?Sized + Visit<'ast, I>>(
@@ -1081,18 +994,7 @@ pub mod walk {
         node: &'ast lexer::OuterLineDoc<I>,
     ) {
         v.visit_text(&node.open);
-
-        if let Some(body) = &node.body {
-            v.visit_line_doc_body(body);
-        }
-    }
-
-    pub fn walk_line_doc_body<'ast, I: UnsynInput, V: ?Sized + Visit<'ast, I>>(
-        v: &mut V,
-        node: &'ast lexer::LineDocBody<I>,
-    ) {
-        v.visit_text(&node.first);
-        v.visit_text(&node.rest);
+        v.visit_text(&node.body);
     }
 
     // The rules that are modelled as the shapes their right sides write are
@@ -1203,8 +1105,10 @@ pub mod walk {
         v.visit_text(&node.0);
     }
 
-    // The three rules that are nothing but a choice of other rules keep the rules
-    // they chose rather than the text of them, so these are descended into.
+    // The two rules that are nothing but a choice of other rules keep the rules
+    // they chose rather than the text of them, so these are descended into. A
+    // block group is not one of them: what it chose is trivia, and the choice
+    // was only how the reading counted the nesting.
 
     pub fn walk_ident<'ast, I: UnsynInput, V: ?Sized + Visit<'ast, I>>(
         v: &mut V,
@@ -1230,11 +1134,7 @@ pub mod walk {
         v: &mut V,
         node: &'ast lexer::BlockCommentOrDoc<I>,
     ) {
-        match node {
-            lexer::BlockCommentOrDoc::Block(comment) => v.visit_block_comment(comment),
-            lexer::BlockCommentOrDoc::Outer(doc) => v.visit_outer_block_doc(doc),
-            lexer::BlockCommentOrDoc::Inner(doc) => v.visit_inner_block_doc(doc),
-        }
+        v.visit_text(&node.0);
     }
 }
 

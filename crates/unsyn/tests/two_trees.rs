@@ -14,14 +14,15 @@
 //! text on either side, and the comparison of two spans needs no
 //! normalization at all.
 //!
-//! What the two trees cannot agree on is the interior of a rule the
-//! generated code reads as text rather than as parts: the hand tree walks
-//! such a rule into the nodes it spells, and the generated file has no
-//! such nodes to walk. Those rules are the hooks `TEXT_INTERIORS` names,
-//! and the projection drops every event that lies inside one. Nothing
-//! else a rule says about a file do the two trees say differently —
-//! which is what the passes that come after the parser need of either
-//! tree, and what the next step of the bootstrap builds on.
+//! There is no third thing the two trees settle differently. The hand tree
+//! once kept parts — the digits of a number, the escapes of a string, the
+//! nesting of a block comment — where the generated code reads one token of
+//! text, and every one of those has now been given up, because no rule of the
+//! language names them and no pass asks them. What is left is the two trees
+//! saying the same rules over the same text, with nothing done to either
+//! sequence on the way to the comparison — which is what the passes that come
+//! after the parser need of either tree, and what the next step of the
+//! bootstrap builds on.
 
 use parserc::Span;
 
@@ -185,31 +186,8 @@ recorder! {
 #[path = "generated/unsyn_us.rs"]
 mod generated;
 
-/// A rule the generated code reads as one piece of text has no interior of its
-/// own in the generated tree, and any hand event inside one is the part of a
-/// node the generated file does not have. Everything else the two trees say
-/// identically.
-///
-/// What is left on this list is a *live* difference and not a convenience: the
-/// hand tree still breaks a block comment into the head, the tail and the
-/// nesting it reads, where the generated code reads the whole comment as text.
-/// The literals and the names stood here too; they left it as the hand tree gave
-/// up parts no rule of the language names, which is what the two trees agreeing
-/// on raw spans is made of. What is left is live: the hand tree still reads a
-/// block comment into parts where the generated code reads it as text, and
-/// `a_block_comment_is_read_as_parts_by_one_tree_and_as_text_by_the_other` is
-/// the case that keeps these four honest — `unsyn.us` itself, written with line
-/// documents, never reaches them.
-const TEXT_INTERIORS: &[&str] = &[
-    "visit_block_comment",
-    "visit_block_comment_or_doc",
-    "visit_inner_block_doc",
-    "visit_outer_block_doc",
-];
-
 /// Reads `source` with both parsers, walks both trees with both visitors, and
-/// returns the events of each: the generated ones as they came, the hand ones
-/// with the parts of a partless node projected away.
+/// returns the events each one said, as they came out of its visitor.
 ///
 /// Nothing else is done to either sequence. The spans are the nodes' own text,
 /// trivia and all, because both trees file a run of trivia in the same place —
@@ -241,41 +219,7 @@ fn both_trees(source: &str) -> (Vec<Event>, Vec<Event>) {
     let mut generated_recorder = Generated::default();
     generated::Visit::visit_crate(&mut generated_recorder, &generated_tree);
 
-    let mut hand_projected: Vec<Event> = Vec::new();
-    let mut interiors: Vec<(usize, usize)> = Vec::new();
-
-    for event in hand_recorder.events {
-        let (start, end) = match &event.1 {
-            Span::Range(range) => (range.start, range.end),
-            _ => (0, 0),
-        };
-
-        // Events come in a depth-first order: an interval is open exactly over
-        // the run of events whose spans it covers, so an event outside the top
-        // interval closes it, and every interval beneath it too.
-        while let Some(top) = interiors.last() {
-            if start >= top.0 && end <= top.1 {
-                break;
-            }
-
-            interiors.pop();
-        }
-
-        // The text rule's own event, when it is not inside another rule's
-        // interior, is a node of both trees; what lies inside an open interval
-        // — the parts of another partless node — is not.
-        if !interiors.is_empty() {
-            continue;
-        }
-
-        if TEXT_INTERIORS.contains(&event.0) {
-            interiors.push((start, end));
-        }
-
-        hand_projected.push(event);
-    }
-
-    (generated_recorder.events, hand_projected)
+    (generated_recorder.events, hand_recorder.events)
 }
 
 /// Says the two event sequences are one sequence, and points at the first
@@ -356,18 +300,17 @@ syntax G -> 'h'{,99};
     assert_one_sequence(&generated, &hand, source);
 }
 
-/// A block comment is a token the generated code reads whole, where the hand
-/// tree still breaks it into the head, the tail and the nesting it read to
-/// find its own end.
+/// A block comment is one token of text in both trees, and the nesting a
+/// reading has to count to find its own closing leaves nothing behind.
 ///
 /// `unsyn.us` cannot show this: it is written with line documents, so the
-/// parity check over it agrees on the comment family only because nothing ever
-/// reaches it. This file does reach it, and it passes through the projection —
-/// which is what says the four rules on that list are doing work rather than
-/// sitting there out of habit. The two trees are *not* equal here without it;
-/// closing that gap is the last item of the lexer-level convergence.
+/// parity check over it never reaches the comment family. This file does, and
+/// the two trees say the same rules over it with nothing done to either
+/// sequence — which is the point, since the hand tree used to break a comment
+/// into a head, a tail and a nested group and needed a projection to be
+/// compared at all.
 #[test]
-fn a_block_comment_is_read_as_parts_by_one_tree_and_as_text_by_the_other() {
+fn a_block_comment_is_one_token_of_text_in_both_trees() {
     let source = r#"/*! inner /* x */ doc */
 /** outer /* nested */ doc */
 syntax A -> 'b';
