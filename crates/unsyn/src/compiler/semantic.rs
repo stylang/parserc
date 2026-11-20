@@ -55,7 +55,7 @@ use parserc::{Span, syntax::Syntax};
 use super::errors::{Diagnostics, LintKind, SemanticsKind, UnsynError};
 use super::input::UnsynInput;
 use super::visit::{Visit, walk};
-use super::{lexer, syntax, syntax::Decl};
+use super::{codegen, lexer, syntax, syntax::Decl};
 
 /// Reports what `file` gets wrong beyond the shape of its text.
 ///
@@ -724,34 +724,26 @@ impl<'ast, I: UnsynInput> Visit<'ast, I> for Checker<'ast, I> {
     fn visit_expr(&mut self, node: &'ast syntax::Expr<I>) {
         // An `|` says which of the node's alternatives was read only where the
         // alternatives are the whole of a right side; a choice written inside a
-        // group belongs to no left side and names nothing, which is worth
-        // telling the author of a file before the tree is read by anyone.
+        // group belongs to no left side, and so becomes no node of the tree at
+        // all — however well its alternatives could have been named. That is
+        // one harm, and it is told once for the choice, at the choice.
         if self.expr_depth > 0 && !node.is_single() {
             self.diagnostics
                 .lint(LintKind::UnnamedAlternative, node.to_span());
         }
 
-        // Where the choice *is* the whole of a right side, it becomes an enum of
-        // one variant per alternative. An alternative that writes one field and
-        // one that writes several are different kinds of variant, and the enum
-        // can only say which of them was read — what the several fields of a
-        // wider alternative are is a matter for a rule with a left side of its
-        // own, which this choice's first level has none of.
-        if self.expr_depth == 0 {
-            let mut plain = 0;
-            let mut wide = 0;
-
+        // Where the choice *is* the whole of a right side it does become an
+        // enum, and a different harm is possible: an alternative that names no
+        // rule and reads no word gives its own variant nothing to be called but
+        // its place. The question is the one the generator answers when it
+        // names a variant, asked here from the same function so that the
+        // warning cannot promise a name the code then declines to write.
+        if self.expr_depth == 0 && !node.is_single() {
             for branch in node.branches() {
-                if writes_one_field(branch) {
-                    plain += 1;
-                } else {
-                    wide += 1;
+                if !codegen::names_its_variant(branch) {
+                    self.diagnostics
+                        .lint(LintKind::UnnamedVariant, codegen::branch_head(branch));
                 }
-            }
-
-            if plain != 0 && wide != 0 {
-                self.diagnostics
-                    .lint(LintKind::MixedAlternative, node.to_span());
             }
         }
 
@@ -1041,37 +1033,6 @@ enum Conflict {
 /// A character and a string of more than one character are never the same value,
 /// and a rule named as a member is only compared by its name, since what it
 /// denotes is what its definition denotes, which is not this pass's business.
-/// Whether one alternative of a choice writes a single field of its node.
-///
-/// One name, one literal, or one set is the one thing it reads. A sequence of
-/// operands, an operand with an operator on it, and a group that stands among
-/// other operands all write more than one — which is what makes them a
-/// different kind of variant of the same enum.
-fn writes_one_field<I>(branch: &syntax::OneOrMore<I, syntax::ExprNoTopAlt<I>>) -> bool
-where
-    I: UnsynInput,
-{
-    let mut elements = branch.elements();
-
-    let Some(first) = elements.next() else {
-        return true;
-    };
-
-    if elements.next().is_some() {
-        return false;
-    }
-
-    matches!(
-        first,
-        syntax::ExprNoTopAlt::WithoutSuffix(
-            syntax::ExprWithoutSuffix::Reference(_)
-                | syntax::ExprWithoutSuffix::Str(_)
-                | syntax::ExprWithoutSuffix::Unicode(_)
-                | syntax::ExprWithoutSuffix::Set(_)
-        )
-    )
-}
-
 fn conflict(later: &Value, earlier: &Value) -> Option<Conflict> {
     match (later, earlier) {
         (Value::Name(later), Value::Name(earlier)) if later == earlier => Some(Conflict::Same),
@@ -1165,21 +1126,6 @@ mod tests {
             Vec::new(),
             "the spec denotes something"
         );
-    }
-
-    #[test]
-    fn the_choices_the_spec_writes_inside_its_groups_are_the_ones_it_names_nowhere() {
-        // Every group of a right side that offers more than one way of being
-        // read is a choice that names no node, and the spec is written with
-        // exactly this many of them. The count is pinned so that a group added
-        // to the spec shows up here rather than only in whoever reads the file.
-        let unnamed = report(include_str!("../../unsyn.us"))
-            .lints
-            .into_iter()
-            .filter(|lint| lint.kind == LintKind::UnnamedAlternative)
-            .count();
-
-        assert_eq!(unnamed, 7, "the choices of unsyn.us that name no node");
     }
 
     #[test]
@@ -1425,10 +1371,19 @@ lexer B -> A | '/*' A;
         );
 
         // Only the members of one set are compared, and the same name twice in two
-        // alternatives of a pattern says nothing about either.
+        // alternatives of a pattern says nothing about either. A set names no
+        // word, though, so the two alternatives are each told for that — which
+        // is a different report and does not speak to the members.
+        let report = report("lexer LF -> U+000A; lexer A -> [LF] | [LF];");
+        assert_eq!(report.errors, Vec::new());
         assert_eq!(
-            report("lexer LF -> U+000A; lexer A -> [LF] | [LF];"),
-            Diagnostics::default()
+            report
+                .lints
+                .iter()
+                .filter(|lint| !matches!(lint.kind, LintKind::UnnamedVariant))
+                .collect::<Vec<_>>(),
+            Vec::<&crate::compiler::errors::Lint>::new(),
+            "the members of the two sets are no business of each other"
         );
     }
 
@@ -1513,60 +1468,64 @@ lexer B -> A | '/*' A;
     }
 
     #[test]
-    fn a_choice_that_mixes_narrow_and_wide_alternatives_is_told() {
-        // Every alternative writes one field: the enum's variants are all of a
-        // kind, and nothing is left unnamed.
+    fn an_alternative_that_names_nothing_is_told() {
+        // Every alternative names a rule or reads a word a variant can be
+        // called by, so the enum says what each of its variants is.
         assert_eq!(
             lints("lexer A -> 'a'; lexer B -> 'b'; lexer C -> A | B | 'c';"),
             Vec::new()
         );
-
-        // And again where every alternative is wider than one field, however
-        // wide it is.
         assert_eq!(
             lints("lexer A -> 'a' 'b'; lexer B -> 'c' 'd'; lexer C -> A | B;"),
-            Vec::new()
-        );
-
-        // One alternative that writes a field apiece with one that writes
-        // several is the mixture the enum cannot name past its first level.
-        //
-        // A name is narrow however wide the rule it names is: the variant of
-        // the choice holds the node of that name as one field, and what the
-        // node is made of is that rule's own business.
-        assert_eq!(
-            lints("lexer A -> 'a' 'b'; lexer C -> A | 'c';"),
             Vec::new(),
-            "a name and a word both write one field"
-        );
-        assert_eq!(
-            lints("lexer C -> 'a' 'b' | 'c';"),
-            [LintKind::MixedAlternative]
+            "a sequence that ends in a name still names its variant"
         );
 
-        // The choice of a group is told by the other lint, which is about the
-        // `|` naming nothing at all rather than about what its alternatives
-        // write.
+        // An alternative whose every literal begins past the alphabet gives
+        // the generator nothing to call the variant but its place. A name is
+        // enough however wide the rule it names is, and a word is enough
+        // however many operands stand around it.
         assert_eq!(
-            lints("lexer A -> 'a' ( 'b' | 'c' ) 'd';"),
-            [LintKind::UnnamedAlternative]
+            lints("lexer A -> _; lexer _ -> ['a'-'z']; lexer C -> A | 'c';"),
+            Vec::new(),
+            "a name and a word both say a variant"
+        );
+        assert_eq!(
+            lints("lexer C -> ['*'-'/'] | 'c';"),
+            [LintKind::UnnamedVariant],
+            "a set names nothing"
+        );
+
+        // One report per unnamed alternative, not one per choice: the author
+        // is shown the alternative that gives nothing, and a choice with two
+        // of them is told twice.
+        assert_eq!(
+            lints("lexer C -> ['*'-'/'] | ['0'-'9'] | 'c';"),
+            [LintKind::UnnamedVariant, LintKind::UnnamedVariant]
         );
     }
 
     #[test]
-    fn the_choices_of_the_spec_that_mix_their_alternatives_are_pinned() {
-        // The same argument as for the unnamed choices: the count is pinned so
-        // that a new mixture in the spec of the language shows up here rather
-        // than only in the code a build writes for it.
-        let mixed = report(include_str!("../../unsyn.us"))
-            .lints
-            .into_iter()
-            .filter(|lint| lint.kind == LintKind::MixedAlternative)
+    fn the_nameless_parts_of_the_spec_are_pinned_by_kind() {
+        // Both counts are pinned, and apart, because they are two different
+        // things to fix: a `|` written inside a group makes no node at all,
+        // while an alternative of a root choice that offers no word leaves the
+        // node it does make with a variant called by its place.
+        let lints = report(include_str!("../../unsyn.us")).lints;
+
+        let unnamed = lints
+            .iter()
+            .filter(|lint| lint.kind == LintKind::UnnamedAlternative)
+            .count();
+        let variants = lints
+            .iter()
+            .filter(|lint| lint.kind == LintKind::UnnamedVariant)
             .count();
 
+        assert_eq!(unnamed, 7, "the choices of unsyn.us written inside groups");
         assert_eq!(
-            mixed, 4,
-            "RepeatBound, ExprWithoutSuffix, AsciiEscape and BlockComment each mix a sequence of operands with a single name or word"
+            variants, 18,
+            "the alternatives of unsyn.us that name nothing: 6 of AsciiEscape, 3 each of BlockComment, ExprWithoutSuffix and Suffix, 2 of RepeatBound, 1 of ExprWithSuffix"
         );
     }
 

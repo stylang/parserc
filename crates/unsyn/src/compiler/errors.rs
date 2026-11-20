@@ -267,21 +267,39 @@ pub enum LintKind {
     /// node; inside a group the choice belongs to no left side, so its
     /// alternatives name nothing, and whatever reads the tree can only tell them
     /// apart by their shape.
+    /// An alternative of a choice that names nothing — neither the rule it
+    /// reaches nor a word it reads.
+    ///
+    /// The root of a right side turns an `|` into the alternatives of a named
+    /// node, and an alternative that names no rule and reads no word gives its
+    /// variant nothing to be called but its place, `F1`, `F2`. Inside a group
+    /// the whole choice belongs to no left side, and every alternative of it
+    /// names nothing at all. Either way what reads the tree can only tell the
+    /// parts apart by their shape.
+    /// A choice written inside a group rather than as the whole of a right side.
+    ///
+    /// The root of a right side turns an `|` into the alternatives of a named
+    /// node; inside a group the choice belongs to no left side, so it becomes
+    /// no node of the tree at all and whatever reads the tree can only tell its
+    /// parts apart by their shape.
     #[error(
         "this `|` names no node of the tree; write the choice as a whole definition or as a rule of its own"
     )]
     UnnamedAlternative,
-    /// A choice at the root of a right side whose alternatives are not all of
-    /// one sort: some write a single field of the node, some write several.
+    /// One alternative of a choice at the root of a right side that names no
+    /// rule and reads no word the generator could call its variant by.
     ///
-    /// The node is an enum of the first level either way, and that is all the
-    /// first level can settle — the parts a complex alternative writes belong
-    /// to no left side and name nothing, so a variant of it is told apart by
-    /// its place rather than by its meaning.
+    /// The choice does become a node here, which is what tells this report
+    /// apart from
+    /// [`UnnamedAlternative`](Self::UnnamedAlternative): the harm is not that
+    /// there is no node but that this one part of it comes out named `F1`,
+    /// `F2`, by its place rather than by what it reads. Naming the word as a
+    /// rule of its own, or beginning the alternative with a word, is what
+    /// settles it.
     #[error(
-        "this choice mixes alternatives that write one field with alternatives that write several; the node names only its first level, and the parts of the wider alternatives name nothing"
+        "this alternative names no rule and reads no word, so its variant is called by its place; write it as a rule of its own, or begin it with a word"
     )]
-    MixedAlternative,
+    UnnamedVariant,
 }
 
 /// One [`LintKind`] and the place in the file that says it.

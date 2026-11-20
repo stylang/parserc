@@ -299,10 +299,8 @@
 
           警告：新 `LintKind::MixedAlternative`，在 `visit_expr` 根层
           (`expr_depth == 0`) 统计各备选写字段数：全部一个或全部多个 → 不警告；
-          两种混在一起 → 警告。判据 `writes_one_field`：单个元素且为
-          Reference/Str/Unicode/Set。**注意一个名字引用不管它指向的规则多宽都
-          算窄**（变体只装那个节点一个字段），所以 `A | 'c'` 不警告，
-          `'a' 'b' | 'c'` 警告。
+          两种混在一起 → 警告。判据 `writes_one_field`。**（此判据后被证伪，
+          见下一小节。）**
           `unsyn.us` 命中 4 处（`RepeatBound`、`ExprWithoutSuffix`、
           `AsciiEscape`、`BlockComment`），已钉住计数。
 
@@ -323,16 +321,59 @@
           不可达），所以 `two_trees` 全绿——但字段结构不等，M8.2d 换 AST 时
           必须先把这四个同步回去（且比 M8.2b-4 更简单：生成侧的 head/body
           已经是纯文本字段，不再需要手写侧那三个自造名 enum）。
-    - [ ] **M8.2b-8 手写侧注释家族回同步**：见上条末尾。
-  - [ ] **M8.2b-6 转义类型收尾（外观性）**：`AsciiEscape`（enum）与
-        `UnicodeEscape`（`Vec<EscapeDigit>`）仍是结构化类型，但 `LitStr` 的
-        body 变成文本后它们已经**不可达**——两个树的 walk 都不会走到，
-        因此不再是对等差异，只是手写侧多余的种类。可顺手改成不透明
-        文本并删 `EscapeDigit`，也可以不做。
-  - [ ] **M8.2c codegen 去类型化**：`Builder::new` 改收类型无关的视图
-        （definitions / branches / operands / atoms / quantity / bound / value /
-        text / span），52 个函数签名重指向；删 `ty_shape` 的字符串回转，改为在
-        构造 `Field` 时就携带 `TyShape`；`Stmt::decl()` 的关键字→Decl 映射搬到
+    - [x] **M8.2b-7b 两条 lint 的关系：合并失败，改为分开但共用判据**：
+          上一小节把警告并入 `UnnamedAlternative` 的尝试被**仓库里已有的
+          测试** `a_choice_inside_a_group_names_no_node_and_says_so` 推反：
+          `syntax A -> ( 'a' | 'b' ) 'c';` 在新判据下不再报警（`'a'`/`'b'`
+          都是可命名的词），但那个组仍然**不产生任何节点** —— 这才是
+          `UnnamedAlternative` 要说的事。“变体有没有名字”与“根本有没有
+          节点”是两件正交的事，合并会丢覆盖。
+
+          最终形式（两个 kind，各管一件事，但**名字判据只写一份**）：
+          - `UnnamedAlternative`：`expr_depth > 0` 且根上有选择 → 按**整个
+            选择**报一次（span 不变，计数仍为 7）。
+          - `UnnamedVariant`（新，代替 `MixedAlternative`）：`expr_depth == 0`
+            且确有选择时，按**每个拿不到名字的备选**报一次，span 落在
+            该备选开头（`branch_head`）。
+          删除 `MixedAlternative` 与 `writes_one_field`。
+
+          共用判据：`variant_word`（从 `variant_name` 提出）+ `one_reference`
+          组成 `names_its_variant`，codegen 与 semantic 同用。**抽取已验证
+          行为无损**：重生成 fixture 与抽取前 `diff` 完全一致。
+
+          `unsyn.us` 现在 7 + 18，分开钉住。18 的构成：AsciiEscape 6、
+          BlockComment 3、ExprWithoutSuffix 3、Suffix 3、RepeatBound 2、
+          ExprWithSuffix 1 —— 与生成侧实际 `F{n}` 变体集合吹得上。
+          **仍未覆盖 `Range` 的 `F2`**：那个变体是 `concat` 名字**冲突**后的
+          兑底（两个备选同形），属于命方案的问题而不是文件的问题，
+          要覆盖它就得把冲突算法也丑给 analyzer —— 待定。
+
+          另一处修正：`lexer A -> [LF] | [LF];` 的断言原本写“整个
+          `Diagnostics::default()`”，现在多了命名报告；改为只断言“没有
+          集合成员类 lint”，不再把无关报告当成失败。
+          根层判据一开始忘了 `!is_single()` 门，导致单备选规则（如
+          `lexer A -> ['a','a']`）也被报 `UnnamedVariant` —— 已修，因为
+          没有选择就没有 enum，也就没有 variant。
+  - [-] **M8.2b-6 转义类型收尾（已被 b-7/b-8 吸收）**：原记“`AsciiEscape`/
+        `UnicodeEscape` 不可达所以只是外观问题”——前半对，后半错。b-7 后
+        `EscapeDigit` 已删、`UnicodeEscape` 已是 `{marker, digits:
+        Vec<HexDigit>, close}` 三字段，`AsciiEscape` 两侧都是 enum(6)。剩下的
+        不是“可选的清理”而是 b-8 那一类真实未同步项。
+  - [ ] **M8.2b-8 手写侧注释家族未回同步**：`73179a8` 把
+        `BlockComment`/`InnerBlockDoc`/`OuterBlockDoc`/`BlockCommentOrDoc`
+        四个都改成了单字段文本，而 `6b84250` 之后生成侧分别是
+        enum(3) / 3 字段 / 4 字段 / enum(3)。两边事件序列仍然相等
+        （`visit_text` 不被记录，且注释内部两侧都不可达），所以
+        `two_trees` 全绿——但字段结构不等，M8.2d 换 AST 时会炸。
+        回同步比 `73179a8` 简单：生成侧的 head/body 已经是纯文本字段，
+        不需要再造 `BlockCommentHead`/`BlockCommentTail`/`OuterBlockDocHead`
+        那三个自造名 enum；手写侧只需把四个类型改成同形的
+        enum/多字段 tuple，加上 `took_text` 一类“读节点取它的文本”的辅助，
+        并改掉 `walk_block_comment` 等四处下钻。
+- [ ] **M8.2c codegen 去类型化**：`Builder::new` 改收类型无关的视图
+  （definitions / branches / operands / atoms / quantity / bound / value /
+  text / span），52 个函数签名重指向；删 `ty_shape` 的字符串回转，改为在
+  构造 `Field` 时就携带 `TyShape`；`Stmt::decl()` 的关键字→Decl 映射搬到
         pass 侧（对关键字文本做比较）。
   - [ ] **M8.2d 生成 AST 进 crate**：`Builder` 参数化「输入 trait 路径、错误
         kind 路径、外部符号的 crate 根、可选 derive（serde）」，使 `unsyn.us`

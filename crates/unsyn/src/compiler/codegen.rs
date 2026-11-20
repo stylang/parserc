@@ -308,6 +308,77 @@ fn external_key(name: &str) -> String {
 
 /// The alternatives of a rule that is nothing but a choice of other rules by name.
 ///
+/// The word one alternative of a choice offers as its variant's name, when it
+/// offers one.
+///
+/// A joining says the word it joins with, a bounded repetition says the brace
+/// it opens with, and a literal says the character it spells — provided that
+/// character begins with a letter, since a variant is named as an identifier
+/// and `*` is not one. Anything else offers nothing, and `None` says so: the
+/// generator then calls the variant by its place, which is what
+/// [`names_its_variant`] exists for the analyzer to ask the same question.
+///
+/// [`names_its_variant`]: crate::compiler::codegen::names_its_variant
+pub(crate) fn variant_word<I>(
+    branch: &syntax::OneOrMore<I, syntax::ExprNoTopAlt<I>>,
+) -> Option<String>
+where
+    I: UnsynInput,
+{
+    branch.elements().find_map(|element| match element {
+        syntax::ExprNoTopAlt::WithSuffix(suffix) => match suffix {
+            syntax::ExprWithSuffix::Concat { keyword, .. } => Some(keyword.0.as_str().to_owned()),
+            syntax::ExprWithSuffix::Followed { keyword, .. } => Some(keyword.0.as_str().to_owned()),
+            syntax::ExprWithSuffix::Except { keyword, .. } => Some(keyword.0.as_str().to_owned()),
+            syntax::ExprWithSuffix::Grouped { suffix, .. } => match suffix {
+                syntax::Suffix::Star(_) | syntax::Suffix::Question(_) | syntax::Suffix::Plus(_) => {
+                    None
+                }
+                syntax::Suffix::Repeat(repeat) => Some(repeat.open.0.as_str().to_owned()),
+            },
+        },
+        syntax::ExprNoTopAlt::WithoutSuffix(syntax::ExprWithoutSuffix::Str(lit)) => {
+            // The value the literal spells names the variant, not the quotes
+            // it was written between.
+            let text: String = lit.chars().into_iter().collect();
+
+            text.chars()
+                .next()
+                .is_some_and(|c| c.is_alphabetic())
+                .then_some(text)
+        }
+        _ => None,
+    })
+}
+
+/// The place in the file where one alternative begins.
+///
+/// An unnamed alternative is told at its own beginning rather than at the
+/// whole choice it sits in, because it is this alternative and no other that
+/// gives the variant nothing to be called.
+pub(crate) fn branch_head<I>(branch: &syntax::OneOrMore<I, syntax::ExprNoTopAlt<I>>) -> Span
+where
+    I: UnsynInput,
+{
+    branch
+        .elements()
+        .next()
+        .map_or(Span::None, |element| element.to_span())
+}
+
+/// Whether one alternative names its own variant: by the rule it names, or by
+/// the word it reads.
+///
+/// This is the one question the generator answers when it names a variant, put
+/// here so that the analyzer's warning and the generated code cannot part
+/// company on which alternatives are nameless.
+pub(crate) fn names_its_variant<I>(branch: &syntax::OneOrMore<I, syntax::ExprNoTopAlt<I>>) -> bool
+where
+    I: UnsynInput,
+{
+    one_reference(branch).is_some() || variant_word(branch).is_some()
+}
+
 /// The rules of `file` that are written as a node rather than as the text they
 /// read.
 ///
@@ -1586,36 +1657,7 @@ where
         branch: &syntax::OneOrMore<I, syntax::ExprNoTopAlt<I>>,
         place: usize,
     ) -> Result<Ident, UnsynError> {
-        let word = branch.elements().find_map(|element| match element {
-            syntax::ExprNoTopAlt::WithSuffix(suffix) => match suffix {
-                syntax::ExprWithSuffix::Concat { keyword, .. } => {
-                    Some(keyword.0.as_str().to_owned())
-                }
-                syntax::ExprWithSuffix::Followed { keyword, .. } => {
-                    Some(keyword.0.as_str().to_owned())
-                }
-                syntax::ExprWithSuffix::Except { keyword, .. } => {
-                    Some(keyword.0.as_str().to_owned())
-                }
-                syntax::ExprWithSuffix::Grouped { suffix, .. } => match suffix {
-                    syntax::Suffix::Star(_)
-                    | syntax::Suffix::Question(_)
-                    | syntax::Suffix::Plus(_) => None,
-                    syntax::Suffix::Repeat(repeat) => Some(repeat.open.0.as_str().to_owned()),
-                },
-            },
-            syntax::ExprNoTopAlt::WithoutSuffix(syntax::ExprWithoutSuffix::Str(lit)) => {
-                // The value the literal spells names the variant, not the
-                // quotes it was written between.
-                let text: String = lit.chars().into_iter().collect();
-
-                text.chars()
-                    .next()
-                    .is_some_and(|c| c.is_alphabetic())
-                    .then_some(text)
-            }
-            _ => None,
-        });
+        let word = variant_word(branch);
 
         Ok(match word {
             Some(word) => item_name(&capitalize(&word), Span::None)?,
