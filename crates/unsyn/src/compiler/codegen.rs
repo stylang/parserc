@@ -244,6 +244,7 @@ where
             syntaxes: &syntaxes,
             taken: HashSet::new(),
             helpers: Vec::new(),
+            prelude: Vec::new(),
             seq: 0,
             field_no: 0,
             field_names: HashSet::new(),
@@ -253,8 +254,9 @@ where
 
         let items = generator.crate_of()?;
         let visit = generator.visit_items();
+        let prelude = std::mem::take(&mut generator.prelude);
 
-        Ok(quote! { #items #visit })
+        Ok(quote! { #(#prelude)* #items #visit })
     }
 }
 
@@ -425,15 +427,12 @@ where
             // folded choice, the members of a set read one character at a
             // time, the operand a removal is written over, and the group
             // whose whole answer is one name.
-            expr_forced(&stmt.expr, false, &mut forced);
-
-            if *shape == Shape::Enum {
-                // The enum's own alternatives are its variants, and what a
-                // variant reads is the node of the rule it names — never the
-                // text of it. The fold that made them one is a fold of types,
-                // which no answer of text is asked of.
-                continue;
-            }
+            // A choice of names answers with the node of the name it chose,
+            // and a sequence answers with the node of its fields: neither asks
+            // a name it reaches for its text. What does is a set read one
+            // character at a time, the operand a removal is written over, and
+            // the group whose whole answer is one name.
+            expr_forced(&stmt.expr, &mut forced);
         }
 
         let mut changed = false;
@@ -466,7 +465,32 @@ where
         && body
             .branches()
             .next()
-            .is_some_and(|branch| branch.elements().count() > 1)
+            .is_some_and(|branch| operand_count(branch) > 1)
+}
+
+/// How many operands one alternative writes.
+///
+/// `concat` is an operator between two operands and not an operand of its own,
+/// so `'U+' concat HexDigit{4}` is a sequence of two however the tree holds it
+/// as one element — and a sequence is what earns a field apiece.
+fn operand_count<I>(branch: &syntax::OneOrMore<I, syntax::ExprNoTopAlt<I>>) -> usize
+where
+    I: UnsynInput,
+{
+    branch.elements().map(operands_of).sum()
+}
+
+/// How many operands one element of an alternative writes.
+fn operands_of<I>(operand: &syntax::ExprNoTopAlt<I>) -> usize
+where
+    I: UnsynInput,
+{
+    match operand {
+        syntax::ExprNoTopAlt::WithSuffix(syntax::ExprWithSuffix::Concat { suffix, .. }) => {
+            1 + operands_of(suffix)
+        }
+        _ => 1,
+    }
 }
 
 /// The names whose text is asked for by `expr`: by the alternatives it folds,
@@ -477,65 +501,65 @@ where
 /// answer: the alternatives it folds, the member of a set read as a choice of
 /// characters, the group whose whole answer is one name, and the operand a
 /// removal is written over.
-fn expr_forced<I>(expr: &syntax::Expr<I>, folds: bool, forced: &mut HashSet<String>)
+fn expr_forced<I>(expr: &syntax::Expr<I>, forced: &mut HashSet<String>)
 where
     I: UnsynInput,
 {
-    // The alternatives of a pattern that has more than one of them answer a
-    // fold, and a fold asks one shape of every part that reaches it.
-    let folds = folds || !expr.is_single();
-
     for branch in expr.branches() {
         for element in branch.elements() {
-            operand_forced(element, folds, forced);
+            operand_forced(element, forced);
         }
     }
 }
 
-fn operand_forced<I>(operand: &syntax::ExprNoTopAlt<I>, folds: bool, forced: &mut HashSet<String>)
+fn operand_forced<I>(operand: &syntax::ExprNoTopAlt<I>, forced: &mut HashSet<String>)
 where
     I: UnsynInput,
 {
     match operand {
-        syntax::ExprNoTopAlt::WithoutSuffix(atom) => atom_forced(atom, folds, forced),
+        syntax::ExprNoTopAlt::WithoutSuffix(atom) => atom_forced(atom, forced),
         syntax::ExprNoTopAlt::WithSuffix(suffix) => match suffix {
-            syntax::ExprWithSuffix::Grouped { target, .. } => atom_forced(target, folds, forced),
+            syntax::ExprWithSuffix::Grouped { target, .. } => atom_forced(target, forced),
             syntax::ExprWithSuffix::Concat {
                 target,
                 suffix: next,
                 ..
             } => {
-                atom_forced(target, folds, forced);
-                operand_forced(next, folds, forced);
+                atom_forced(target, forced);
+                operand_forced(next, forced);
             }
             // What follows is only probed, and its answer thrown away: the
             // probe asks the shape of the answer of nothing. What a removal is
             // written over is the one operand whose text is read back.
-            syntax::ExprWithSuffix::Followed { target, .. } => atom_forced(target, folds, forced),
+            syntax::ExprWithSuffix::Followed { target, .. } => atom_forced(target, forced),
             syntax::ExprWithSuffix::Except { target, tokens, .. } => {
                 if let syntax::ExprWithoutSuffix::Reference(ident) = target {
                     forced.insert(external_key(ident.text().as_str()));
                 }
 
-                atom_forced(tokens, folds, forced);
+                atom_forced(tokens, forced);
             }
         },
     }
 }
 
-fn atom_forced<I>(atom: &syntax::ExprWithoutSuffix<I>, folds: bool, forced: &mut HashSet<String>)
+fn atom_forced<I>(atom: &syntax::ExprWithoutSuffix<I>, forced: &mut HashSet<String>)
 where
     I: UnsynInput,
 {
     match atom {
-        // A name read alone hands back its whole answer. Read among the parts
-        // of a fold, the fold asks that answer of every part as one thing, and
-        // the thing a fold of text answers with is text; read on its own, as
-        // the field of a struct or the target of a probe that throws the
-        // answer away, the name keeps whichever shape it was written in.
-        syntax::ExprWithoutSuffix::Reference(ident) if folds => {
-            forced.insert(external_key(ident.text().as_str()));
-        }
+        // A name read alone hands back its whole answer, and a name read among
+        // the parts of a fold hands back the text of it: the fold is wrapped in
+        // the reading of text, so the name keeps whichever shape its own
+        // production writes — one field per sub-expression of it — rather than
+        // being flattened into one run of text to suit the fold it is read
+        // among.
+        syntax::ExprWithoutSuffix::Reference(_) => {}
+        // A group whose whole answer is one name hands that name's answer back,
+        // and a group is read back as text wherever it stands: a field of `I`,
+        // an operand the code of a rule folds. What a group reads besides — a
+        // sequence, a choice of its own — it answers with its reading, and the
+        // names inside answer only to that.
         // A group whose whole answer is one name hands that name's answer
         // back, and a group is read back as text wherever it stands: a field
         // of `I`, an operand the code of a rule folds. What a group reads
@@ -558,7 +582,7 @@ where
             {
                 forced.insert(external_key(ident.text().as_str()));
             } else {
-                expr_forced(group, false, forced);
+                expr_forced(group, forced);
             }
         }
         // A set of more than one member is a choice of its members, and a
@@ -735,7 +759,7 @@ where
     I: UnsynInput,
 {
     let (from, to) = match range {
-        syntax::Range::Unicode(from, _, _, _, to) => (from.value()?, to.value()?),
+        syntax::Range::Unicode(from, _, to) => (from.value()?, to.value()?),
         syntax::Range::Str(from, _, to) => (one_char(from.chars())?, one_char(to.chars())?),
     };
 
@@ -844,6 +868,11 @@ where
     taken: HashSet<String>,
     /// The functions the rule being written has asked for, in the order asked.
     helpers: Vec<TokenStream>,
+    /// The functions the whole file has asked for, written before its rules.
+    ///
+    /// A helper a single rule needs stands beside that rule; one every fold may
+    /// reach is not any rule's, so it goes above all of them.
+    prelude: Vec<TokenStream>,
     /// How many functions the rule being written has asked for.
     seq: usize,
     /// How many fields of the rule being written have been named by their
@@ -1266,13 +1295,26 @@ where
             },
             Some(at_most) => quote! {
                 while taken.len() < #at_most {
-                    let Some(one) = #each else { break };
+                    // The `break` carries its semicolon because that is how
+                    // `rustfmt` writes it, and the file this code is kept in is
+                    // a file `rustfmt` has been over: tokens formatting changes
+                    // would make the kept file say something a build does not.
+                    let Some(one) = #each else { break; };
                     taken.push(one);
                 }
             },
         };
 
         let rule = self.rule.clone();
+
+        // A lower bound of one is asked as the emptiness it is, which is what
+        // reads clearly and what a lint asks for; a bound above one is the
+        // comparison it has to stay.
+        let too_few = if at_least == 1 {
+            quote! { taken.is_empty() }
+        } else {
+            quote! { taken.len() < #at_least }
+        };
 
         self.helpers.push(quote! {
             fn #read<I>(
@@ -1289,7 +1331,7 @@ where
 
                 // Fewer than the bound asked for is the repetition itself
                 // missing, told at the place the reading of it stands.
-                if taken.len() < #at_least {
+                if #too_few {
                     return Err(::parserc::Kind::Syntax(
                         #rule,
                         ::parserc::ControlFlow::Recovable,
@@ -2174,6 +2216,13 @@ where
     /// The code of a pattern: the alternatives of it tried in the order written.
     fn code_of_expr(&mut self, expr: &syntax::Expr<I>) -> Result<Code, UnsynError> {
         let mut branches = Vec::new();
+        // Which of them answer with the node of a rule rather than with text,
+        // settled before any code is written since writing it borrows the
+        // generator.
+        let answer_kinds: Vec<bool> = expr
+            .branches()
+            .map(|branch| self.branch_yields_node(branch))
+            .collect();
 
         for branch in expr.branches() {
             branches.push(self.code_of_branch(branch)?);
@@ -2183,15 +2232,136 @@ where
             return Ok(branches.pop().expect("one branch counted twice"));
         }
 
+        // A fold asks one answer of every alternative it joins, and the answer
+        // a fold of a rule gives is the text the alternative took: an
+        // alternative may be a node of its own, and what a `.or()` of a node
+        // and of a run of text would answer with is neither. So the branches
+        // that answer with a node are read for their text here, which is what
+        // lets an alternative keep the fields its own production writes instead
+        // of being flattened into one run to suit the fold it is read among.
+        //
+        // Only those branches are wrapped. A sequence and a repetition are both
+        // written as a function that keeps the text it took, and so answers
+        // with text already; reading the text of a text again would cost a
+        // clone of the input per character of the hottest loop in a lexer for
+        // nothing at all.
         let mut choice = branches.into_iter();
-        let mut parser = self.expr_of(choice.next().expect("a pattern has a branch"))?;
+        let mut answers = answer_kinds.iter();
+        let first = self.expr_of(choice.next().expect("a pattern has a branch"))?;
+        let mut left_is_closure = answers.next().copied().unwrap_or(false);
+        let mut parser = self.as_text(first, left_is_closure);
 
         for branch in choice {
+            let node = answers.next().copied().unwrap_or(false);
             let other = self.expr_of(branch)?;
-            parser = quote! { #parser.or(#other) };
+            let other = self.as_text(other, node);
+
+            parser = if left_is_closure {
+                quote! { (#parser).or(#other) }
+            } else {
+                quote! { #parser.or(#other) }
+            };
+
+            left_is_closure = false;
         }
 
         Ok(Code::Expr(parser))
+    }
+
+    /// The parser `parser` read for the text it took, whatever else it answers
+    /// with.
+    ///
+    /// The helper this reaches for is written once, at the top of the file, the
+    /// first time a fold needs it.
+    /// The parser of one alternative of a fold, answering with the text it took.
+    ///
+    /// `yields_node` says whether the alternative answers with the node of a
+    /// rule; only then is the reading of its text wrapped around it, since
+    /// every other alternative is text already and wrapping it again would cost
+    /// a clone of the input on every character a lexer's hottest loop reads.
+    fn as_text(&mut self, parser: TokenStream, yields_node: bool) -> TokenStream {
+        if !yields_node {
+            return parser;
+        }
+
+        if self.prelude.is_empty() {
+            // No document on the helper: `rustfmt` rewrites a document of more
+            // than one line into one attribute per line, and the file this code
+            // is kept in is a file `rustfmt` has been over, so the tokens kept
+            // would not be the tokens a build writes. What the helper is for is
+            // said here, beside the code that asks for it.
+            self.prelude.push(quote! {
+                fn text_of<P, I>(
+                    parser: P,
+                    input: &mut I,
+                ) -> ::core::result::Result<I, <I as ::parserc::Input>::Error>
+                where
+                    I: ::parserc::chars::CharsInput,
+                    P: ::parserc::Parser<I>,
+                {
+                    let mut whole = input.clone();
+                    let before = input.len();
+
+                    parser.parse(input)?;
+
+                    Ok(whole.split_to(before - input.len()))
+                }
+            });
+        }
+
+        // The closure is written bare here and parenthesised only where it is
+        // the left operand of a fold: `.or()` binds tighter than the closure
+        // body, so a bare closure on the left would take the `.or()` into its
+        // own body. As an argument it needs no parens, and writing them would
+        // be a lint.
+        //
+        // The body is a block already, because that is what `rustfmt` rewrites a
+        // body of any length into, and the file this code is kept in is a file
+        // `rustfmt` has been over: tokens that formatting changes would make
+        // the kept file say something other than what a build writes.
+        quote! { |input: &mut I| { text_of(#parser, input) } }
+    }
+
+    /// Whether one alternative of a fold answers with the node of a rule rather
+    /// than with the text it took.
+    ///
+    /// An alternative of more than one operand is written as a function that
+    /// keeps the text those operands took, and so is a suffixed operand and a
+    /// joined one; the only answer that is a node is a name read on its own,
+    /// bare or behind a group that holds nothing else.
+    fn branch_yields_node(&self, branch: &syntax::OneOrMore<I, syntax::ExprNoTopAlt<I>>) -> bool {
+        let mut elements = branch.elements();
+        let Some(first) = elements.next() else {
+            return false;
+        };
+
+        if elements.next().is_some() {
+            return false;
+        }
+
+        match first {
+            syntax::ExprNoTopAlt::WithoutSuffix(atom) => self.atom_yields_node(atom),
+            syntax::ExprNoTopAlt::WithSuffix(_) => false,
+        }
+    }
+
+    /// Whether one operand answers with the node of a rule.
+    fn atom_yields_node(&self, atom: &syntax::ExprWithoutSuffix<I>) -> bool {
+        match atom {
+            syntax::ExprWithoutSuffix::Reference(ident) => {
+                self.nodes.contains(&external_key(ident.text().as_str()))
+            }
+            // A group around one operand adds nothing to what that operand
+            // answers with.
+            syntax::ExprWithoutSuffix::Paren { expr: group, .. } => {
+                group.is_single()
+                    && group
+                        .branches()
+                        .next()
+                        .is_some_and(|branch| self.branch_yields_node(branch))
+            }
+            _ => false,
+        }
     }
 
     /// The code of one alternative: the operands of it, one after the other.
@@ -3497,17 +3667,25 @@ mod tests {
     }
 
     #[test]
-    fn a_name_read_among_others_is_written_as_the_text_it_read() {
-        // `C` is a choice of names, but `D` reads `C` beside a word of its own,
-        // where the two alternatives have to answer with the same thing.
+    fn a_name_read_among_others_keeps_its_shape_and_is_read_for_text() {
+        // `C` is a choice of names, so it is an enum of the two nodes it names;
+        // `D` reads `C` beside a word of its own, where the two alternatives
+        // have to answer with one thing. The fold is what changes its answer to
+        // text, and only for the alternative that had a node to give: the word
+        // is text already, and reading the text of a text again would cost a
+        // clone of the input per character for nothing.
         let soup =
             code("lexer A -> 'a'; lexer B -> 'b'; lexer C -> A | B; lexer D -> ( C | 'z' ) 'x';");
 
-        assert!(!soup.contains("pub enum C"));
+        assert!(soup.contains("pub enum C"), "{soup}");
         assert!(has(
             &soup,
-            quote! { <C<I> as ::parserc::syntax::Syntax<I>>::into_parser().map(|node| node.0) }
+            quote! { (|input: &mut I| { text_of(<C<I> as ::parserc::syntax::Syntax<I>>::into_parser(), input) }).or(::parserc::next('z')) }
         ));
+        assert!(
+            !soup.contains("text_of (:: parserc :: next ('z')"),
+            "a word is text already: {soup}"
+        );
     }
 
     #[test]
@@ -3542,12 +3720,24 @@ mod tests {
     }
 
     #[test]
-    fn a_joining_is_what_a_sequence_already_is() {
+    fn a_joining_writes_a_field_apiece_and_no_run_between_them() {
         let soup = code("lexer A -> 'ab' concat 'cd';");
 
-        // Nothing stands between the two operands, which is what reading one after
-        // the other already is.
-        assert!(soup.contains(":: parserc :: keyword (\"ab\") . parse (input) ? ; :: parserc :: keyword (\"cd\") . parse (input) ?"));
+        // `concat` joins two operands, so the rule is the sequence of two it
+        // writes — a field apiece — and nothing stands between them, which is
+        // what tells a joining from a plain sequence of a `syntax` rule.
+        assert!(has(
+            &soup,
+            quote! {
+                pub struct A<I>(
+                    #[parserc(parser = ::parserc::keyword("ab"))] pub I,
+                    #[parserc(parser = ::parserc::keyword("cd"))] pub I,
+                )
+                where
+                    I: ::parserc::chars::CharsInput;
+            }
+        ));
+        assert!(!soup.contains("Option < S < I >>"), "{soup}");
     }
 
     #[test]

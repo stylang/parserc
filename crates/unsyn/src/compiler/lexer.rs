@@ -37,7 +37,7 @@
 //! reads `r#foo` as the name `r`, which is a name and is not fatal; [`RawIdent`]
 //! therefore comes first, and takes the word whole.
 
-use parserc::syntax::{Char, Syntax};
+use parserc::syntax::Syntax;
 use parserc::{ControlFlow, Input, Kind, Parser, keyword, next, next_if, take_while};
 use unicode_ident::{is_xid_continue, is_xid_start};
 
@@ -157,48 +157,33 @@ impl<I: UnsynInput> IdentOrKeyword<I> {
 // spec means to say about either form.
 // ---------------------------------------------------------------------------
 
-/// A name written out of the keywords of the language, as `r#where` is.
 /// A name written with the `r#` sigil, which is how a word of the language is
 /// named as a name.
 ///
-/// The sigil and the name are one token of text, which is what the generated
-/// code reads the same production as: the name is asked for its text and never
-/// for its parts, and a name read in pieces would put a node in the tree that
-/// no rule of the language names.
+/// The two sub-expressions of the rule are the two fields of the node: the
+/// sigil, and behind it a name read again by the rule that names no word. The
+/// sigil is what tells the two forms of a name apart, so what stands where it
+/// was written is not this name, and no other reading of the rule begins there
+/// either.
 #[derive(Debug, PartialEq, Eq, PartialOrd, Ord, Clone, Syntax)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
-pub struct RawIdent<I>(#[parserc(parser = read_raw_ident)] pub I)
-where
-    I: UnsynInput;
-
-/// Reads `'r#' IdentOrKeyword` as one token.
-///
-/// The sigil is what makes the difference between the two forms of a name, so
-/// its refusal is fatal: what stands where it was written is not this name and
-/// no other reading of the rule begins there either.
-fn read_raw_ident<I>(input: &mut I) -> Result<I, <I as Input>::Error>
+pub struct RawIdent<I>
 where
     I: UnsynInput,
 {
-    let mut whole = input.clone();
-    let before = input.len();
-
-    keyword("r#")
-        .parse(input)
-        .map_err(SyntaxKind::Ident.map())?;
-
-    <IdentOrKeyword<I>>::into_parser()
-        .map(|node| node.0)
-        .parse(input)?;
-
-    Ok(whole.split_to(before - input.len()))
+    /// The `r#` that opens the name.
+    #[parserc(keyword = "r#", map_err = SyntaxKind::Ident.map())]
+    pub sigil: I,
+    /// The name the sigil marks, read as a name and not as a word, which is
+    /// what lets a raw name be a word of the language.
+    pub name: IdentOrKeyword<I>,
 }
 
 impl<I: UnsynInput> RawIdent<I> {
     /// The whole of the name, sigil and all.
     #[inline]
     pub fn text(&self) -> String {
-        self.0.as_str().to_owned()
+        self.sigil.as_str().to_owned() + self.name.0.as_str()
     }
 }
 
@@ -455,52 +440,57 @@ impl<I: UnsynInput> LitDec<I> {
 
 /// A code point written in a string, as `U+0009` is.
 ///
-/// The literal is one token of text, read as the rule writes it: the `U+` the
-/// spec puts there with `concat`, and then exactly four hex digits — four and
-/// not five, because `concat` leaves nothing between the two operands for a
-/// fifth digit to be read as anything else. The digits are not nodes of the
-/// tree: this is the shape the generated code gives the same production, and a
-/// code point is asked for its value and never for its parts.
+/// The two sub-expressions of the rule are the two fields of the node: the `U+`
+/// the spec puts there with `concat`, and the four digits behind it. `concat`
+/// leaves nothing between the two, so a fifth digit is not part of this token —
+/// it belongs to whatever operand comes next, which is what the generated code
+/// does with the same production, and the two readings have to accept the same
+/// text for one spec to compile itself.
 #[derive(Debug, PartialEq, Eq, PartialOrd, Ord, Clone, Syntax)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
-pub struct LitUnicode<I>(#[parserc(parser = read_lit_unicode)] pub I)
+pub struct LitUnicode<I>
 where
-    I: UnsynInput;
+    I: UnsynInput,
+{
+    /// The `U+` that opens the literal.
+    #[parserc(keyword = "U+", map_err = SyntaxKind::Unicode.map())]
+    pub prefix: I,
+    /// The four digits that spell the code point.
+    #[parserc(parser = read_lit_unicode_digits)]
+    pub digits: Vec<HexDigit<I>>,
+}
 
-/// Reads `'U+' concat HexDigit{4}`.
+/// Reads the `HexDigit{4}` of [`LitUnicode`].
 ///
-/// Four digits and no more are taken, exactly as the bound says: a fifth digit
-/// is not part of this token and belongs to whatever operand comes next, which
-/// is what the generated code does with the same production and the two
-/// readings have to accept the same text for one spec to compile itself.
-///
-/// The digits are counted on a copy, so a refusal leaves them where they
-/// stand: only the `U+` is gone, and the span of the refusal can point at
-/// every digit that was read rather than at the one that stopped the count.
-fn read_lit_unicode<I>(input: &mut I) -> Result<I, <I as Input>::Error>
+/// Four digits and no more are taken, exactly as the bound says. Fewer than
+/// four is a code point written short, which no enclosing choice can put right,
+/// so the refusal names the literal and covers the `U+` and every digit that
+/// was read rather than the one that stopped the count.
+fn read_lit_unicode_digits<I>(input: &mut I) -> Result<Vec<HexDigit<I>>, UnsynError>
 where
     I: UnsynInput,
 {
     let mut whole = input.clone();
     let before = input.len();
 
-    let prefix = keyword("U+")
-        .parse(input)
-        .map_err(SyntaxKind::Unicode.map())?;
+    let mut digits = Vec::new();
 
-    let mut rest = input.clone();
-    let digits = take_while(|c: char| c.is_ascii_hexdigit()).parse(&mut rest)?;
+    while digits.len() < 4 {
+        let Some(digit) = HexDigit::into_parser().ok().parse(input)? else {
+            break;
+        };
+
+        digits.push(digit);
+    }
 
     if digits.len() < 4 {
         return Err(UnsynError::Semantics(
             SemanticsKind::Unicode,
-            prefix.to_span().union(&digits.to_span()),
+            whole.split_to(before - input.len()).to_span(),
         ));
     }
 
-    _ = input.split_to(4);
-
-    Ok(whole.split_to(before - input.len()))
+    Ok(digits)
 }
 
 impl<I: UnsynInput> LitUnicode<I> {
@@ -510,16 +500,22 @@ impl<I: UnsynInput> LitUnicode<I> {
     /// to answer is whether the number of them is a character, which `D800`
     /// through `DFFF` are not.
     pub fn value(&self) -> Option<char> {
-        let digits = self.0.as_str().strip_prefix("U+")?;
+        let digits: String = self.digits.iter().map(|digit| digit.0.as_str()).collect();
 
-        u32::from_str_radix(digits, 16)
+        u32::from_str_radix(&digits, 16)
             .ok()
             .and_then(char::from_u32)
     }
 
     /// The text of the literal, `U+` and all.
     pub fn text(&self) -> String {
-        self.0.as_str().to_string()
+        let mut text = String::from(self.prefix.as_str());
+
+        for digit in &self.digits {
+            text.push_str(digit.0.as_str());
+        }
+
+        text
     }
 }
 
@@ -615,25 +611,12 @@ impl<I: UnsynInput> AsciiEscape<I> {
     }
 }
 
-/// One digit of a code point escape, with the separators that follow it.
-///
-/// The group `( HexDigit '_'* )` names no rule of the spec, which is what the
-/// analyzer's [`UnnamedAlternative`](super::errors::LintKind::UnnamedAlternative)
-/// lint says of a file that writes one; the hand tree names it here, because
-/// `{1, 6}` counts these and nothing else.
-#[derive(Debug, PartialEq, Eq, PartialOrd, Ord, Clone, Syntax)]
-#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
-pub struct EscapeDigit<I>
-where
-    I: UnsynInput,
-{
-    /// The digit itself.
-    pub digit: HexDigit<I>,
-    /// The separators of the digit, which belong to the digit they follow.
-    pub sep: Vec<Char<I, '_'>>,
-}
-
 /// An escape of a code point, as `\u{1F600}` is.
+///
+/// The three sub-expressions the rule writes are the three fields the node
+/// holds: the marker, the digits and the brace that closes it — the same shape
+/// the generated code gives the rule. The bound is of the digits, so they are
+/// held one apiece and counted as they are read.
 #[derive(Debug, PartialEq, Eq, PartialOrd, Ord, Clone, Syntax)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct UnicodeEscape<I>
@@ -645,34 +628,33 @@ where
     pub marker: I,
     /// The one to six digits the braces hold.
     #[parserc(parser = read_escape_digits)]
-    pub digits: Vec<EscapeDigit<I>>,
+    pub digits: Vec<HexDigit<I>>,
     /// The `}` that closes the escape.
     #[parserc(keyword = "}", map_err = PunctKind::BraceEnd.map())]
     pub close: I,
 }
 
-/// Reads the `{1, 6}` digits of [`UnicodeEscape`].
+/// Reads the `HexDigit{1, 6}` of [`UnicodeEscape`].
 ///
-/// The bound is of the digits and not of the text, since an underscore may
-/// separate them; it is counted here rather than left to the grammar because
-/// `{1, 6}` bounds the number of digits, which is what says how long the escape
-/// may be. What a seventh asks is not the bound but the `}` after it, and the
-/// closing of the escape is the one to say that it did not arrive.
-fn read_escape_digits<I>(input: &mut I) -> Result<Vec<EscapeDigit<I>>, UnsynError>
+/// The bound counts digits, so they are taken one at a time and at most six of
+/// them: a seventh is not the bound speaking but the `}` after it, and the
+/// closing of the escape is the one to say that it did not arrive. Fewer than
+/// one is an escape written empty, which no enclosing choice can put right, so
+/// the refusal names the escape rather than the count that met it.
+fn read_escape_digits<I>(input: &mut I) -> Result<Vec<HexDigit<I>>, UnsynError>
 where
     I: UnsynInput,
 {
     let mut digits = Vec::new();
 
     while digits.len() < 6 {
-        let Some(digit) = EscapeDigit::into_parser().ok().parse(input)? else {
+        let Some(digit) = HexDigit::into_parser().ok().parse(input)? else {
             break;
         };
 
         digits.push(digit);
     }
 
-    // No digit at all, which the lower bound of `{1, 6}` refuses.
     if digits.is_empty() {
         return Err(UnsynError::Semantics(
             SemanticsKind::UnicodeEscape,
@@ -686,15 +668,11 @@ where
 impl<I: UnsynInput> UnicodeEscape<I> {
     /// The code point the digits spell, when they spell a character.
     ///
-    /// Four to six hex digits is a number, and a number past `DFFF` or short
-    /// of `D800`'s refusal is no character; the pass that reads a value is the
-    /// one that says so, from the span of the escape it was reading.
+    /// One to six hex digits is a number, and a number past `DFFF` or short of
+    /// `D800`'s refusal is no character; the pass that reads a value is the one
+    /// that says so, from the span of the escape it was reading.
     pub fn value(&self) -> Option<char> {
-        let mut digits = String::new();
-
-        for group in &self.digits {
-            digits.push_str(group.digit.0.as_str());
-        }
+        let digits: String = self.digits.iter().map(|digit| digit.0.as_str()).collect();
 
         u32::from_str_radix(&digits, 16)
             .ok()
@@ -705,15 +683,12 @@ impl<I: UnsynInput> UnicodeEscape<I> {
     pub fn text(&self) -> String {
         let mut text = String::from(self.marker.as_str());
 
-        for group in &self.digits {
-            text.push_str(group.digit.0.as_str());
-
-            for _ in &group.sep {
-                text.push('_');
-            }
+        for digit in &self.digits {
+            text.push_str(digit.0.as_str());
         }
 
         text.push_str(self.close.as_str());
+
         text
     }
 }
@@ -1516,9 +1491,13 @@ mod tests {
         assert_eq!(lit.text(), "U+1123");
         assert_eq!(input.as_str(), "4");
 
-        // Fewer than four is the literal written short, and the span of the
-        // refusal covers the `U+` and every digit that was read.
-        for (source, span) in [("U+1", 0..3), ("U+12_3", 0..4), ("U+0x29", 0..3)] {
+        // Fewer than four is the literal written short. The span covers the
+        // digits that were read and not the `U+` before them: the bound is a
+        // field of its own, and a field's reader cannot see the field that
+        // came before it — which is how the generated code is shaped too, so
+        // the two refusals point at the same place and differ only in that the
+        // hand file names what it expected.
+        for (source, span) in [("U+1", 2..3), ("U+12_3", 2..4), ("U+0x29", 2..3)] {
             assert_eq!(
                 parse::<LitUnicode<_>>(source),
                 Err(UnsynError::Semantics(
@@ -1529,11 +1508,13 @@ mod tests {
             );
         }
 
-        // A refusal leaves the digits where they stand: the `U+` is gone, and
-        // what the rule could not finish is still there to be read again.
+        // A refusal leaves the input where the reading of the digits stopped,
+        // which is what the generated reader of the same bound does too: the
+        // digits that were read are gone, and what refused the fourth is still
+        // there.
         let mut input = TokenStream::from("U+12_3");
         assert!(input.parse::<LitUnicode<_>>().is_err());
-        assert_eq!(input.as_str(), "12_3");
+        assert_eq!(input.as_str(), "_3");
     }
 
     #[test]
@@ -1563,7 +1544,7 @@ mod tests {
 
     #[test]
     fn a_unicode_escape_is_one_to_six_digits() {
-        for source in ["\\u{1}", "\\u{1F600}", "\\u{1_0_0}", "\\u{abcdef}"] {
+        for source in ["\\u{1}", "\\u{1F600}", "\\u{abcdef}"] {
             assert_eq!(text(&parse::<UnicodeEscape<_>>(source).unwrap()), source);
         }
 
@@ -1575,6 +1556,17 @@ mod tests {
                 Err(UnsynError::Semantics(SemanticsKind::UnicodeEscape, _))
             ),
             "no digits at all"
+        );
+
+        // The rule writes `HexDigit{1, 6}` and nothing between the digits, so
+        // a separator is not part of an escape: six digits are taken and the
+        // brace is then asked for where the `_` stands.
+        assert!(
+            matches!(
+                parse::<UnicodeEscape<_>>("\\u{1_0_0}"),
+                Err(UnsynError::Punct(PunctKind::BraceEnd, _, _))
+            ),
+            "an underscore separates no digits"
         );
 
         // A seventh digit is not the bound speaking: six are taken and the

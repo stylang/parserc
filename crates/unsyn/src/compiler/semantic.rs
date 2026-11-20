@@ -904,8 +904,8 @@ impl<'ast, I: UnsynInput> Visit<'ast, I> for Checker<'ast, I> {
         walk::walk_range(self, node);
 
         let (text, ends) = match node {
-            syntax::Range::Unicode(from, _, _, _, to) => (
-                format!("{}-{}", from.text(), to.text()),
+            syntax::Range::Unicode(from, dash, to) => (
+                format!("{}{}{}", from.text(), dash.as_str(), to.text()),
                 [self.code_of(from), self.code_of(to)],
             ),
             syntax::Range::Str(from, dash, to) => (

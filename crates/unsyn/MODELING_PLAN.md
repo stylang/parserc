@@ -246,11 +246,56 @@
           文本，故两侧都不可达）。
           注释家族测试改名为 `a_block_comment_is_one_token_of_text_in_both_trees`，
           它现在是断言“无投影也相等”的正向用例。
-    - [ ] **M8.2b-6 转义类型收尾（外观性）**：`AsciiEscape`（enum）与
-          `UnicodeEscape`（`Vec<EscapeDigit>`）仍是结构化类型，但 `LitStr` 的
-          body 变成文本后它们已经**不可达**——两个树的 walk 都不会走到，
-          因此不再是对等差异，只是手写侧多余的种类。可顺手改成不透明
-          文本并删 `EscapeDigit`，也可以不做。
+    - [x] **M8.2b-6 转义与字段数（生成器改造）**：用户改 spec 后提出硬规则
+          ——**产生式右侧有多少个子表达式，就生成多少个 Field**。
+          根因定位（实验证据，非推断）：`lexer U -> 'ab' H{1,6} 'c'` 单独生成时
+          是 struct 多字段，一旦被另一个规则的内部匹名选择引用（如 `LitStr`
+          的 body）就坡缩成单个 `read_*` 文本字段。因为折叠（`.or()` 链）
+          要求所有分支回答同一类型，而 `reference()` 对非节点规则发
+          `.map(|node| node.0)`——于是 `node_rules` 把被折叠引用的规则全部
+          降级成 Text。
+
+          修法：生成一个文件级 `text_of<P, I>(parser, input) -> I` 辅助函数，
+          在折叠处把“回答节点”的分支包成 `|input| { text_of(p, input) }`，
+          并删掉 `atom_forced` 里 `Reference if folds` 的降级传染。
+          **只包需要的分支**（`branch_yields_node`：仅“单独一个名字引用且它是
+          节点”），否则词法最热的逐字符循环会每个字符多一次 `input.clone()`。
+
+          效果（生成侧字段数）：`RawIdent` 1→2、`UnicodeEscape` 1→3、
+          `LitUnicode` 1→2、`InnerBlockDoc` 1→3、`OuterBlockDoc` 1→4、
+          `BlockCommentOrDoc` 文本→enum(3)。`LitDec`/`LitStr`/`NonKeywordIdent`/
+          `QuoteEscape`/单字符集本来就是 1 个子表达式 → 1 字段 ✓。
+
+          附带修两个真 bug（都是“降级取消后首次被走到”的代码路径）：
+          ① 有界重复发 `else { break }`，rustfmt 会改写成 `{ break; }` →
+            保留文件与新生成文件 token 不等，freshness 失败；
+          ② 下界为 1 时发 `taken.len() < 1usize` → clippy `len_without_is_empty`，
+            改为 `taken.is_empty()`。
+          又：`is_sequence` 不看穿 `concat`，所以 `LitUnicode -> 'U+' concat
+          HexDigit{4}` 被当成单子表达式；新增 `operand_count`/`operands_of` 沿
+          `concat` 链展开计数后修为 2 字段。
+
+          手写侧同步：`RawIdent` 回到 `{sigil, name: IdentOrKeyword}`、
+          `UnicodeEscape` 改为 `{marker, digits: Vec<HexDigit>, close}`（删
+          `EscapeDigit` 与 `'_'*`）、`LitUnicode` 改为 `{prefix,
+          digits: Vec<HexDigit>}`、`Range::Unicode` 去掉两个 junction（spec 已改
+          `concat`）并与 `Range::Str` 同形。
+
+          **又找到并修了一个活的分歧**：`unsyn.us` 全文没有 `r#`，所以双树
+          比对从来没走到 `RawIdent`——手写侧读成一整段文本、生成侧读成
+          “sigil + 名字节点”，用 `syntax r#where -> 'a';` 一探就 `EQ false`。
+          已修并新增 `a_name_written_raw_is_two_parts_in_both_trees` 钉住。
+    - [ ] **M8.2b-7 剩下的唯一根因：lexer 侧“字面量选择”不成 enum**。
+          仍为单字段文本但 spec 写了多个顶层备选的规则，只剩四个：
+          `AsciiEscape`（6 备选，首备选是 3 子表达式序列）、`BlockComment`
+          （3 备选，首备选是 4 子表达式序列）、`LeadingKeywords`（3）、
+          `FollowingKeywords`（3）。原因：`named_choice` 只认“备选全是裸名
+          引用”，字面量选择就不算。`syntax` 侧已经会对字面量选择产 enum
+          （`ExprWithoutSuffix` 7 变体、`Suffix` 4、`RepeatBound` 3、`Item` 3），
+          所以缺的是把同一机制用到 `lexer` 规则。
+          连带影响：`LeadingKeywords` 变 enum 后 `Stmt::decl()` 可以从变体而
+          不是从关键字文本得到 `Decl`（目前这个映射在 `syntax.rs:746`，是
+          M8.2c 要去掉的手写侧假设之一）。
   - [ ] **M8.2b-6 转义类型收尾（外观性）**：`AsciiEscape`（enum）与
         `UnicodeEscape`（`Vec<EscapeDigit>`）仍是结构化类型，但 `LitStr` 的
         body 变成文本后它们已经**不可达**——两个树的 walk 都不会走到，

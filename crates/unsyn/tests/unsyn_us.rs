@@ -184,10 +184,14 @@ mod and_it_reads {
     ///
     /// The raw form is a name of two parts — the sigil and, behind it, a name
     /// read again by the rule that names no word — and the plain form is the
-    /// one text the `except` left standing.
+    /// one text the `except` left standing. Both answer with the whole of the
+    /// name, sigil and all, which is what a definition's name is.
     fn name(node: &Ident<TokenStream<'_>>) -> (String, &'static str) {
         match node {
-            Ident::RawIdent(raw) => (raw.0.as_str().to_owned(), "RawIdent"),
+            Ident::RawIdent(raw) => (
+                raw.f1.as_str().to_owned() + raw.ident_or_keyword.0.as_str(),
+                "RawIdent",
+            ),
             Ident::NonKeywordIdent(plain) => (plain.0.as_str().to_owned(), "NonKeywordIdent"),
         }
     }
@@ -229,28 +233,45 @@ mod and_it_reads {
 
     #[test]
     fn a_unicode_literal_wants_four_digits() {
-        assert_eq!(
-            parse::<LitUnicode<_>>("U+0041")
-                .expect("four digits")
-                .0
-                .as_str(),
-            "U+0041"
-        );
+        // The two sub-expressions of the rule are the two fields of the node:
+        // the `U+` and the four digits behind it.
+        let lit = parse::<LitUnicode<_>>("U+0041").expect("four digits");
+        assert_eq!(lit.f1.as_str(), "U+");
+        assert_eq!(lit.hex_digit.len(), 4, "one node per digit");
+
         assert!(parse::<LitUnicode<_>>("U+004").is_err(), "three digits");
+
+        // Four digits and no more: a fifth is not part of the literal but the
+        // text of whatever operand comes next.
+        let mut input = parserc::chars::TokenStream::<parserc::Kind>::from("U+00419");
+        let lit = input
+            .parse::<LitUnicode<_>>()
+            .expect("the first four digits");
+        assert_eq!(lit.hex_digit.len(), 4);
+        assert_eq!(input.as_str(), "9");
     }
 
     #[test]
-    fn an_escape_counts_its_groups() {
-        assert_eq!(
-            parse::<UnicodeEscape<_>>(r"\u{1F_600}")
-                .expect("an escape with its underscores")
-                .0
-                .as_str(),
-            r"\u{1F_600}"
-        );
+    fn an_escape_takes_one_to_six_digits_and_no_separator() {
+        // The three sub-expressions of the rule are the three fields of the
+        // node: the marker, the digits and the brace that closes them.
+        let escape = parse::<UnicodeEscape<_>>(r"\u{1F600}").expect("an escape of five digits");
+        assert_eq!(escape.f1.as_str(), r"\u{");
+        assert_eq!(escape.hex_digit.len(), 5, "one node per digit");
+        assert_eq!(escape.f2.as_str(), "}");
+
         assert!(
             parse::<UnicodeEscape<_>>(r"\u{}").is_err(),
             "no digits at all"
+        );
+
+        // The rule bounds the digits and writes nothing between them, so a
+        // separator is no part of an escape: the six digits are taken and the
+        // brace is then asked for where the `_` stands.
+        let mut input = parserc::chars::TokenStream::<parserc::Kind>::from(r"\u{1F_600}");
+        assert!(
+            input.parse::<UnicodeEscape<_>>().is_err(),
+            "an underscore separates no digits"
         );
     }
 

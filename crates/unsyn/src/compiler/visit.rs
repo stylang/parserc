@@ -371,12 +371,6 @@ where
         walk::walk_unicode_escape(self, node);
     }
 
-    /// The `( HexDigit '_'* )` of [`UnicodeEscape`](lexer::UnicodeEscape), a
-    /// group the spec leaves unnamed and the hand tree names for it.
-    fn visit_escape_digit(&mut self, node: &'ast lexer::EscapeDigit<I>) {
-        walk::walk_escape_digit(self, node);
-    }
-
     /// `lexer OctDigit -> ['0'-'7'];`
     fn visit_oct_digit(&mut self, node: &'ast lexer::OctDigit<I>) {
         walk::walk_oct_digit(self, node);
@@ -766,24 +760,15 @@ pub mod walk {
         node: &'ast syntax::Range<I>,
     ) {
         match node {
-            syntax::Range::Unicode(start, s, dash, s2, end) => {
-                v.visit_lit_unicode(start);
-
-                if let Some(s) = s {
-                    v.visit_s(s);
-                }
-
-                v.visit_minus(dash);
-
-                if let Some(s) = s2 {
-                    v.visit_s(s);
-                }
-
-                v.visit_lit_unicode(end);
-            }
             // The `-` of this form is joined to both of its neighbours by the
             // `concat` the rule asks for, so it is the text of the node rather
-            // than a terminal of it, and reaches the visitor as text.
+            // than a terminal of it, and reaches the visitor as text — as it
+            // does for the form of two strings.
+            syntax::Range::Unicode(start, dash, end) => {
+                v.visit_lit_unicode(start);
+                v.visit_text(dash);
+                v.visit_lit_unicode(end);
+            }
             syntax::Range::Str(start, dash, end) => {
                 v.visit_lit_str(start);
                 v.visit_text(dash);
@@ -1004,7 +989,8 @@ pub mod walk {
         v: &mut V,
         node: &'ast lexer::RawIdent<I>,
     ) {
-        v.visit_text(&node.0);
+        v.visit_text(&node.sigil);
+        v.visit_ident_or_keyword(&node.name);
     }
 
     pub fn walk_non_keyword_ident<'ast, I: UnsynInput, V: ?Sized + Visit<'ast, I>>(
@@ -1073,21 +1059,10 @@ pub mod walk {
         v.visit_text(&node.marker);
 
         for digit in &node.digits {
-            v.visit_escape_digit(digit);
+            v.visit_hex_digit(digit);
         }
 
         v.visit_text(&node.close);
-    }
-
-    pub fn walk_escape_digit<'ast, I: UnsynInput, V: ?Sized + Visit<'ast, I>>(
-        v: &mut V,
-        node: &'ast lexer::EscapeDigit<I>,
-    ) {
-        v.visit_hex_digit(&node.digit);
-
-        for separator in &node.sep {
-            v.visit_text(&separator.0);
-        }
     }
 
     pub fn walk_lit_dec<'ast, I: UnsynInput, V: ?Sized + Visit<'ast, I>>(
@@ -1102,7 +1077,11 @@ pub mod walk {
         v: &mut V,
         node: &'ast lexer::LitUnicode<I>,
     ) {
-        v.visit_text(&node.0);
+        v.visit_text(&node.prefix);
+
+        for digit in &node.digits {
+            v.visit_hex_digit(digit);
+        }
     }
 
     // The two rules that are nothing but a choice of other rules keep the rules

@@ -646,15 +646,15 @@ where
     I: UnsynInput,
 {
     /// A range of code points, as `U+0009-U+000D` is.
+    ///
+    /// The rule asks for the dash of this form by `concat`, as it does for the
+    /// form of two strings, so neither end of the dash holds trivia and the two
+    /// variants are written the same way.
     Unicode(
         Box<LitUnicode<I>>,
-        /// The run before the dash.
-        Option<S<I>>,
-        /// The `-` that divides the two ends.
-        #[parserc(crucial)]
-        Minus<I>,
-        /// The run before the end above.
-        Option<S<I>>,
+        /// The `-` that divides the two ends, joined to both of them.
+        #[parserc(crucial, keyword = "-", map_err = PunctKind::Minus.map())]
+        I,
         Box<LitUnicode<I>>,
     ),
     /// A range of strings, as `'0'-'7'` is.

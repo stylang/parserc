@@ -320,3 +320,30 @@ syntax A -> 'b';
 
     assert_one_sequence(&generated, &hand, source);
 }
+
+/// A name written raw is a name of two parts, and both trees say so.
+///
+/// `unsyn.us` never writes `r#`, so the parity check over it cannot tell
+/// whether the two trees agree on the raw form of a name — and they did not:
+/// one held the sigil and the name behind it as the two sub-expressions the
+/// rule writes, the other held the whole of it as one run of text.
+#[test]
+fn a_name_written_raw_is_two_parts_in_both_trees() {
+    let source = "syntax r#where -> 'a';\nlexer r#type -> 'b';\n";
+
+    let (generated, hand) = both_trees(source);
+
+    // The name behind the sigil is a node of its own, and both trees reach it.
+    assert!(
+        generated.iter().any(|(hook, _)| *hook == "visit_raw_ident"),
+        "the generated tree never reached the raw form of a name"
+    );
+    assert!(
+        generated
+            .iter()
+            .any(|(hook, _)| *hook == "visit_ident_or_keyword"),
+        "the generated tree never reached the name behind the sigil"
+    );
+
+    assert_one_sequence(&generated, &hand, source);
+}

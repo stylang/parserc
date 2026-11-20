@@ -63,7 +63,7 @@ lexer AsciiEscape ->
     ;
 
 lexer UnicodeEscape ->
-    '\\u{' ( HexDigit '_'* ){1, 6} '}'
+    '\\u{' HexDigit{1, 6} '}'
     ;
 
 lexer OctDigit -> ['0'-'7'];
@@ -154,7 +154,7 @@ syntax RepeatBound ->
 syntax Repeat -> '{' RepeatBound '}';
 
 syntax Range ->
-      LitUnicode '-' LitUnicode
+      LitUnicode concat '-' concat LitUnicode
     | LitStr concat '-' concat LitStr
     ;
 
