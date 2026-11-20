@@ -115,21 +115,18 @@
 //!   lets that question decide, while the hand file answers it by naming the
 //!   node anyway.
 //! - The hand file gives the parts of a rule names that say what they hold —
-//!   `open`, `head`, `tail` — and names the unnamed choices of a right side as
-//!   rules of their own (`LitStrContent`, `BlockCommentTail`), which is what the
+//!   `open`, `head`, `tail` — where the generator has only the file to go by and
+//!   says `f1`, `f2`, and the rule's own name. A group of a right side that the
+//!   spec never named used to be answered the same way, by the hand file naming
+//!   it anyway; those are now rules of `unsyn.us` where a reader of a pattern
+//!   matches on them, and text where nobody does, which is what the
 //!   [`UnnamedAlternative`](super::errors::LintKind::UnnamedAlternative) lint
-//!   asks the author of a file to do in the spec. The generator has only the
-//!   file to go by, and says `f1`, `f2`, and the rule's own name.
+//!   asks of the author of a file either way.
 //! - A refusal the generated code reports is a [`Kind`](parserc::Kind) of the
 //!   combinator that met it, where the hand-written file names what it expected
 //!   with its own [`UnsynError`] variants. Naming them
 //!   is a table the caller of a build would have to supply, in the same way that
 //!   it supplies the externals.
-//! - A `LitUnicode` is read as the four digits its rule asks for and no more, so
-//!   a fifth is left to the rule that encloses it. The hand-written reader takes
-//!   every digit it is offered and refuses the literal; a file that says anything
-//!   else is already refused by the analyzer, and both readings accept the same
-//!   files.
 //!
 //! # What the generated code asks of its crate
 //!

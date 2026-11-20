@@ -419,32 +419,20 @@ impl<'ast, I: UnsynInput> Checker<'ast, I> {
 
     /// The characters a string literal holds.
     ///
-    /// The reader has refused a literal whose escapes are not among those the spec
-    /// writes, so the only thing left to find is an escape of a code point that is
-    /// no character, which `\u{D800}` and its like are. Its place is reported as a
-    /// piece of the literal's own span, since the literal is the only node that
-    /// reaches it.
+    /// The reader has refused a literal whose escapes are not among those the
+    /// spec writes, so the only thing left to find is an escape of a code point
+    /// that is no character, which `\u{D800}` and its like are. The decoder
+    /// hands those out by span — the literal is one run of text, so nothing
+    /// below it has a span of its own to point at.
     fn chars_of(&mut self, lit: &'ast lexer::LitStr<I>) -> Vec<char> {
-        let mut chars = Vec::new();
+        let decoded = lit.decoded();
 
-        for piece in &lit.body {
-            if let lexer::LitStrContent::Unicode(escape) = piece
-                && escape.value().is_none()
-            {
-                // The escape was read whole and well; only the number it
-                // spells is no character, and its own span is where to say so.
-                self.diagnostics.push(UnsynError::Semantics(
-                    SemanticsKind::InvalidCodePoint,
-                    escape.to_span(),
-                ));
-
-                continue;
-            }
-
-            chars.extend(piece.chars());
+        for span in decoded.invalid {
+            self.diagnostics
+                .push(UnsynError::Semantics(SemanticsKind::InvalidCodePoint, span));
         }
 
-        chars
+        decoded.chars
     }
 
     /// The code point a `U+` literal spells, when it spells one.

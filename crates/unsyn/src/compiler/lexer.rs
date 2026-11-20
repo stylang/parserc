@@ -8,14 +8,18 @@
 //! that is the whole of the right side is an enum whose variants are the
 //! alternatives.
 //!
-//! A choice written inside a group — the body of [`LitStr`], the alternatives
-//! that fill the block rules — belongs to no left side, and the
-//! [analyzer](super::semantic) says so of every file that writes one. The hand
-//! tree cannot leave such a choice unmodelled either, so it names these groups
-//! on the pass's behalf — [`LitStrContent`] and its like — and models each of
-//! them as an enum, the same shape a named rule would have earned. What the
-//! spec instead answers from outside itself — `<IdentOrKeyword>` and its like —
-//! is read whole, as one token of text, which is what the file says a name is.
+//! A choice written inside a group belongs to no left side, and the
+//! [analyzer](super::semantic) says so of every file that writes one. Where the
+//! choice is what a *pattern* has to answer — which of the quantity operators
+//! stood on an operand, which of the three forms spelled a bound — the group is
+//! a rule of the spec and a node of the tree, because a reader of a pattern is
+//! matching on it either way. Where it is only how a token is spelled, the group
+//! earns no name and no node either: the token is read as one run of text and
+//! [`decode`] says what the run holds. What the spec answers from outside
+//! itself — `<IdentOrKeyword>` and its like — is read whole for the same
+//! reason.
+//!
+//! [`decode`]: super::decode
 //!
 //! # Where the trivia goes
 //!
@@ -34,7 +38,7 @@
 //! therefore comes first, and takes the word whole.
 
 use parserc::syntax::{Char, Syntax};
-use parserc::{ControlFlow, Input, Kind, Parser, Span, keyword, next, next_if, take_while};
+use parserc::{ControlFlow, Input, Kind, Parser, keyword, next, next_if, take_while};
 use unicode_ident::{is_xid_continue, is_xid_start};
 
 use crate::compiler::errors::{KeywordKind, PunctKind, SemanticsKind, SyntaxKind, UnsynError};
@@ -154,50 +158,69 @@ impl<I: UnsynInput> IdentOrKeyword<I> {
 // ---------------------------------------------------------------------------
 
 /// A name written out of the keywords of the language, as `r#where` is.
+/// A name written with the `r#` sigil, which is how a word of the language is
+/// named as a name.
+///
+/// The sigil and the name are one token of text, which is what the generated
+/// code reads the same production as: the name is asked for its text and never
+/// for its parts, and a name read in pieces would put a node in the tree that
+/// no rule of the language names.
 #[derive(Debug, PartialEq, Eq, PartialOrd, Ord, Clone, Syntax)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
-pub struct RawIdent<I>
+pub struct RawIdent<I>(#[parserc(parser = read_raw_ident)] pub I)
+where
+    I: UnsynInput;
+
+/// Reads `'r#' IdentOrKeyword` as one token.
+///
+/// The sigil is what makes the difference between the two forms of a name, so
+/// its refusal is fatal: what stands where it was written is not this name and
+/// no other reading of the rule begins there either.
+fn read_raw_ident<I>(input: &mut I) -> Result<I, <I as Input>::Error>
 where
     I: UnsynInput,
 {
-    /// The `r#` that opens the name.
-    #[parserc(keyword = "r#", map_err = SyntaxKind::Ident.map())]
-    pub sigil: I,
-    /// The name the sigil marks, read as a name and not as a word, which is what
-    /// lets a raw name be a word of the language.
-    pub name: IdentOrKeyword<I>,
+    let mut whole = input.clone();
+    let before = input.len();
+
+    keyword("r#")
+        .parse(input)
+        .map_err(SyntaxKind::Ident.map())?;
+
+    <IdentOrKeyword<I>>::into_parser()
+        .map(|node| node.0)
+        .parse(input)?;
+
+    Ok(whole.split_to(before - input.len()))
 }
 
 impl<I: UnsynInput> RawIdent<I> {
     /// The whole of the name, sigil and all.
     #[inline]
     pub fn text(&self) -> String {
-        self.sigil.as_str().to_owned() + &self.name.text()
+        self.0.as_str().to_owned()
     }
 }
 
 /// A name that is not a word of the language.
+///
+/// The name is one token of text, as the generated code reads it: what the
+/// `except` asks is answered while the name is read and leaves nothing of its
+/// own in the tree.
 #[derive(Debug, PartialEq, Eq, PartialOrd, Ord, Clone, Syntax)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
-pub struct NonKeywordIdent<I>
+pub struct NonKeywordIdent<I>(#[parserc(parser = read_non_keyword_ident)] pub I)
 where
-    I: UnsynInput,
-{
-    /// The name the `except` leaves standing.
-    ///
-    /// The name is the whole node: what the removal asks is not a part of it,
-    /// and the name read is held by the [`IdentOrKeyword`] it answers with.
-    #[parserc(parser = read_non_keyword_ident)]
-    pub name: IdentOrKeyword<I>,
-}
+    I: UnsynInput;
 
-/// Reads the `IdentOrKeyword except Keywords` of [`NonKeywordIdent`].
+/// Reads the `IdentOrKeyword except Keywords` of [`NonKeywordIdent`] as one
+/// token of text.
 ///
 /// `except` asks its question of the text the operand to its left read and of
 /// nothing else: the removal runs over that text on its own, and only a removal
 /// that takes all of it refuses the name. `lexerX` is therefore a name of its
 /// own, although `lexer` fits the head of it.
-fn read_non_keyword_ident<I>(input: &mut I) -> Result<IdentOrKeyword<I>, UnsynError>
+fn read_non_keyword_ident<I>(input: &mut I) -> Result<I, UnsynError>
 where
     I: UnsynInput,
 {
@@ -212,7 +235,7 @@ where
         ));
     }
 
-    Ok(name)
+    Ok(name.0)
 }
 
 /// A name of a node: either a word of the language written raw, or one that is
@@ -239,7 +262,7 @@ impl<I: UnsynInput> Ident<I> {
     pub fn text(&self) -> String {
         match self {
             Ident::Raw(raw) => raw.text(),
-            Ident::NonKeyword(ident) => ident.name.text(),
+            Ident::NonKeyword(ident) => ident.0.as_str().to_owned(),
         }
     }
 }
@@ -432,21 +455,52 @@ impl<I: UnsynInput> LitDec<I> {
 
 /// A code point written in a string, as `U+0009` is.
 ///
-/// unsyn asks for exactly four hex digits after `U+`, where Rust allows four to
-/// six, because the token it returns is always six characters long. The count
-/// is a thing the grammar cannot say in fields, so the reading of the digits
-/// keeps the check the rule asks for; what the node holds once it has passed
-/// is the digits themselves.
-#[derive(Debug, PartialEq, Eq, PartialOrd, Ord, Clone)]
+/// The literal is one token of text, read as the rule writes it: the `U+` the
+/// spec puts there with `concat`, and then exactly four hex digits — four and
+/// not five, because `concat` leaves nothing between the two operands for a
+/// fifth digit to be read as anything else. The digits are not nodes of the
+/// tree: this is the shape the generated code gives the same production, and a
+/// code point is asked for its value and never for its parts.
+#[derive(Debug, PartialEq, Eq, PartialOrd, Ord, Clone, Syntax)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
-pub struct LitUnicode<I>
+pub struct LitUnicode<I>(#[parserc(parser = read_lit_unicode)] pub I)
+where
+    I: UnsynInput;
+
+/// Reads `'U+' concat HexDigit{4}`.
+///
+/// Four digits and no more are taken, exactly as the bound says: a fifth digit
+/// is not part of this token and belongs to whatever operand comes next, which
+/// is what the generated code does with the same production and the two
+/// readings have to accept the same text for one spec to compile itself.
+///
+/// The digits are counted on a copy, so a refusal leaves them where they
+/// stand: only the `U+` is gone, and the span of the refusal can point at
+/// every digit that was read rather than at the one that stopped the count.
+fn read_lit_unicode<I>(input: &mut I) -> Result<I, <I as Input>::Error>
 where
     I: UnsynInput,
 {
-    /// The `U+` that opens the literal.
-    pub prefix: I,
-    /// The four digits that spell the code point.
-    pub digits: Vec<HexDigit<I>>,
+    let mut whole = input.clone();
+    let before = input.len();
+
+    let prefix = keyword("U+")
+        .parse(input)
+        .map_err(SyntaxKind::Unicode.map())?;
+
+    let mut rest = input.clone();
+    let digits = take_while(|c: char| c.is_ascii_hexdigit()).parse(&mut rest)?;
+
+    if digits.len() < 4 {
+        return Err(UnsynError::Semantics(
+            SemanticsKind::Unicode,
+            prefix.to_span().union(&digits.to_span()),
+        ));
+    }
+
+    _ = input.split_to(4);
+
+    Ok(whole.split_to(before - input.len()))
 }
 
 impl<I: UnsynInput> LitUnicode<I> {
@@ -456,63 +510,16 @@ impl<I: UnsynInput> LitUnicode<I> {
     /// to answer is whether the number of them is a character, which `D800`
     /// through `DFFF` are not.
     pub fn value(&self) -> Option<char> {
-        let mut digits = String::new();
+        let digits = self.0.as_str().strip_prefix("U+")?;
 
-        for digit in &self.digits {
-            digits.push_str(digit.0.as_str());
-        }
-
-        u32::from_str_radix(&digits, 16)
+        u32::from_str_radix(digits, 16)
             .ok()
             .and_then(char::from_u32)
     }
 
     /// The text of the literal, `U+` and all.
     pub fn text(&self) -> String {
-        let mut text = String::from(self.prefix.as_str());
-
-        for digit in &self.digits {
-            text.push_str(digit.0.as_str());
-        }
-
-        text
-    }
-}
-
-impl<I> Syntax<I> for LitUnicode<I>
-where
-    I: UnsynInput,
-{
-    /// Reads the `'U+' concat HexDigit{4}` of [`LitUnicode`].
-    ///
-    /// `concat` joins the two operands with nothing between them, so a fifth
-    /// digit cannot be the start of the next token: it is a bound written
-    /// wrong, and the literal is refused.
-    #[inline]
-    fn parse(input: &mut I) -> Result<Self, <I as Input>::Error> {
-        let mut whole = input.clone();
-
-        let prefix = keyword("U+")
-            .parse(input)
-            .map_err(SyntaxKind::Unicode.map())?;
-
-        let digits = Vec::<HexDigit<I>>::into_parser().parse(input)?;
-
-        if digits.len() != 4 {
-            return Err(UnsynError::Semantics(
-                SemanticsKind::Unicode,
-                prefix.to_span().union(&digits.to_span()),
-            ));
-        }
-
-        _ = whole.split_to(prefix.len() + digits.len());
-
-        Ok(Self { prefix, digits })
-    }
-
-    #[inline]
-    fn to_span(&self) -> Span {
-        self.prefix.to_span().union(&self.digits.to_span())
+        self.0.as_str().to_string()
     }
 }
 
@@ -716,62 +723,17 @@ impl<I: UnsynInput> UnicodeEscape<I> {
 // `                   | UnicodeEscape )* '\'';`
 // ---------------------------------------------------------------------------
 
-/// The `( ~['"','\\',CR] | QuoteEscape | AsciiEscape | UnicodeEscape )` that
-/// fills a string.
-///
-/// The group names no rule of the spec, which is what the analyzer's
-/// [`UnnamedAlternative`](super::errors::LintKind::UnnamedAlternative) lint says
-/// of a file that writes one; the hand tree names it here, because the reading
-/// of a string is a reading of its pieces one by one.
-#[derive(Debug, PartialEq, Eq, PartialOrd, Ord, Clone, Syntax)]
-#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
-pub enum LitStrContent<I>
-where
-    I: UnsynInput,
-{
-    /// One character of the plain text of the body, which is none of the three
-    /// the set refuses: the quote that would close the literal, the backslash
-    /// that opens an escape, and the `CR` no escape writes.
-    Plain(#[parserc(parser = next_if(|c: char| c != '\'' && c != '\\' && c != '\r'))] I),
-    /// An escaped quote.
-    Quote(QuoteEscape<I>),
-    /// One of the escapes ASCII writes with a backslash.
-    Ascii(AsciiEscape<I>),
-    /// An escape of a code point.
-    Unicode(UnicodeEscape<I>),
-}
-
-impl<I: UnsynInput> LitStrContent<I> {
-    /// The characters the piece spells.
-    ///
-    /// An escape of no character — `\u{D800}` and its like, a shape the reader
-    /// accepts because four to six hex digits is a number — spells none, and
-    /// the pass that reads a value is the one to refuse it.
-    pub fn chars(&self) -> Vec<char> {
-        match self {
-            LitStrContent::Plain(text) => text.as_str().chars().collect(),
-            LitStrContent::Quote(_) => vec!['\''],
-            LitStrContent::Ascii(escape) => vec![escape.value()],
-            LitStrContent::Unicode(escape) => escape.value().into_iter().collect(),
-        }
-    }
-
-    /// The text of the piece, as it was written.
-    pub fn text(&self) -> String {
-        match self {
-            LitStrContent::Plain(text) => text.as_str().to_owned(),
-            LitStrContent::Quote(quote) => quote.0.as_str().to_owned(),
-            LitStrContent::Ascii(escape) => escape.text(),
-            LitStrContent::Unicode(escape) => escape.text(),
-        }
-    }
-}
-
 /// A string literal: any run of characters between two `'`, in which a `'`, a
 /// `\` and a `CR` can only be written by an escape.
 ///
-/// The content stops at the first `'` that is not part of an escape, so a
-/// literal can never hold a bare apostrophe.
+/// The body is one run of text, which is the shape the generated code gives the
+/// same production: the pieces are read as tokens only so that the run stops
+/// where a piece does not begin, and what the tree keeps is the text they made
+/// up. What the literal spells is read back from that text by [`decode`],
+/// because a member of a set and the end of a range are both asked what a
+/// literal *spells* and never how it was spelled.
+///
+/// [`decode`]: super::decode
 #[derive(Debug, PartialEq, Eq, PartialOrd, Ord, Clone, Syntax)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct LitStr<I>
@@ -781,35 +743,77 @@ where
     /// The quote that opens the literal.
     #[parserc(keyword = "'", map_err = PunctKind::SingleQuote.map())]
     pub open: I,
-    /// The pieces of the body, each one character of plain text or one escape.
+    /// The body of the literal, pieces of plain text and escapes together.
     ///
     /// The repetition ends where no piece begins, which is the closing quote
     /// wherever one stands and whatever the text after the pieces otherwise
     /// is; the quote that has to come next says what was expected there.
-    pub body: Vec<LitStrContent<I>>,
+    #[parserc(parser = read_lit_str_body)]
+    pub body: I,
     /// The quote that closes the literal.
     #[parserc(keyword = "'", map_err = PunctKind::SingleQuote.map())]
     pub close: I,
 }
 
+/// Reads the body of a string literal as one run of text.
+///
+/// The four pieces the rule lists are tried one after another, and each is
+/// thrown away once it has been read: they bound the run and say nothing the
+/// tree does not already hold. A piece that does not begin is the end of the
+/// body, so the loop stops there with the input untouched and the closing
+/// quote — or whatever else stands there — is left for the rule above.
+fn read_lit_str_body<I>(input: &mut I) -> Result<I, <I as Input>::Error>
+where
+    I: UnsynInput,
+{
+    let mut whole = input.clone();
+    let mut taken = 0;
+
+    loop {
+        let here = input.len();
+
+        let piece = next_if(|c: char| c != '\'' && c != '\\' && c != '\r')
+            .map(|_| ())
+            .or(<QuoteEscape<I>>::into_parser().map(|_| ()))
+            .or(<AsciiEscape<I>>::into_parser().map(|_| ()))
+            .or(<UnicodeEscape<I>>::into_parser().map(|_| ()))
+            .ok();
+
+        if piece.parse(input)?.is_none() {
+            break;
+        }
+
+        taken += here - input.len();
+    }
+
+    Ok(whole.split_to(taken))
+}
+
 impl<I: UnsynInput> LitStr<I> {
+    /// What the body spells: the characters of the literal, and the span of
+    /// every escape among them that spells no character.
+    ///
+    /// The two quotes bound the literal and carry no value, so only the body is
+    /// read, and the offsets the refusals carry are the source's because the
+    /// body says where in the source it began.
+    pub fn decoded(&self) -> super::decode::Body {
+        super::decode::string_body(self.body.as_str(), self.body.start())
+    }
+
     /// The characters the literal spells.
     ///
-    /// The two quotes bound the literal and carry no value, so only the body
-    /// is read. An escape of no character yields no character: the refusal it
-    /// is worth belongs to the pass that reads a value, which reaches the
-    /// escape itself and says so from its span.
+    /// An escape of no character yields no character: the refusal it is worth
+    /// is in [`decoded`](LitStr::decoded), and the pass that reads a value is
+    /// the one to say so from that span.
     pub fn chars(&self) -> Vec<char> {
-        self.body.iter().flat_map(LitStrContent::chars).collect()
+        self.decoded().chars
     }
 
     /// The text of the literal, both quotes and all, as it was written.
     pub fn text(&self) -> String {
         let mut text = String::from(self.open.as_str());
 
-        for piece in &self.body {
-            text.push_str(&piece.text());
-        }
+        text.push_str(self.body.as_str());
 
         text.push_str(self.close.as_str());
         text
@@ -1283,7 +1287,7 @@ mod tests {
     impl ToText for NonKeywordIdent<TokenStream<'_>> {
         #[inline]
         fn text(&self) -> String {
-            self.name.text()
+            self.0.as_str().to_owned()
         }
     }
 
@@ -1523,13 +1527,19 @@ mod tests {
     fn a_unicode_literal_is_exactly_four_digits() {
         assert_eq!(text(&parse::<LitUnicode<_>>("U+2029").unwrap()), "U+2029");
 
-        // The span of the refusal covers the `U+` and the digits it read.
-        for (source, span) in [
-            ("U+1", 0..3),
-            ("U+11234", 0..7),
-            ("U+12_3", 0..4),
-            ("U+0x29", 0..3),
-        ] {
+        // Four digits is the whole token. A fifth is not a miswritten literal
+        // but the text that follows it, which is what the bound says and what
+        // the generated reading of the same rule does — the two parsers have
+        // to accept one language for a spec to compile itself.
+        let mut input = TokenStream::from("U+11234");
+        let lit = input.parse::<LitUnicode<_>>().unwrap();
+        assert_eq!(lit.to_span(), Span::Range(0..6));
+        assert_eq!(lit.text(), "U+1123");
+        assert_eq!(input.as_str(), "4");
+
+        // Fewer than four is the literal written short, and the span of the
+        // refusal covers the `U+` and every digit that was read.
+        for (source, span) in [("U+1", 0..3), ("U+12_3", 0..4), ("U+0x29", 0..3)] {
             assert_eq!(
                 parse::<LitUnicode<_>>(source),
                 Err(UnsynError::Semantics(
@@ -1539,6 +1549,12 @@ mod tests {
                 "{source}"
             );
         }
+
+        // A refusal leaves the digits where they stand: the `U+` is gone, and
+        // what the rule could not finish is still there to be read again.
+        let mut input = TokenStream::from("U+12_3");
+        assert!(input.parse::<LitUnicode<_>>().is_err());
+        assert_eq!(input.as_str(), "12_3");
     }
 
     #[test]

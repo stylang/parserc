@@ -185,24 +185,22 @@ recorder! {
 #[path = "generated/unsyn_us.rs"]
 mod generated;
 
-/// A rule the generated code reads as one piece of text — `NonKeywordIdent`
-/// beside the `except` it holds, the literals whose digits and escapes are
-/// asked for their values rather than their parts — has no interior of its own
-/// in the generated tree, and the hand events inside one are the parts of a
+/// A rule the generated code reads as one piece of text has no interior of its
+/// own in the generated tree, and any hand event inside one is the part of a
 /// node the generated file does not have. Everything else the two trees say
 /// identically.
 ///
-/// The list is the set of rules the generated code reads as one piece of text,
-/// not the subset a given file happens to reach: an escape lies inside a
-/// `LitStr`, so it is covered by that interval already, and a block comment
-/// appears nowhere in the spec — both are named so that the projection says
-/// what the generated file *is*, and stays right when the spec changes.
+/// What is left on this list is a *live* difference and not a convenience: the
+/// hand tree still breaks a block comment into the head, the tail and the
+/// nesting it reads, where the generated code reads the whole comment as text.
+/// The literals and the names stood here too; they left it as the hand tree gave
+/// up parts no rule of the language names, which is what the two trees agreeing
+/// on raw spans is made of. What is left is live: the hand tree still reads a
+/// block comment into parts where the generated code reads it as text, and
+/// `a_block_comment_is_read_as_parts_by_one_tree_and_as_text_by_the_other` is
+/// the case that keeps these four honest — `unsyn.us` itself, written with line
+/// documents, never reaches them.
 const TEXT_INTERIORS: &[&str] = &[
-    "visit_non_keyword_ident",
-    "visit_lit_str",
-    "visit_lit_unicode",
-    "visit_unicode_escape",
-    "visit_ascii_escape",
     "visit_block_comment",
     "visit_block_comment_or_doc",
     "visit_inner_block_doc",
@@ -354,6 +352,28 @@ syntax G -> 'h'{,99};
         .filter(|(hook, _)| *hook == "visit_repeat_bound")
         .count();
     assert_eq!(bounds, 4, "each of the four bounds written");
+
+    assert_one_sequence(&generated, &hand, source);
+}
+
+/// A block comment is a token the generated code reads whole, where the hand
+/// tree still breaks it into the head, the tail and the nesting it read to
+/// find its own end.
+///
+/// `unsyn.us` cannot show this: it is written with line documents, so the
+/// parity check over it agrees on the comment family only because nothing ever
+/// reaches it. This file does reach it, and it passes through the projection —
+/// which is what says the four rules on that list are doing work rather than
+/// sitting there out of habit. The two trees are *not* equal here without it;
+/// closing that gap is the last item of the lexer-level convergence.
+#[test]
+fn a_block_comment_is_read_as_parts_by_one_tree_and_as_text_by_the_other() {
+    let source = r#"/*! inner /* x */ doc */
+/** outer /* nested */ doc */
+syntax A -> 'b';
+"#;
+
+    let (generated, hand) = both_trees(source);
 
     assert_one_sequence(&generated, &hand, source);
 }

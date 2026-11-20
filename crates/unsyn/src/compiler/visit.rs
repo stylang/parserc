@@ -351,15 +351,9 @@ where
     }
 
     /// `lexer LitStr -> '\'' … '\'';`
+    /// `lexer LitStr -> '\'' (…) '\'';`
     fn visit_lit_str(&mut self, node: &'ast lexer::LitStr<I>) {
         walk::walk_lit_str(self, node);
-    }
-
-    /// The `( ~['"','\\',CR] | QuoteEscape | AsciiEscape | UnicodeEscape )` of
-    /// [`LitStr`](lexer::LitStr), a group the spec leaves unnamed and the hand
-    /// tree names for it.
-    fn visit_lit_str_content(&mut self, node: &'ast lexer::LitStrContent<I>) {
-        walk::walk_lit_str_content(self, node);
     }
 
     /// `lexer QuoteEscape -> '\\'';`
@@ -1108,15 +1102,14 @@ pub mod walk {
         v: &mut V,
         node: &'ast lexer::RawIdent<I>,
     ) {
-        v.visit_text(&node.sigil);
-        v.visit_ident_or_keyword(&node.name);
+        v.visit_text(&node.0);
     }
 
     pub fn walk_non_keyword_ident<'ast, I: UnsynInput, V: ?Sized + Visit<'ast, I>>(
         v: &mut V,
         node: &'ast lexer::NonKeywordIdent<I>,
     ) {
-        v.visit_ident_or_keyword(&node.name);
+        v.visit_text(&node.0);
     }
 
     pub fn walk_leading_keywords<'ast, I: UnsynInput, V: ?Sized + Visit<'ast, I>>(
@@ -1149,24 +1142,8 @@ pub mod walk {
         node: &'ast lexer::LitStr<I>,
     ) {
         v.visit_text(&node.open);
-
-        for piece in &node.body {
-            v.visit_lit_str_content(piece);
-        }
-
+        v.visit_text(&node.body);
         v.visit_text(&node.close);
-    }
-
-    pub fn walk_lit_str_content<'ast, I: UnsynInput, V: ?Sized + Visit<'ast, I>>(
-        v: &mut V,
-        node: &'ast lexer::LitStrContent<I>,
-    ) {
-        match node {
-            lexer::LitStrContent::Plain(text) => v.visit_text(text),
-            lexer::LitStrContent::Quote(quote) => v.visit_quote_escape(quote),
-            lexer::LitStrContent::Ascii(escape) => v.visit_ascii_escape(escape),
-            lexer::LitStrContent::Unicode(escape) => v.visit_unicode_escape(escape),
-        }
     }
 
     pub fn walk_ascii_escape<'ast, I: UnsynInput, V: ?Sized + Visit<'ast, I>>(
@@ -1223,11 +1200,7 @@ pub mod walk {
         v: &mut V,
         node: &'ast lexer::LitUnicode<I>,
     ) {
-        v.visit_text(&node.prefix);
-
-        for digit in &node.digits {
-            v.visit_hex_digit(digit);
-        }
+        v.visit_text(&node.0);
     }
 
     // The three rules that are nothing but a choice of other rules keep the rules

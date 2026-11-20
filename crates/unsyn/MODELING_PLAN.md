@@ -176,13 +176,51 @@
           `a_count_above_one_digit_is_one_token_in_both_trees`：`unsyn.us` 的计数
           全是单字符，规格自己发现不了这个分歧，故另造一份含多位计数的源。
           已验证该测试有牙（往 `walk_lit_dec` 里添一个多余事件即失败）。
-    - [ ] **M8.2b-2 `LitUnicode`**：生成侧是 `read_lit_unicode` 不透明文本，
-          手写侧仍是 `{prefix, Vec<HexDigit>}`；改为单字段文本 + 解码。
-    - [ ] **M8.2b-3 `LitStr` / escape 家族**：手写 `Vec<LitStrContent>` → 文本，
-          删 `LitStrContent`/`EscapeDigit`；bad-escape 的 span 由解码器给出。
-    - [ ] **M8.2b-4 注释/文档家族**：删 `BlockCommentHead`/`BlockCommentTail`/
-          `OuterBlockDocHead`/`LineDocBody`，对齐 `read_block_comment_*`。
-    - [ ] **M8.2b-5 `Ident` 家族**：`RawIdent`/`NonKeywordIdent` 对齐不透明文本。
+    - [x] **M8.2b-2 `LitUnicode`**：手写侧改为单字段文本
+          `LitUnicode<I>(parser = read_lit_unicode)`，与生成侧
+          `keyword("U+") + take_while_with(4..=4, hex)` 同形；`visit_lit_unicode`
+          从 `TEXT_INTERIORS` 去掉（已逐项开关验证：现在只有
+          `non_keyword_ident`/`lit_str` 两项真被需要，其余因嵌在
+          `lit_str` 区间内或本文件未出现而暂不需要，保留是为了描述形状）。
+          **修掉一个比形状更严重的问题：两侧接受的语言不同**。手写侧用
+          `take_while` 取光十六进制数字再要求 `len()==4`，所以 `U+11234`
+          被拒绝；生成侧只取 4 个，`U+1123` 是 token、剩下的 `4` 属于下
+          一个操作数。spec 写的是 `HexDigit{4}`，没有说“不得更多”，所以
+          手写的拒绝是自造假设 —— 两个 parser 认不同语言就无法自举。
+          现在以 spec 为准，但保留更好的报错：数字在副本上计数，所以
+          span 仍覆盖已读的全部数字，且失败时不吞掉 digit（只消耗
+          `U+`）。测试 `a_unicode_literal_is_exactly_four_digits` 重写：
+          `U+11234` 现在断言 token 为 `U+1123` 并留下 `4`。
+    - [x] **M8.2b-3 `LitStr`**：手写侧 `LitStr` 改为 `{open, body: I, close}`，
+          `body` 由 `read_lit_str_body` 一次取完（用四种 piece 定边界但丢弃
+          节点），与生成侧 `read_lit_str_1` 同形；删 `LitStrContent`。
+          新增 `compiler::decode` 模块（唯一入口 `string_body(text, at)`），
+          把转义解码从节点方法变成对源文本的解码器，返回 `chars` + 非法
+          `\u{…}` 的 **span**（`at` 用 `Input::start()`，所以报错仍指向具体
+          转义而不是整个字面量）；`semantic::chars_of` 改用 `lit.decoded()`。
+    - [x] **M8.2b-5 `Ident` 家族**：`RawIdent` / `NonKeywordIdent` 改为单字段
+          不透明文本（`read_raw_ident` / `read_non_keyword_ident` 返回整段
+          token），与生成侧一致；手写树不再在 name 内部发
+          `visit_ident_or_keyword`。
+    - 投影列表从 9 项缩到 4 项，且逐项开关实验确认：现在只剩
+          `block_comment` 家族（`inner_block_doc` / `outer_block_doc` 两项经
+          实验证明是**真正在起作用**的，删掉即失败）。
+          新增 `a_block_comment_is_read_as_parts_by_one_tree_and_as_text_by_the_other`：
+          `unsyn.us` 全用行文档，永远走不到注释家族，所以主对等测试对它是
+          空转；这个测试用含 `/*! /* */ */` 与 `/** /* nested */ */` 的源把
+          差异固定下来，口头上写明“今天靠投影才通过”面不是已收敛。
+    - [ ] **M8.2b-4 注释/文档家族**（未完成）：手写侧仍有
+          `BlockCommentHead` / `BlockCommentTail` / `OuterBlockDocHead` /
+          `LineDocBody` 四个自造名节点，生成侧把 `BlockComment` /
+          `InnerBlockDoc` / `OuterBlockDoc` / `BlockCommentOrDoc` 读成不透明
+          文本。需要手写侧改用递归下降 reader（嵌套计数的逻辑今日靠
+          derive + head/tail enum 表达）。这一步做完，`TEXT_INTERIORS` 可
+          整体删除，两树事件序列完全裸相等。
+  - [ ] **M8.2b-6 转义类型收尾（外观性）**：`AsciiEscape`（enum）与
+        `UnicodeEscape`（`Vec<EscapeDigit>`）仍是结构化类型，但 `LitStr` 的
+        body 变成文本后它们已经**不可达**——两个树的 walk 都不会走到，
+        因此不再是对等差异，只是手写侧多余的种类。可顺手改成不透明
+        文本并删 `EscapeDigit`，也可以不做。
   - [ ] **M8.2c codegen 去类型化**：`Builder::new` 改收类型无关的视图
         （definitions / branches / operands / atoms / quantity / bound / value /
         text / span），52 个函数签名重指向；删 `ty_shape` 的字符串回转，改为在
