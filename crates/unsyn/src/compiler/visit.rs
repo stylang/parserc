@@ -174,9 +174,10 @@ where
     // -----------------------------------------------------------------------
     // The terminals a `syntax` production is written with
     //
-    // Each owns the run of the trivia on both sides of its text, so each walk
-    // begins and ends with `visit_s`. See the crate document for the rule that
-    // gives a run to exactly one of the two neighbours it lies between.
+    // Each holds its own text and nothing else, so each walk hands over that
+    // text alone; the runs about it belong to the sequence, whose walk reaches
+    // them through `visit_s`. See the crate document for the rule that files a
+    // run away exactly once, however two neighbours it lies between.
     // -----------------------------------------------------------------------
 
     /// `';'`, which ends a definition.
@@ -519,9 +520,24 @@ pub mod walk {
         }
 
         v.visit_ident(&node.ident);
-        v.visit_arrow_right(&node.definition.start);
-        v.visit_expr(&node.definition.body);
-        v.visit_semi(&node.definition.end);
+
+        if let Some(s) = &node.s1 {
+            v.visit_s(s);
+        }
+
+        v.visit_arrow_right(&node.arrow);
+
+        if let Some(s) = &node.s2 {
+            v.visit_s(s);
+        }
+
+        v.visit_expr(&node.expr);
+
+        if let Some(s) = &node.s3 {
+            v.visit_s(s);
+        }
+
+        v.visit_semi(&node.semi);
     }
 
     pub fn walk_outer_doc<'ast, I: UnsynInput, V: ?Sized + Visit<'ast, I>>(
@@ -550,8 +566,17 @@ pub mod walk {
     ) {
         walk_one_or_more(v, &node.first);
 
-        for (or, alternative) in &node.rest {
+        for (s, or, s2, alternative) in &node.rest {
+            if let Some(s) = s {
+                v.visit_s(s);
+            }
+
             v.visit_or(or);
+
+            if let Some(s) = s2 {
+                v.visit_s(s);
+            }
+
             walk_one_or_more(v, alternative);
         }
     }
@@ -575,15 +600,47 @@ pub mod walk {
                 v.visit_tilde(tilde);
                 walk_set(v, set);
             }
-            syntax::ExprWithoutSuffix::Call(external) => {
-                v.visit_lt(&external.start);
-                v.visit_ident(&external.body);
-                v.visit_gt(&external.end);
+            syntax::ExprWithoutSuffix::Call {
+                lt,
+                s,
+                ident,
+                s2,
+                gt,
+            } => {
+                v.visit_lt(lt);
+
+                if let Some(s) = s {
+                    v.visit_s(s);
+                }
+
+                v.visit_ident(ident);
+
+                if let Some(s) = s2 {
+                    v.visit_s(s);
+                }
+
+                v.visit_gt(gt);
             }
-            syntax::ExprWithoutSuffix::Paren(group) => {
-                v.visit_paren_start(&group.start);
-                v.visit_expr(&group.body);
-                v.visit_paren_end(&group.end);
+            syntax::ExprWithoutSuffix::Paren {
+                open,
+                s,
+                expr,
+                s2,
+                close,
+            } => {
+                v.visit_paren_start(open);
+
+                if let Some(s) = s {
+                    v.visit_s(s);
+                }
+
+                v.visit_expr(expr);
+
+                if let Some(s) = s2 {
+                    v.visit_s(s);
+                }
+
+                v.visit_paren_end(close);
             }
             syntax::ExprWithoutSuffix::Set(set) => walk_set(v, set),
             syntax::ExprWithoutSuffix::Str(lit) => v.visit_lit_str(lit),
@@ -597,35 +654,76 @@ pub mod walk {
         node: &'ast syntax::ExprWithSuffix<I>,
     ) {
         match node {
-            syntax::ExprWithSuffix::Grouped { target, suffix } => {
+            syntax::ExprWithSuffix::Grouped { target, s, suffix } => {
                 v.visit_expr_without_suffix(target);
+
+                if let Some(s) = s {
+                    v.visit_s(s);
+                }
+
                 v.visit_suffix(suffix);
             }
             syntax::ExprWithSuffix::Concat {
                 target,
+                s,
                 keyword,
+                s2,
                 suffix,
             } => {
                 v.visit_expr_without_suffix(target);
+
+                if let Some(s) = s {
+                    v.visit_s(s);
+                }
+
                 v.visit_concat(keyword);
+
+                if let Some(s) = s2 {
+                    v.visit_s(s);
+                }
+
                 v.visit_expr_no_top_alt(suffix);
             }
             syntax::ExprWithSuffix::Followed {
                 target,
+                s,
                 keyword,
+                s2,
                 suffix,
             } => {
                 v.visit_expr_without_suffix(target);
+
+                if let Some(s) = s {
+                    v.visit_s(s);
+                }
+
                 v.visit_followed(keyword);
+
+                if let Some(s) = s2 {
+                    v.visit_s(s);
+                }
+
                 v.visit_expr_no_top_alt(suffix);
             }
             syntax::ExprWithSuffix::Except {
                 target,
+                s,
                 keyword,
+                s2,
                 tokens,
             } => {
                 v.visit_expr_without_suffix(target);
+
+                if let Some(s) = s {
+                    v.visit_s(s);
+                }
+
                 v.visit_except(keyword);
+
+                if let Some(s) = s2 {
+                    v.visit_s(s);
+                }
+
                 v.visit_expr_without_suffix(tokens);
             }
         }
@@ -635,9 +733,19 @@ pub mod walk {
         v: &mut V,
         node: &'ast syntax::Repeat<I>,
     ) {
-        v.visit_brace_start(&node.0.start);
-        v.visit_repeat_bound(&node.0.body);
-        v.visit_brace_end(&node.0.end);
+        v.visit_brace_start(&node.open);
+
+        if let Some(s) = &node.s {
+            v.visit_s(s);
+        }
+
+        v.visit_repeat_bound(&node.bound);
+
+        if let Some(s) = &node.s2 {
+            v.visit_s(s);
+        }
+
+        v.visit_brace_end(&node.close);
     }
 
     pub fn walk_repeat_bound<'ast, I: UnsynInput, V: ?Sized + Visit<'ast, I>>(
@@ -645,15 +753,33 @@ pub mod walk {
         node: &'ast syntax::RepeatBound<I>,
     ) {
         match node {
-            syntax::RepeatBound::RangeTo(comma, end) => {
-                v.visit_comma(comma);
-                v.visit_lit_dec(end);
-            }
-            syntax::RepeatBound::RangeFrom(start, comma, end) => {
-                v.visit_lit_dec(start);
+            syntax::RepeatBound::RangeTo(s, comma, s2, end) => {
+                if let Some(s) = s {
+                    v.visit_s(s);
+                }
+
                 v.visit_comma(comma);
 
-                if let Some(end) = end {
+                if let Some(s) = s2 {
+                    v.visit_s(s);
+                }
+
+                v.visit_lit_dec(end);
+            }
+            syntax::RepeatBound::RangeFrom(start, s, comma, end) => {
+                v.visit_lit_dec(start);
+
+                if let Some(s) = s {
+                    v.visit_s(s);
+                }
+
+                v.visit_comma(comma);
+
+                if let Some((s, end)) = end {
+                    if let Some(s) = s {
+                        v.visit_s(s);
+                    }
+
                     v.visit_lit_dec(end);
                 }
             }
@@ -666,9 +792,19 @@ pub mod walk {
         node: &'ast syntax::Range<I>,
     ) {
         match node {
-            syntax::Range::Unicode(start, dash, end) => {
+            syntax::Range::Unicode(start, s, dash, s2, end) => {
                 v.visit_lit_unicode(start);
+
+                if let Some(s) = s {
+                    v.visit_s(s);
+                }
+
                 v.visit_minus(dash);
+
+                if let Some(s) = s2 {
+                    v.visit_s(s);
+                }
+
                 v.visit_lit_unicode(end);
             }
             // The `-` of this form is joined to both of its neighbours by the
@@ -725,18 +861,35 @@ pub mod walk {
         v: &mut V,
         node: &'ast syntax::Set<I>,
     ) {
-        v.visit_bracket_start(&node.start);
+        v.visit_bracket_start(&node.open);
 
-        for (item, comma) in &node.body.pairs {
+        for (s, item, s2, comma) in &node.items {
+            if let Some(s) = s {
+                v.visit_s(s);
+            }
+
             v.visit_set_item(item);
+
+            if let Some(s) = s2 {
+                v.visit_s(s);
+            }
+
             v.visit_comma(comma);
         }
 
-        if let Some(tail) = &node.body.tail {
-            v.visit_set_item(tail);
+        if let Some((s, item)) = &node.tail {
+            if let Some(s) = s {
+                v.visit_s(s);
+            }
+
+            v.visit_set_item(item);
         }
 
-        v.visit_bracket_end(&node.end);
+        if let Some(s) = &node.s {
+            v.visit_s(s);
+        }
+
+        v.visit_bracket_end(&node.close);
     }
 
     /// `('*' | '?' | '+' | Repeat)`, the four quantity operators the production
@@ -764,20 +917,12 @@ pub mod walk {
     macro_rules! walk_terminal {
         ($($method:ident, $type:ident);* $(;)?) => {
             $(
-                #[doc = concat!("The `", stringify!($type), "` punct, with the runs of the trivia on each side of it.")]
+                #[doc = concat!("The `", stringify!($type), "` punct — one text, the runs beside it belonging to the sequence.")]
                 pub fn $method<'ast, I: UnsynInput, V: ?Sized + Visit<'ast, I>>(
                     v: &mut V,
                     node: &'ast syntax::$type<I>,
                 ) {
-                    if let Some(s) = &node.0 {
-                        v.visit_s(s);
-                    }
-
-                    v.visit_text(&node.1);
-
-                    if let Some(s) = &node.2 {
-                        v.visit_s(s);
-                    }
+                    v.visit_text(&node.0);
                 }
             )*
         };
@@ -1172,8 +1317,8 @@ mod tests {
 
         // Every character of the source is held by exactly one token of the tree,
         // and the walk reaches the tokens in the order they were written: the
-        // runs of the trivia, which the terminals file away on each side of their
-        // own text, are never given twice and never left out.
+        // runs of the trivia, which the sequence files away beside the operands
+        // they lie between, are never given twice and never left out.
         assert_eq!(echo.text, source);
 
         let mut covered = 0;

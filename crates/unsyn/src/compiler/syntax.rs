@@ -9,30 +9,24 @@
 //!
 //! A group on the right side of a production is usually no node of its own, since
 //! nothing names it: `X+` is [`OneOrMore`], `X*` is a [`Vec`], `('a' 'b')` is a
-//! tuple, and `'[' … ']'` is a [`Delimiter`]. What earns a type is a name on the
-//! *left* side, and the code that reads a tree reads the names. The one exception
-//! is [`RepeatBound`], which names a group only because reading it means matching
-//! on it either way.
+//! tuple, and `('a' ',')*` is [`SetMember`]. What earns a type is a name on the
+//! *left* side, and the code that reads a tree reads the names. The two
+//! exceptions are [`Set`] and [`RepeatBound`], which name a group only because
+//! reading one means matching on it or asking it questions either way.
 //!
 //! # Where the trivia goes
 //!
-//! The terminals of this module are the puncts and the fixed words a `syntax` rule
-//! is written with — `';'`, `'|'`, `'concat'` — and each of them owns the run of
-//! the trivia on both sides of its text, which is why no field of a node here is
-//! an `Option<S>` laid around a terminal. Where two operands that own nothing
-//! stand next to each other (one name after another, or one operand of a sequence
-//! after another), the sequence carries the run between them as a field of its
-//! own. See the [crate documentation](crate) for the rule, and for why a run can
-//! belong to exactly one of the two neighbours it lies between.
+//! No node of this module keeps a run of the trivia: the terminals a `syntax`
+//! rule is written with — `';'`, `'|'`, `'concat'` — hold their own text and
+//! nothing else, and the run between two operands is a field of the sequence
+//! that reads them. See the [crate documentation](crate) for the rule, and for
+//! why a run is filed away exactly once however two neighbours it lies between.
 //!
 //! The one place the two levels meet is a `lexer` rule reached by name, such as
-//! [`Ident`] or [`LitStr`]: it owns no trivia, since its text is read into the
-//! text of the rule that reaches it.
+//! [`Ident`] or [`LitStr`]: it keeps no trivia either, since its text is read
+//! into the text of the rule that reaches it.
 
-use parserc::{
-    ControlFlow, Input, Kind, Span,
-    syntax::{Delimiter, Punctuated, Syntax, SyntaxInput},
-};
+use parserc::{ControlFlow, Kind, syntax::Syntax};
 
 use crate::compiler::lexer::{Ident, LeadingKeywords, LitDec, LitStr, LitUnicode, S};
 use crate::compiler::{
@@ -40,17 +34,23 @@ use crate::compiler::{
     input::UnsynInput,
 };
 
+/// A node with the run of trivia that stands before it.
+///
+/// The run between two elements of a repetition is part of neither element, so
+/// the repetition keeps it beside the element it precedes rather than around it.
+pub type Led<I, N> = (Option<S<I>>, N);
+
 // ---------------------------------------------------------------------------
 // The terminals a `syntax` rule is written with.
 //
-// Each is one fixed word, and each owns the run of the trivia on both sides of
-// it: a definition may be written `A| B` as much as `A |B`, and no rule of the
-// language has to say so. The runs are optional, so a terminal never fails for a
-// missing separator; it fails only when its own text is not there.
+// Each is one fixed word and nothing more: a definition may be written `A| B`
+// as much as `A |B`, and the run that makes the two readings the same reading
+// is the sequence's own field rather than a part of the word. A terminal
+// therefore never fails for a missing separator; it fails only when its own
+// text is not there.
 // ---------------------------------------------------------------------------
 
-/// Declares one terminal of the syntax level: a fixed word between two runs of
-/// the trivia.
+/// Declares one terminal of the syntax level: a fixed word and nothing else.
 macro_rules! syntax_terminal {
     (
         $(#[$meta:meta])*
@@ -60,16 +60,14 @@ macro_rules! syntax_terminal {
         #[derive(Debug, PartialEq, Eq, PartialOrd, Ord, Clone, Syntax)]
         #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
         pub struct $name<I>(
-            /// The run of the trivia before the word.
-            pub Option<S<I>>,
-            /// The word itself.
+            /// The word itself, kept whole — the runs around a terminal belong
+            /// to the sequence it stands in, exactly as the generated code
+            /// lays them out.
             #[parserc(
                 keyword = $value,
                 map_err = crate::compiler::errors::$kind::$variant.map()
             )]
             pub I,
-            /// The run of the trivia after the word, which the word keeps.
-            pub Option<S<I>>,
         )
         where
             I: UnsynInput;
@@ -155,16 +153,12 @@ macro_rules! syntax_word {
         #[derive(Debug, PartialEq, Eq, PartialOrd, Ord, Clone, Syntax)]
         #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
         pub struct $name<I>(
-            /// The run of the trivia before the word.
-            pub Option<S<I>>,
-            /// The word itself, which takes no run of the trivia.
+            /// The word itself; the runs beside it belong to the sequence.
             #[parserc(
                 keyword = $value,
                 map_err = crate::compiler::errors::$kind::$variant.map()
             )]
             pub I,
-            /// The run of the trivia after the word, which the word keeps.
-            pub Option<S<I>>,
         )
         where
             I: UnsynInput;
@@ -198,9 +192,10 @@ syntax_terminal!(
 /// after it, each with the run that separates it from the operand before.
 ///
 /// A sequence has no operator of its own, which is why the run between two of its
-/// operands is part of the tree: it is what tells them apart. A run that the
-/// operand before already swallowed leaves the field `None`, as in `<ident> 'x'`,
-/// where the call keeps the space in its closing `>`.
+/// operands is part of the tree: it is what tells them apart. The run before an
+/// operand that begins with one of its own — the match of a repetition, the
+/// element of an optional group — is that operand's field and not this one's,
+/// which is what leaves a field of `rest` `None`.
 ///
 /// This is the shape of a repetition and not a node of the grammar, which is why
 /// it is generic over the operand it repeats.
@@ -214,7 +209,7 @@ where
     /// The operand every sequence must have, since `+` asks for at least one.
     pub first: X,
     /// The operands that follow it, each with the run before it.
-    pub rest: Vec<(Option<S<I>>, X)>,
+    pub rest: Vec<Led<I, X>>,
 }
 
 impl<I, X> OneOrMore<I, X>
@@ -259,7 +254,7 @@ impl<I: UnsynInput> Expr<I> {
     /// part of the alternative, so it is dropped here.
     #[inline]
     pub fn branches(&self) -> impl Iterator<Item = &OneOrMore<I, ExprNoTopAlt<I>>> {
-        std::iter::once(&self.first).chain(self.rest.iter().map(|(_, branch)| branch))
+        std::iter::once(&self.first).chain(self.rest.iter().map(|(_, _, _, branch)| branch))
     }
 
     /// Whether the expression offers exactly one way of being read.
@@ -275,7 +270,15 @@ impl<I: UnsynInput> Expr<I> {
 ///
 /// A group of a right side names no node of the tree, so the tuple it is written
 /// as stands for it as it is.
-pub type Alternative<I> = (Or<I>, OneOrMore<I, ExprNoTopAlt<I>>);
+///
+/// The runs of trivia the sequence holds between its operands are fields of the
+/// tuple, as [`Led`] says for the one case a repetition has to name.
+pub type Alternative<I> = (
+    Option<S<I>>,
+    Or<I>,
+    Option<S<I>>,
+    OneOrMore<I, ExprNoTopAlt<I>>,
+);
 
 /// Turns an expression that ran into a keyword into the definition that should
 /// have ended before it.
@@ -339,13 +342,56 @@ fn map_expr_no_top_alt_err(err: UnsynError) -> UnsynError {
 // `    | LitStr | LitUnicode | Ident ;`
 // ---------------------------------------------------------------------------
 
-/// `('[' ( SetItem ',' )* SetItem? ']')`, which is what [`Punctuated`] reads: a
-/// list of members, most of them followed by a comma, and a comma the closing
-/// bracket may keep.
+/// The members of a set, each written with its own comma.
 ///
-/// A group of a right side is no node of its own, so a set is the [`Delimiter`]
-/// it is written as rather than a type declared for it.
-pub type Set<I> = Delimiter<BracketStart<I>, BracketEnd<I>, Punctuated<SetItem<I>, Comma<I>>>;
+/// The repetition `( SetItem ',' )` names no node of the tree, so the tuple
+/// stands for it as the production writes it: the run before the member, the
+/// member, the run before the comma, and the comma.
+pub type SetMember<I> = (Option<S<I>>, SetItem<I>, Option<S<I>>, Comma<I>);
+
+/// `('[' ( SetItem ',' )* SetItem? ']')`: a list of members, most of them
+/// followed by a comma, and a member the closing bracket may keep without one.
+///
+/// The group of a right side is written as the sequence it is — the brackets
+/// and the members are fields, and the runs between them are the sequence's
+/// own, which is the shape the generated code gives the same pattern.
+#[derive(Debug, PartialEq, Eq, PartialOrd, Ord, Clone, Syntax)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+pub struct Set<I>
+where
+    I: UnsynInput,
+{
+    /// The `[` that opens the set.
+    pub open: BracketStart<I>,
+    /// The members each followed by a comma, with the runs about them.
+    pub items: Vec<SetMember<I>>,
+    /// The member after the last comma, when one is written.
+    pub tail: Option<Led<I, SetItem<I>>>,
+    /// The run before the closing bracket.
+    pub s: Option<S<I>>,
+    /// The `]` that closes the set.
+    pub close: BracketEnd<I>,
+}
+
+impl<I: UnsynInput> Set<I> {
+    /// The members of the set, in the order they were written.
+    pub fn members(&self) -> impl Iterator<Item = &SetItem<I>> {
+        self.items
+            .iter()
+            .map(|(_, item, _, _)| item)
+            .chain(self.tail.iter().map(|(_, item)| item))
+    }
+
+    /// How many members the set lists.
+    pub fn len(&self) -> usize {
+        self.items.len() + usize::from(self.tail.is_some())
+    }
+
+    /// Whether the set lists no member at all.
+    pub fn is_empty(&self) -> bool {
+        self.len() == 0
+    }
+}
 
 /// An operand that stands alone, with no suffix on it.
 #[derive(Debug, PartialEq, Eq, PartialOrd, Ord, Clone, Syntax)]
@@ -366,12 +412,34 @@ where
         /// The negated set, whose members are the values refused here.
         Set<I>,
     ),
-    /// `'<' Ident '>'`, a call of an external the caller of the parser binds, as
-    /// in `<NAME>`.
-    Call(Delimiter<Lt<I>, Gt<I>, Ident<I>>),
+    /// `'<' Ident '>'`, a call of an external the caller of the parser binds,
+    /// read as the sequence of its parts.
+    Call {
+        /// The `<` that opens the call.
+        lt: Lt<I>,
+        /// The run the call reads after the `<`.
+        s: Option<S<I>>,
+        /// The name the caller binds.
+        ident: Ident<I>,
+        /// The run before the `>`.
+        s2: Option<S<I>>,
+        /// The `>` that closes the call.
+        gt: Gt<I>,
+    },
     /// `'(' Expr ')'`, a group, so that an expression may sit inside a sequence
     /// or take a suffix as one operand.
-    Paren(Delimiter<ParenStart<I>, ParenEnd<I>, Box<Expr<I>>>),
+    Paren {
+        /// The `(` that opens the group.
+        open: ParenStart<I>,
+        /// The run the group reads after the `(`.
+        s: Option<S<I>>,
+        /// The expression the group holds.
+        expr: Box<Expr<I>>,
+        /// The run before the `)`.
+        s2: Option<S<I>>,
+        /// The `)` that closes the group.
+        close: ParenEnd<I>,
+    },
     /// `'[' … ']'`, a set of the characters and strings it lists.
     ///
     /// A set is a union, so the pass that reads it compares its members by the
@@ -431,6 +499,8 @@ where
     Grouped {
         /// The operand the operator applies to.
         target: ExprWithoutSuffix<I>,
+        /// The run between the operand and its operator.
+        s: Option<S<I>>,
         /// The operator the group picked.
         suffix: Suffix<I>,
     },
@@ -440,9 +510,13 @@ where
     Concat {
         /// What is joined to the operand after the keyword.
         target: ExprWithoutSuffix<I>,
-        /// The keyword, with the runs on each side of it.
+        /// The run between the operand and the keyword.
+        s: Option<S<I>>,
+        /// The keyword, which keeps no run of its own.
         #[parserc(crucial)]
         keyword: Concat<I>,
+        /// The run between the keyword and the operand after it.
+        s2: Option<S<I>>,
         /// The operand after the keyword.
         suffix: Box<ExprNoTopAlt<I>>,
     },
@@ -453,9 +527,13 @@ where
     Followed {
         /// What the operand after the keyword must follow.
         target: ExprWithoutSuffix<I>,
-        /// The keyword, with the runs on each side of it.
+        /// The run between the operand and the keyword.
+        s: Option<S<I>>,
+        /// The keyword, which keeps no run of its own.
         #[parserc(crucial)]
         keyword: Followed<I>,
+        /// The run between the keyword and the operand after it.
+        s2: Option<S<I>>,
         /// The operand after the keyword.
         suffix: Box<ExprNoTopAlt<I>>,
     },
@@ -468,9 +546,13 @@ where
     Except {
         /// What the operand after the keyword is taken out of.
         target: ExprWithoutSuffix<I>,
-        /// The keyword, with the runs on each side of it.
+        /// The run between the operand and the keyword.
+        s: Option<S<I>>,
+        /// The keyword, which keeps no run of its own.
         #[parserc(crucial)]
         keyword: Except<I>,
+        /// The run between the keyword and the operand taken out.
+        s2: Option<S<I>>,
         /// The operand to take out, which cannot itself carry a suffix.
         tokens: ExprWithoutSuffix<I>,
     },
@@ -487,12 +569,21 @@ where
 /// braces hold is named by [`RepeatBound`].
 #[derive(Debug, PartialEq, Eq, PartialOrd, Ord, Clone, Syntax)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
-pub struct Repeat<I>(
-    /// The `{` … `}` the bounds are written between.
-    pub Delimiter<BraceStart<I>, BraceEnd<I>, RepeatBound<I>>,
-)
+pub struct Repeat<I>
 where
-    I: UnsynInput;
+    I: UnsynInput,
+{
+    /// The `{` that opens the bound.
+    pub open: BraceStart<I>,
+    /// The run the repetition reads after the `{`.
+    pub s: Option<S<I>>,
+    /// The bounds the braces hold.
+    pub bound: RepeatBound<I>,
+    /// The run before the `}`.
+    pub s2: Option<S<I>>,
+    /// The `}` that closes the bound.
+    pub close: BraceEnd<I>,
+}
 
 /// The group `(',' LitDec | LitDec ',' LitDec? | LitDec)` of the [`Repeat`] rule.
 ///
@@ -515,19 +606,25 @@ where
 {
     /// `,n`, at most `n` times.
     RangeTo(
+        /// The run before the comma, as the sequence says it.
+        Option<S<I>>,
         /// The `,` that opens the form, and says which form this is.
         Comma<I>,
+        /// The run between the comma and the bound.
+        Option<S<I>>,
         /// The bound above.
-        LitDec<I>,
+        Box<LitDec<I>>,
     ),
     /// `n,m`, or `n,` with no bound above.
     RangeFrom(
         /// The bound below.
-        LitDec<I>,
+        Box<LitDec<I>>,
+        /// The run before the comma.
+        Option<S<I>>,
         /// The `,` that divides the two bounds.
         Comma<I>,
-        /// The bound above, if one is written.
-        Option<LitDec<I>>,
+        /// The bound above with the run before it, if one is written.
+        Option<Led<I, Box<LitDec<I>>>>,
     ),
     /// `n`, exactly `n` times.
     Count(
@@ -550,11 +647,15 @@ where
 {
     /// A range of code points, as `U+0009-U+000D` is.
     Unicode(
-        LitUnicode<I>,
+        Box<LitUnicode<I>>,
+        /// The run before the dash.
+        Option<S<I>>,
         /// The `-` that divides the two ends.
         #[parserc(crucial)]
         Minus<I>,
-        LitUnicode<I>,
+        /// The run before the end above.
+        Option<S<I>>,
+        Box<LitUnicode<I>>,
     ),
     /// A range of strings, as `'0'-'7'` is.
     ///
@@ -621,8 +722,18 @@ where
     pub s: Option<S<I>>,
     /// The name of the node.
     pub ident: Ident<I>,
-    /// The `->` … `;` the pattern is written between.
-    pub definition: Delimiter<ArrowRight<I>, Semi<I>, Expr<I>>,
+    /// The run between the name and the `->`.
+    pub s1: Option<S<I>>,
+    /// The `->` that opens the definition.
+    pub arrow: ArrowRight<I>,
+    /// The run between the `->` and the pattern.
+    pub s2: Option<S<I>>,
+    /// The pattern the definition gives its node.
+    pub expr: Box<Expr<I>>,
+    /// The run before the `;`.
+    pub s3: Option<S<I>>,
+    /// The `;` that ends the definition.
+    pub semi: Semi<I>,
 }
 
 impl<I: UnsynInput> Stmt<I> {
@@ -719,60 +830,29 @@ where
 
 /// A parsed file.
 ///
-/// A file is read to its end, which is more than the two repetitions of the rule
-/// say on their own: a list ends where the next item fails to match, and whatever
-/// is left over then belongs to no rule of the grammar. It is therefore reported
-/// as [`SyntaxKind::Eof`] rather than handed back to the caller, since a file that
-/// stops short of its end is broken and not merely short.
-#[derive(Debug, PartialEq, Eq, Clone)]
+/// A file is read as far as its items reach, exactly as the two repetitions of
+/// the rule say: a list ends where the next item fails to begin, and the
+/// caller—whoever asks for the file whole—reports whatever was left. Nothing
+/// here invents an end-of-file check the pattern does not state.
+#[derive(Debug, PartialEq, Eq, Clone, Syntax)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct Crate<I>
 where
     I: UnsynInput,
 {
     /// The documents that describe the file, each with the run before it.
-    ///
-    /// A `/*!` form owns no trivia, so the run between two of them is the list's
-    /// own.
-    pub inner_docs: Vec<(Option<S<I>>, InnerDoc<I>)>,
+    pub inner_docs: Vec<Led<I, Box<InnerDoc<I>>>>,
     /// The items of the file, in the order they were written.
     ///
-    /// No run of the trivia stands between two of these, since a run is an item of
-    /// its own: [`Item::S`] holds it.
+    /// The run between two definitions is itself an item — the `S` the rule
+    /// `Item` lists — so the repetition carries no run of its own: a run
+    /// laid before an item would starve the item meant to keep it.
     pub items: Vec<Item<I>>,
-}
-
-impl<I> Syntax<I> for Crate<I>
-where
-    I: UnsynInput,
-{
-    #[inline]
-    fn parse(input: &mut I) -> Result<Self, <I as Input>::Error> {
-        let inner_docs = input.parse()?;
-        let items = input.parse()?;
-
-        if !input.is_empty() {
-            return Err(UnsynError::Syntax(
-                SyntaxKind::Eof,
-                ControlFlow::Fatal,
-                input.to_span(),
-            ));
-        }
-
-        Ok(Self { inner_docs, items })
-    }
-
-    #[inline]
-    fn to_span(&self) -> Span {
-        Span::None
-            .union(&self.inner_docs.to_span())
-            .union(&self.items.to_span())
-    }
 }
 
 #[cfg(test)]
 mod tests {
-    use parserc::AsStr;
+    use parserc::{AsStr, Input, Span, syntax::SyntaxInput};
 
     use super::*;
     use crate::compiler::input::TokenStream;
@@ -797,19 +877,17 @@ mod tests {
     }
 
     #[test]
-    fn a_terminal_keeps_the_runs_on_both_sides_of_it() {
-        let semi = whole::<Semi<_>>(" ; ").unwrap();
+    fn a_terminal_is_its_word_and_nothing_else() {
+        // A terminal keeps no run: the CST lays the trivia between the operands
+        // of a sequence out as fields of its own, exactly as the generated code
+        // does for the same pattern, so every character stands where the
+        // sequence says it and no terminal hides one.
+        let semi = whole::<Semi<_>>(";").unwrap();
+        assert_eq!(semi.0.as_str(), ";");
 
-        assert_eq!(semi.1.as_str(), ";");
-        assert_eq!(semi.0.unwrap().0.as_str(), " ");
-        // The run after the word belongs to the word, which is why no sequence of
-        // terminals of this level carries a gap of its own.
-        assert_eq!(semi.2.unwrap().0.as_str(), " ");
-
-        // A separator is never required, so a word of the language may stand
-        // against its neighbours with nothing between them.
-        let tight = whole::<Semi<_>>(";").unwrap();
-        assert!(tight.0.is_none() && tight.2.is_none());
+        // Over-reaching is not reading: what stands beside the word is left
+        // for the sequence.
+        assert!(whole::<Semi<_>>(" ;").is_err());
     }
 
     #[test]
@@ -828,7 +906,7 @@ mod tests {
         ));
         assert!(matches!(
             whole::<ExprNoTopAlt<_>>("<XID_Start>").unwrap(),
-            ExprNoTopAlt::WithoutSuffix(ExprWithoutSuffix::Call(_))
+            ExprNoTopAlt::WithoutSuffix(ExprWithoutSuffix::Call { .. })
         ));
 
         // Only one suffix is allowed, so `A*?` is not a repetition of an option.
@@ -836,20 +914,20 @@ mod tests {
     }
 
     #[test]
-    fn a_sequence_carries_the_run_between_two_operands_that_own_nothing() {
+    fn a_sequence_carries_the_run_between_two_operands() {
         let expr = whole::<Expr<_>>("'a' 'b'").unwrap();
 
         assert_eq!(expr.branches().count(), 1);
-        let (gap, operand) = expr.first.rest.first().unwrap();
-        // `'a'` is a lexer token and owns no run, so the space between the two is
-        // the sequence's own.
+        let (gap, operand) = &expr.first.rest.first().unwrap();
+        // No operand owns a run, so the space between the two is the
+        // sequence's own field.
         assert_eq!(gap.as_ref().unwrap().0.as_str(), " ");
         assert_eq!(operand.to_span(), Span::Range(4..7));
 
-        // A call owns the run inside its closing `>`, so the sequence has nothing
-        // left to carry.
-        let expr = whole::<Expr<_>>("<XID_Start> 'a'").unwrap();
-        assert!(expr.first.rest.first().unwrap().0.is_none());
+        // Two runs between three operands, each where the sequence says.
+        let expr = whole::<Expr<_>>("'a' 'b' 'c'").unwrap();
+        assert_eq!(expr.first.rest.len(), 2);
+        assert!(expr.first.rest.iter().all(|(gap, _)| gap.is_some()));
     }
 
     #[test]
@@ -857,7 +935,7 @@ mod tests {
         let expr = whole::<Expr<_>>("'a' | 'b' | 'c'").unwrap();
 
         assert_eq!(expr.branches().count(), 3);
-        assert_eq!(expr.rest[0].1.elements().count(), 1);
+        assert_eq!(expr.rest[0].3.elements().count(), 1);
         assert!(!expr.is_single());
 
         // A bar with nothing after it is not an alternative.
@@ -906,13 +984,13 @@ mod tests {
         use RepeatBound::{Count, RangeFrom, RangeTo};
 
         fn bounds(src: &str) -> RepeatBound<TokenStream<'_>> {
-            whole::<Repeat<_>>(src).unwrap().0.body
+            whole::<Repeat<_>>(src).unwrap().bound
         }
 
         assert!(matches!(bounds("{3}"), Count(_)));
-        assert!(matches!(bounds("{1, 6}"), RangeFrom(_, _, Some(_))));
-        assert!(matches!(bounds("{1,}"), RangeFrom(_, _, None)));
-        assert!(matches!(bounds("{,4}"), RangeTo(_, _)));
+        assert!(matches!(bounds("{1, 6}"), RangeFrom(_, _, _, Some((_, _)))));
+        assert!(matches!(bounds("{1,}"), RangeFrom(_, _, _, None)));
+        assert!(matches!(bounds("{,4}"), RangeTo(_, _, _, _)));
 
         // A bound of two is not a bound followed by a brace that finds a comma.
         assert!(whole::<Repeat<_>>("{1, 2, 3}").is_err());
@@ -976,8 +1054,15 @@ mod tests {
         assert_eq!(stmt.ident.text(), "Expr");
         assert_eq!(stmt.to_span(), Span::Range(0..source.len()));
 
-        // The name is read after the word, and neither owns the run between them.
+        // The sequence carries every run between its operands as a field of
+        // its own: the name comes after the word, the arrow after the name,
+        // and the pattern after the arrow.
         assert_eq!(stmt.s.unwrap().0.as_str(), " ");
+        assert_eq!(stmt.s1.unwrap().0.as_str(), " ");
+        assert_eq!(stmt.s2.unwrap().0.as_str(), " ");
+        // Nothing lies between a pattern and the `;` that closes it here, so
+        // the last junction of the sequence stands empty.
+        assert!(stmt.s3.is_none());
         // A word and a name run together is what the spec writes, not what it
         // refuses: `syntaxExpr` is the word `syntax` and then the name `Expr`,
         // and the space between them is trivia that belongs to no rule.
@@ -1004,19 +1089,61 @@ mod tests {
                 .iter()
                 .filter(|item| matches!(item, Item::S(_)))
                 .count(),
-            2,
-            "a run of the trivia no terminal took is an item of its own"
+            4,
+            "a run between two definitions is an item of its own"
         );
+        // Every character is held: each run by the node that keeps it, and the
+        // text a node reads by the node itself. No terminal owns a run, so a
+        // run of trivia at the edge of an item stands there as an item.
+        let mut covered = 0usize;
+        let mut hold = |span: Span| {
+            let Span::Range(range) = span else {
+                panic!("a node without a range")
+            };
+            assert_eq!(range.start, covered, "a gap before {range:?}");
+            covered = range.end;
+        };
+
+        for (run, doc) in &file.inner_docs {
+            if let Some(run) = run {
+                hold(run.to_span());
+            }
+            hold(doc.to_span());
+        }
+
+        for item in &file.items {
+            match item {
+                Item::Stmt(stmt) => hold(stmt.to_span()),
+                Item::OuterDoc(doc) => hold(doc.to_span()),
+                Item::S(s) => hold(s.to_span()),
+            }
+        }
+
+        assert_eq!(covered, source.len(), "the file holds all of its text");
         assert_eq!(file.to_span(), Span::Range(0..source.len()));
     }
 
     #[test]
-    fn text_no_item_can_read_breaks_the_file() {
+    fn text_no_item_can_read_is_left_of_the_file() {
+        let source = "lexer A -> 'a';\n@";
+        let mut input = TokenStream::from(source);
+        let file = input
+            .parse::<Crate<_>>()
+            .expect("a file is read as far as its items reach");
+
+        // The run in front of the foreign character is an item of its own, and
+        // the character itself stands where it was written: the rule for a
+        // file lists items and nothing else, so whoever asks for the file
+        // whole is the one that reports what is left.
+        assert_eq!(file.items.len(), 2);
+        assert_eq!(input.to_span(), Span::Range(16..17));
+
+        // Reading the same text whole is what refuses it.
         assert_eq!(
-            TokenStream::from("lexer A -> 'a';\n@").parse::<Crate<_>>(),
+            whole::<Crate<_>>(source),
             Err(UnsynError::Syntax(
                 SyntaxKind::Eof,
-                ControlFlow::Fatal,
+                ControlFlow::Recovable,
                 Span::Range(16..17)
             ))
         );

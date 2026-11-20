@@ -30,27 +30,12 @@ mod generated;
 /// The path of the file the code of the spec is kept in.
 const GENERATED: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/tests/generated/unsyn_us.rs");
 
-/// The scan `<IdentOrKeyword>` is bound to: the start of a name — an
-/// XID_Start or an `_` — and then the greedy run of characters a name
-/// continues with. A generated file reaches this by the path the caller gave
-/// in the binding, which is what an external is: the caller decides what a
-/// call means, and here the answer is the same scan the hand lexer of this
-/// crate reads.
-fn scan_ident_or_keyword<I>(input: &mut I) -> Result<I, <I as parserc::Input>::Error>
-where
-    I: parserc::chars::CharsInput,
-{
-    use parserc::{Parser, next_if, take_while};
+/// The scan the generated file binds `<IdentOrKeyword>` to, re-exported at
+/// this crate's root, which is the path the binding reaches.
+#[path = "common/scan.rs"]
+mod scan;
 
-    let mut whole = input.clone();
-    let before = input.len();
-
-    next_if(|c: char| ::unicode_ident::is_xid_start(c) || c == '_').parse(input)?;
-
-    take_while(::unicode_ident::is_xid_continue).parse(input)?;
-
-    Ok(whole.split_to(before - input.len()))
-}
+pub use scan::scan_ident_or_keyword;
 
 /// The code of the terminals `unsyn.us` declares.
 ///

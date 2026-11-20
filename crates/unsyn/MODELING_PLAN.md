@@ -129,7 +129,18 @@
       新验收测试 `the_generated_visitor_hands_over_every_character_once`：
       生成的 visitor 走生成的 parser 对 `unsyn.us` 的树，每个字符恰好交付
       一次、顺序完整——与手写 visit 的不变量同源。
-- [ ] **M8 完全自举**：semantic/codegen 两个 pass 迁移到只经 visit 接口 +
-      值访问器读取树（不依赖具体节点类型），或以生成器再生一份自身
-      （generated-from-generated 恒等检验），以生成的 parser 替换手写
-      parser 解析 `.us` 文件。
+- [x] **M8.1 双树对等检验**：新测试 `crates/unsyn/tests/two_trees.rs`——
+      同一份 `unsyn.us` 分别由「手写 parser + 手写 visitor」与「生成 parser +
+      生成 visitor」走一遍，记录 (visit_<规则>, span) 事件序列并逐条比对。
+      手写侧已改为生成侧的 junction 模型（终端只持有自己的文本，操作数之间的
+      run 是序列的显式 `Option<S<I>>` 字段），所以两棵树的 span **直接相等**，
+      不再有任何归一化：不裁空白，不过滤空 span。
+      仅剩一件投影，且它是真实的形状差异：生成侧降级为文本的规则
+      （non_keyword_ident / lit_str / lit_unicode / unicode_escape /
+      ascii_escape / block_comment 家族）其内部子事件在生成树中不存在，
+      手写序列按区间栈投影掉。其余 900+ 事件严格相等：规则、顺序、区间
+      完全一致。`TEXT_INTERIORS` 列的是「生成代码按文本读取的规则」全集，
+      而非今日 `unsyn.us` 恰好触及的子集，规范变化时投影仍然成立。
+- [ ] **M8.2 完全自举**：semantic/codegen 两个 pass 迁移到只经 visit 接口 +
+      值访问器读取树（不依赖具体节点类型），以生成的 parser 替换手写
+      parser 解析 `.us` 文件，形成编译自身的闭环。

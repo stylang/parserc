@@ -19,12 +19,13 @@
 //!
 //! # Where the trivia goes
 //!
-//! No node of this module owns a run of the trivia. A `lexer` token is read out
-//! of the text it is handed, and a run taken there would end up inside that
-//! text; the whitespace on each side of a token belongs to the `syntax` rule
-//! that reaches it, which is why the terminals a `syntax` rule is written with —
-//! the puncts and the fixed words — live in [`super::syntax`] instead. See the
-//! [crate documentation](crate) for how a run is divided between two neighbours.
+//! No node of this module keeps a run of the trivia. A `lexer` token is read
+//! out of the text it is handed, and a run taken there would end up inside that
+//! text. The trivia on each side of such a token is therefore the sequence's
+//! own: the `syntax` rule that reaches the token holds the run in a field laid
+//! beside it, which is why the terminals a `syntax` rule is written with — the
+//! puncts and the fixed words — live in [`super::syntax`] instead. See the
+//! [crate documentation](crate) for how a run is filed away exactly once.
 //!
 //! The one consequence worth stating is the order of the alternatives of
 //! [`Ident`]. A semantics error is fatal, so once a rule has refused text for

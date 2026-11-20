@@ -80,10 +80,11 @@
 //! an item of the repetition rather than a boundary the code lays down.
 //!
 //! The shapes an operand can hold are the shapes [`parserc`] already has: a
-//! a node of a rule the file names, [`Box`]ed where the node is of the tree —
+//! node of a rule the file names, [`Box`]ed where the node is of the tree —
 //! a cycle can only be built through a node, and the box is what makes the
 //! type finite — a [`Char`](parserc::syntax::Char) of one character, a field
-//! of `I` with the `keyword` of a word beside it, a [`Vec`] or an [`Option`] of a repetition, a tuple of a group, and the nested
+//! of `I` with the `keyword` of a word beside it, a [`Vec`] or an [`Option`]
+//! of a repetition, a tuple of a group, and the nested
 //! [`Or`](parserc::syntax::Or) of a choice the file left unnamed: the shape
 //! says what the group holds, and no name of the generator is in it. An
 //! operator of the grammar is never a field of its word: `concat` lays its
@@ -395,7 +396,7 @@ where
             continue;
         }
 
-        let body = &stmt.definition.body;
+        let body = &stmt.expr;
 
         let shape = if named_choice(body).is_some() {
             Shape::Enum
@@ -433,7 +434,7 @@ where
             // folded choice, the members of a set read one character at a
             // time, the operand a removal is written over, and the group
             // whose whole answer is one name.
-            expr_forced(&stmt.definition.body, false, &mut forced);
+            expr_forced(&stmt.expr, false, &mut forced);
 
             if *shape == Shape::Enum {
                 // The enum's own alternatives are its variants, and what a
@@ -549,17 +550,15 @@ where
         // of `I`, an operand the code of a rule folds. What a group reads
         // besides — a sequence, a choice of its own — it answers with its
         // reading, and the names inside answer only to that.
-        syntax::ExprWithoutSuffix::Paren(group) => {
+        syntax::ExprWithoutSuffix::Paren { expr: group, .. } => {
             if group
-                .body
                 .branches()
                 .next()
                 .is_some_and(|branch| branch.elements().count() == 1)
-                && group.body.is_single()
+                && group.is_single()
                 && let Some(syntax::ExprNoTopAlt::WithoutSuffix(
                     syntax::ExprWithoutSuffix::Reference(ident),
                 )) = group
-                    .body
                     .branches()
                     .next()
                     .expect("one element")
@@ -568,7 +567,7 @@ where
             {
                 forced.insert(external_key(ident.text().as_str()));
             } else {
-                expr_forced(&group.body, false, forced);
+                expr_forced(group, false, forced);
             }
         }
         // A set of more than one member is a choice of its members, and a
@@ -635,7 +634,7 @@ where
             // A `syntax` rule is no character to be a member of a set of one, and
             // is only ever asked of a file that is refused before it is read.
             if matches!(stmt.decl(), Decl::Whitespace | Decl::Lexer) {
-                bodies.push((stmt.ident.text(), &stmt.definition.body));
+                bodies.push((stmt.ident.text(), &stmt.expr));
             }
         }
     }
@@ -703,14 +702,14 @@ where
         },
         syntax::ExprWithoutSuffix::Unicode(lit) => Some(vec![Arm::Char(lit.value()?)]),
         syntax::ExprWithoutSuffix::Set(set) => set_arms(set, known),
-        syntax::ExprWithoutSuffix::Paren(group) => expr_arms(&group.body, known),
+        syntax::ExprWithoutSuffix::Paren { expr: group, .. } => expr_arms(group, known),
         syntax::ExprWithoutSuffix::Reference(ident) => known.get(ident.text().as_str()).cloned(),
         // A refusal of a set is every character the universe holds besides it,
         // which is no set to list, whatever the set itself denotes.
         syntax::ExprWithoutSuffix::Tilde(..) => None,
         // An external is whatever the caller binds, and nothing here may say more
         // of it than that.
-        syntax::ExprWithoutSuffix::Call(..) => None,
+        syntax::ExprWithoutSuffix::Call { .. } => None,
     }
 }
 
@@ -745,7 +744,7 @@ where
     I: UnsynInput,
 {
     let (from, to) = match range {
-        syntax::Range::Unicode(from, _, to) => (from.value()?, to.value()?),
+        syntax::Range::Unicode(from, _, _, _, to) => (from.value()?, to.value()?),
         syntax::Range::Str(from, _, to) => (one_char(from.chars())?, one_char(to.chars())?),
     };
 
@@ -917,7 +916,7 @@ where
         // rules are of that shape was settled over the whole file first, since a
         // rule asked for among the parts of another is not written as a node.
         if self.nodes.contains(&external_key(&text))
-            && let Some(names) = named_choice(&stmt.definition.body)
+            && let Some(names) = named_choice(&stmt.expr)
         {
             let mut variants = Vec::new();
 
@@ -1027,11 +1026,8 @@ where
     /// The predicate of a `whitespace` rule, which is the one rule the derive of
     /// the syntax asks a function of a character rather than a parser.
     fn whitespace(&mut self, text: &str, stmt: &syntax::Stmt<I>) -> Result<Rule, UnsynError> {
-        let arms = expr_arms(&stmt.definition.body, self.denotations).ok_or_else(|| {
-            UnsynError::Build(
-                BuildKind::Whitespace(text.to_owned()),
-                stmt.definition.body.to_span(),
-            )
+        let arms = expr_arms(&stmt.expr, self.denotations).ok_or_else(|| {
+            UnsynError::Build(BuildKind::Whitespace(text.to_owned()), stmt.expr.to_span())
         })?;
 
         let pred = self.unique(format!("is_{}", to_snake_case(text)));
@@ -1057,7 +1053,7 @@ where
         // A rule whose whole right side is one alternative of more than one
         // operand is a sequence, and a sequence is modelled as the struct its
         // operands write: one field apiece, in the order they were written.
-        let body = &stmt.definition.body;
+        let body = &stmt.expr;
 
         if is_sequence(body) && self.nodes.contains(&external_key(text)) {
             let branch = body.branches().next().expect("a pattern has a branch");
@@ -1141,12 +1137,12 @@ where
         match operand {
             syntax::ExprNoTopAlt::WithoutSuffix(atom) => Ok(vec![self.atom_field(atom, None)?]),
             syntax::ExprNoTopAlt::WithSuffix(suffix) => match suffix {
-                syntax::ExprWithSuffix::Grouped { target, suffix } => {
+                syntax::ExprWithSuffix::Grouped { target, suffix, .. } => {
                     let bounds = match suffix {
                         syntax::Suffix::Star(_) => (0, None),
                         syntax::Suffix::Question(_) => (0, Some(1)),
                         syntax::Suffix::Plus(_) => (1, None),
-                        syntax::Suffix::Repeat(repeat) => self.bounds(&repeat.0.body)?,
+                        syntax::Suffix::Repeat(repeat) => self.bounds(&repeat.bound)?,
                     };
 
                     Ok(vec![self.atom_field(target, Some(bounds))?])
@@ -1359,7 +1355,7 @@ where
         stmt: &syntax::Stmt<I>,
     ) -> Result<Vec<TokenStream>, UnsynError> {
         let name = item_name(text, stmt.ident.to_span())?;
-        let body = &stmt.definition.body;
+        let body = &stmt.expr;
         let mut allow = wants_allow(text);
 
         let item = if body.is_single() {
@@ -1534,19 +1530,19 @@ where
         let word = branch.elements().find_map(|element| match element {
             syntax::ExprNoTopAlt::WithSuffix(suffix) => match suffix {
                 syntax::ExprWithSuffix::Concat { keyword, .. } => {
-                    Some(keyword.1.as_str().to_owned())
+                    Some(keyword.0.as_str().to_owned())
                 }
                 syntax::ExprWithSuffix::Followed { keyword, .. } => {
-                    Some(keyword.1.as_str().to_owned())
+                    Some(keyword.0.as_str().to_owned())
                 }
                 syntax::ExprWithSuffix::Except { keyword, .. } => {
-                    Some(keyword.1.as_str().to_owned())
+                    Some(keyword.0.as_str().to_owned())
                 }
                 syntax::ExprWithSuffix::Grouped { suffix, .. } => match suffix {
                     syntax::Suffix::Star(_)
                     | syntax::Suffix::Question(_)
                     | syntax::Suffix::Plus(_) => None,
-                    syntax::Suffix::Repeat(repeat) => Some(repeat.0.start.1.as_str().to_owned()),
+                    syntax::Suffix::Repeat(repeat) => Some(repeat.open.0.as_str().to_owned()),
                 },
             },
             syntax::ExprNoTopAlt::WithoutSuffix(syntax::ExprWithoutSuffix::Str(lit)) => {
@@ -1610,7 +1606,7 @@ where
 
         let Some(body) = self.file.items.iter().find_map(|item| match item {
             syntax::Item::Stmt(stmt) => {
-                (external_key(stmt.ident.text().as_str()) == *key).then_some(&stmt.definition.body)
+                (external_key(stmt.ident.text().as_str()) == *key).then_some(&stmt.expr)
             }
             _ => None,
         }) else {
@@ -1763,7 +1759,7 @@ where
         };
 
         match suffix {
-            syntax::ExprWithSuffix::Grouped { target, suffix } => {
+            syntax::ExprWithSuffix::Grouped { target, suffix, .. } => {
                 // A repetition repeats what its operand reads: the field of
                 // the operand wrapped in the shape that reads it the bound
                 // over. The mark itself is not data — unlike the three
@@ -1938,18 +1934,14 @@ where
         &mut self,
         atom: &syntax::ExprWithoutSuffix<I>,
     ) -> Result<Vec<Field>, UnsynError> {
-        if let syntax::ExprWithoutSuffix::Paren(group) = atom {
-            if group.body.is_single() {
-                let branch = group
-                    .body
-                    .branches()
-                    .next()
-                    .expect("a pattern has a branch");
+        if let syntax::ExprWithoutSuffix::Paren { expr: group, .. } = atom {
+            if group.is_single() {
+                let branch = group.branches().next().expect("a pattern has a branch");
 
                 return self.branch_fields(branch);
             }
 
-            let ty = self.choice_type(&group.body)?;
+            let ty = self.choice_type(group)?;
 
             return Ok(vec![Field {
                 name: None,
@@ -2008,13 +2000,13 @@ where
                     attr: None,
                 })
             }
-            syntax::ExprWithoutSuffix::Call(call) => {
-                let name = call.body.text();
+            syntax::ExprWithoutSuffix::Call { ident: call, .. } => {
+                let name = call.text();
 
                 let parser = self.external.get(&external_key(&name)).ok_or_else(|| {
                     UnsynError::Build(
                         BuildKind::External(self.rule.clone(), name.clone()),
-                        call.body.to_span(),
+                        call.to_span(),
                     )
                 })?;
 
@@ -2043,7 +2035,7 @@ where
                     attr: Some(field_parser(&quote! { ::parserc::next_if(#pred) })),
                 })
             }
-            syntax::ExprWithoutSuffix::Paren(_) => {
+            syntax::ExprWithoutSuffix::Paren { .. } => {
                 unreachable!("a group is written by `atom_fields`")
             }
         }
@@ -2125,7 +2117,7 @@ where
         };
 
         match atom {
-            syntax::ExprWithSuffix::Grouped { target, suffix } => {
+            syntax::ExprWithSuffix::Grouped { target, suffix, .. } => {
                 let bounds = match suffix {
                     syntax::Suffix::Star(_) => (0, None),
                     syntax::Suffix::Question(_) => (0, Some(1)),
@@ -2168,18 +2160,14 @@ where
 
                 Ok(vec![quote! { ::parserc::syntax::Char<I, #c> }])
             }
-            syntax::ExprWithoutSuffix::Paren(group) => {
-                if group.body.is_single() {
-                    let branch = group
-                        .body
-                        .branches()
-                        .next()
-                        .expect("a pattern has a branch");
+            syntax::ExprWithoutSuffix::Paren { expr: group, .. } => {
+                if group.is_single() {
+                    let branch = group.branches().next().expect("a pattern has a branch");
 
                     return self.branch_type(branch).map(|ty| vec![ty]);
                 }
 
-                self.choice_type(&group.body).map(|ty| vec![ty])
+                self.choice_type(group).map(|ty| vec![ty])
             }
             atom => Err(self.unsupported(atom.to_span())),
         }
@@ -2257,20 +2245,20 @@ where
                 Ok(Code::Expr(quote! { ::parserc::next(#c) }))
             }
             syntax::ExprWithoutSuffix::Reference(ident) => Ok(Code::Expr(self.reference(ident)?)),
-            syntax::ExprWithoutSuffix::Call(call) => {
-                let name = call.body.text();
+            syntax::ExprWithoutSuffix::Call { ident: call, .. } => {
+                let name = call.text();
 
                 let parser = self.external.get(&external_key(&name)).ok_or_else(|| {
                     UnsynError::Build(
                         BuildKind::External(self.rule.clone(), name.clone()),
-                        call.body.to_span(),
+                        call.to_span(),
                     )
                 })?;
 
                 Ok(Code::Expr(parser.clone()))
             }
             syntax::ExprWithoutSuffix::Set(set) => Ok(Code::Expr(self.code_of_set(set)?)),
-            syntax::ExprWithoutSuffix::Paren(group) => self.code_of_expr(&group.body),
+            syntax::ExprWithoutSuffix::Paren { expr: group, .. } => self.code_of_expr(group),
             syntax::ExprWithoutSuffix::Tilde(_, set) => {
                 // What `~` asks is answered by the character here, and takes it, so
                 // that a refusal of the set is a match of the operand.
@@ -2400,19 +2388,19 @@ where
     /// The code of an operand that carries one of the suffixes.
     fn code_of_suffix(&mut self, suffix: &syntax::ExprWithSuffix<I>) -> Result<Code, UnsynError> {
         match suffix {
-            syntax::ExprWithSuffix::Grouped { target, suffix } => {
+            syntax::ExprWithSuffix::Grouped { target, suffix, .. } => {
                 let (at_least, at_most) = match suffix {
                     syntax::Suffix::Star(_) => (0, None),
                     syntax::Suffix::Question(_) => (0, Some(1)),
                     syntax::Suffix::Plus(_) => (1, None),
-                    syntax::Suffix::Repeat(repeat) => self.bounds(&repeat.0.body)?,
+                    syntax::Suffix::Repeat(repeat) => self.bounds(&repeat.bound)?,
                 };
 
                 self.code_of_repetition(target, at_least, at_most)
             }
-            // `concat` joins two operands with nothing between them, and a node of
-            // a `lexer` rule owns no trivia, so it is what a sequence of two
-            // operands already is.
+            // `concat` joins two operands with nothing between them, and no node
+            // of a `lexer` rule keeps a run of the trivia beside it, so the pair
+            // is what a sequence of two operands already is.
             syntax::ExprWithSuffix::Concat { target, suffix, .. } => {
                 let mut stmts = self.code_of_atom(target)?.into_stmts();
                 stmts.extend(self.code_of_operand(suffix)?.into_stmts());
@@ -2542,10 +2530,10 @@ where
     /// How many times an operand is repeated, of the three forms a bound has.
     fn bounds(&self, bound: &syntax::RepeatBound<I>) -> Result<(usize, Option<usize>), UnsynError> {
         Ok(match bound {
-            syntax::RepeatBound::RangeTo(_, to) => (0, Some(self.count_of(to)?)),
-            syntax::RepeatBound::RangeFrom(from, _, to) => (
+            syntax::RepeatBound::RangeTo(_, _, _, to) => (0, Some(self.count_of(to)?)),
+            syntax::RepeatBound::RangeFrom(from, _, _, to) => (
                 self.count_of(from)?,
-                to.as_ref().map(|to| self.count_of(to)).transpose()?,
+                to.as_ref().map(|(_, to)| self.count_of(to)).transpose()?,
             ),
             syntax::RepeatBound::Count(count) => {
                 let count = self.count_of(count)?;
@@ -3308,13 +3296,7 @@ fn set_items<I>(set: &syntax::Set<I>) -> Vec<&syntax::SetItem<I>>
 where
     I: UnsynInput,
 {
-    let body = &set.body;
-
-    body.pairs
-        .iter()
-        .map(|(item, _)| item)
-        .chain(body.tail.iter().map(|tail| &**tail))
-        .collect()
+    set.members().collect()
 }
 
 #[cfg(test)]

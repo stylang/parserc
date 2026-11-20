@@ -23,24 +23,25 @@
 //! # Where the trivia goes
 //!
 //! A run of trivia lies between two words of the language, and since the node
-//! that declares it is greedy and takes each run whole, that run belongs to
-//! exactly one of the two. Which one is settled by the shape of the productions,
-//! never by what the characters of the described language happen to be:
+//! that declares it is greedy and takes each run whole, the run is one node of
+//! the tree and never part of two. Where it is filed is settled by the shape of
+//! the productions, never by what the characters of the described language
+//! happen to be:
 //!
-//! - a terminal whose pattern denotes finitely many fixed words — `'<'`, `';'`,
-//!   `'->'`, `'lexer'` — *owns* the runs on each side of the text it matched, as
-//!   the punctuation of a hand-written parser does;
-//! - the node `whitespace` declares is the trivia itself, and owns nothing;
-//! - a terminal another pattern reaches by name owns nothing, since its text is
-//!   read into the text of the rule that reaches it, and a run taken there would
-//!   end up inside that other token;
-//! - a terminal that could match a character the trivia matches owns nothing,
-//!   since the run before it would eat what it stands there to take.
+//! - no operand keeps a run for itself. A terminal holds its own text and
+//!   nothing else, and a `lexer` token is read out of the text it is handed, so
+//!   a run taken there would end up inside that other token;
+//! - between two operands of a sequence stands a field of the sequence, one
+//!   optional run of the trivia, laid beside the operands rather than around
+//!   either of them;
+//! - an option and a repetition open each of their matches with the run that
+//!   stands before them, so no field lies before such an operand as well — that
+//!   leading run is what tells two matches of one repetition apart.
 //!
-//! Between two operands neither of which owns the run before it, the sequence
-//! that reads them carries one optional run of the trivia. An operand that may
-//! match nothing — an option, a repetition, a bound — never owns a run, so it is
-//! always content to let its neighbour keep it.
+//! The one exception is a repetition of a rule that can itself match the trivia,
+//! such as the items of a file: a run laid before every item would be taken by
+//! the item meant to keep it, so such a list carries no leading run, and the
+//! trivia stands among the items as an item of its own.
 //!
 //! None of this changes what a grammar accepts: the first operand that reaches a
 //! run keeps it, and keeps all of it. What it decides is where in the tree the

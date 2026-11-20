@@ -514,7 +514,7 @@ impl<'ast, I: UnsynInput> Checker<'ast, I> {
     /// no members at all denotes nothing, which is not a set but a mistake about
     /// where the brackets end.
     fn set(&mut self, set: &'ast syntax::Set<I>) -> Pattern {
-        let members = self.take_members(set.body.len());
+        let members = self.take_members(set.len());
         let span = set.to_span();
 
         if members.is_empty() {
@@ -796,10 +796,10 @@ impl<'ast, I: UnsynInput> Visit<'ast, I> for Checker<'ast, I> {
             // A call of an external is a link the caller of the parser binds, and
             // so mentions no name of this file: nothing here can ask that the file
             // have defined it, and nothing here can reach past it.
-            syntax::ExprWithoutSuffix::Call(_) => Pattern::terminal(),
+            syntax::ExprWithoutSuffix::Call { .. } => Pattern::terminal(),
             // A group is one operand, so what it can do is what the expression
             // written inside it can do, the name it holds bare and all.
-            syntax::ExprWithoutSuffix::Paren(_) => self.take_one(),
+            syntax::ExprWithoutSuffix::Paren { .. } => self.take_one(),
             syntax::ExprWithoutSuffix::Str(lit) => {
                 _ = self.chars_of(lit);
 
@@ -891,13 +891,13 @@ impl<'ast, I: UnsynInput> Visit<'ast, I> for Checker<'ast, I> {
         let bound = match node {
             // `{,n}` is as much `{0,n}` as `{n}` is `{n,n}`, which is what both
             // the bound below and the bound above are asked for.
-            syntax::RepeatBound::RangeTo(_, to) => Bound {
+            syntax::RepeatBound::RangeTo(_, _, _, to) => Bound {
                 from: 0,
                 to: Some(self.count_of(to)),
             },
-            syntax::RepeatBound::RangeFrom(from, _, to) => Bound {
+            syntax::RepeatBound::RangeFrom(from, _, _, to) => Bound {
                 from: self.count_of(from),
-                to: to.as_ref().map(|to| self.count_of(to)),
+                to: to.as_ref().map(|(_, to)| self.count_of(to)),
             },
             syntax::RepeatBound::Count(count) => {
                 let count = self.count_of(count);
@@ -916,7 +916,7 @@ impl<'ast, I: UnsynInput> Visit<'ast, I> for Checker<'ast, I> {
         walk::walk_range(self, node);
 
         let (text, ends) = match node {
-            syntax::Range::Unicode(from, _, to) => (
+            syntax::Range::Unicode(from, _, _, _, to) => (
                 format!("{}-{}", from.text(), to.text()),
                 [self.code_of(from), self.code_of(to)],
             ),
