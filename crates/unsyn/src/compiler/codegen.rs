@@ -572,7 +572,7 @@ where
         }
         // A set of more than one member is a choice of its members, and a
         // choice answers with one thing however wide the members are.
-        syntax::ExprWithoutSuffix::Set(set) | syntax::ExprWithoutSuffix::Tilde(_, set)
+        syntax::ExprWithoutSuffix::Set(set) | syntax::ExprWithoutSuffix::Tilde { set, .. }
             if set_items(set).len() > 1 =>
         {
             for item in set_items(set) {
@@ -706,7 +706,7 @@ where
         syntax::ExprWithoutSuffix::Reference(ident) => known.get(ident.text().as_str()).cloned(),
         // A refusal of a set is every character the universe holds besides it,
         // which is no set to list, whatever the set itself denotes.
-        syntax::ExprWithoutSuffix::Tilde(..) => None,
+        syntax::ExprWithoutSuffix::Tilde { .. } => None,
         // An external is whatever the caller binds, and nothing here may say more
         // of it than that.
         syntax::ExprWithoutSuffix::Call { .. } => None,
@@ -1242,7 +1242,7 @@ where
     /// count, counted here for the field it will be written into.
     fn class_of(&self, atom: &syntax::ExprWithoutSuffix<I>) -> Option<TokenStream> {
         match atom {
-            syntax::ExprWithoutSuffix::Tilde(_, set) => {
+            syntax::ExprWithoutSuffix::Tilde { set, .. } => {
                 set_arms(set, self.denotations).as_deref().map(refused_pred)
             }
             atom => atom_arms(atom, self.denotations).as_deref().map(class_pred),
@@ -2016,7 +2016,7 @@ where
                     attr: Some(field_parser(parser)),
                 })
             }
-            syntax::ExprWithoutSuffix::Set(set) | syntax::ExprWithoutSuffix::Tilde(_, set) => {
+            syntax::ExprWithoutSuffix::Set(set) | syntax::ExprWithoutSuffix::Tilde { set, .. } => {
                 // A set of the tree level reads one character of what its
                 // members denote, which is one test only while every member
                 // denotes characters; anything wider has no field to read
@@ -2025,7 +2025,7 @@ where
                     .ok_or_else(|| self.unsupported(atom.to_span()))?;
 
                 let pred = match atom {
-                    syntax::ExprWithoutSuffix::Tilde(..) => refused_pred(&arms),
+                    syntax::ExprWithoutSuffix::Tilde { .. } => refused_pred(&arms),
                     _ => class_pred(&arms),
                 };
 
@@ -2259,7 +2259,7 @@ where
             }
             syntax::ExprWithoutSuffix::Set(set) => Ok(Code::Expr(self.code_of_set(set)?)),
             syntax::ExprWithoutSuffix::Paren { expr: group, .. } => self.code_of_expr(group),
-            syntax::ExprWithoutSuffix::Tilde(_, set) => {
+            syntax::ExprWithoutSuffix::Tilde { set, .. } => {
                 // What `~` asks is answered by the character here, and takes it, so
                 // that a refusal of the set is a match of the operand.
                 if let Some(arms) = set_arms(set, self.denotations) {
@@ -2465,7 +2465,7 @@ where
         let class = match target {
             // A refusal is a class when what it refuses is one, and the class of
             // the refusal is the other half of the characters.
-            syntax::ExprWithoutSuffix::Tilde(_, set) => {
+            syntax::ExprWithoutSuffix::Tilde { set, .. } => {
                 set_arms(set, self.denotations).as_deref().map(refused_pred)
             }
             atom => atom_arms(atom, self.denotations).as_deref().map(class_pred),

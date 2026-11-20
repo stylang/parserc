@@ -138,25 +138,32 @@ where
         walk::walk_expr_without_suffix(self, node);
     }
 
-    /// `syntax ExprWithSuffix -> ExprWithoutSuffix ( '*' | … ) | …`
+    /// `syntax ExprWithSuffix -> ExprWithoutSuffix Suffix | …`
     fn visit_expr_with_suffix(&mut self, node: &'ast syntax::ExprWithSuffix<I>) {
         walk::walk_expr_with_suffix(self, node);
     }
 
-    /// The `('*' | '?' | '+' | Repeat)` of [`ExprWithSuffix`](syntax::ExprWithSuffix),
-    /// a group the spec leaves unnamed and the hand tree names for it.
+    /// The node of the rule `syntax Set -> '[' ( SetItem ',' )* SetItem? ']';`.
+    ///
+    /// A set is asked about in two ways — the values it denotes, and the one
+    /// character `~` refuses — so both ways reach it through this hook, which is
+    /// what lets a judge of membership see one set whole.
+    fn visit_set(&mut self, node: &'ast syntax::Set<I>) {
+        walk::walk_set(self, node);
+    }
+
+    /// The node of the rule `syntax Suffix -> '*' | '?' | '+' | Repeat;`.
     fn visit_suffix(&mut self, node: &'ast syntax::Suffix<I>) {
         walk::walk_suffix(self, node);
     }
 
-    /// `syntax Repeat -> '{' ( ',' LitDec | LitDec ',' LitDec? | LitDec ) '}';`
+    /// The node of the rule `syntax Repeat -> '{' RepeatBound '}';`.
     fn visit_repeat(&mut self, node: &'ast syntax::Repeat<I>) {
         walk::walk_repeat(self, node);
     }
 
-    /// The group of bounds the [`syntax::Repeat`] rule holds: the one right side
-    /// that has
-    /// a type of its own, and so a method of its own.
+    /// The node of the rule `syntax RepeatBound -> ',' LitDec | LitDec ','
+    /// LitDec? | LitDec;`.
     fn visit_repeat_bound(&mut self, node: &'ast syntax::RepeatBound<I>) {
         walk::walk_repeat_bound(self, node);
     }
@@ -396,12 +403,6 @@ where
         walk::walk_lit_dec(self, node);
     }
 
-    /// The `( DecDigit | '_' )` of [`LitDec`](lexer::LitDec), a group the spec
-    /// leaves unnamed and the hand tree names for it.
-    fn visit_digit_or_underscore(&mut self, node: &'ast lexer::DigitOrUnderscore<I>) {
-        walk::walk_digit_or_underscore(self, node);
-    }
-
     /// `lexer LitUnicode -> 'U+' concat HexDigit{4};`
     fn visit_lit_unicode(&mut self, node: &'ast lexer::LitUnicode<I>) {
         walk::walk_lit_unicode(self, node);
@@ -596,9 +597,14 @@ pub mod walk {
         node: &'ast syntax::ExprWithoutSuffix<I>,
     ) {
         match node {
-            syntax::ExprWithoutSuffix::Tilde(tilde, set) => {
+            syntax::ExprWithoutSuffix::Tilde { tilde, s, set } => {
                 v.visit_tilde(tilde);
-                walk_set(v, set);
+
+                if let Some(s) = s {
+                    v.visit_s(s);
+                }
+
+                v.visit_set(set);
             }
             syntax::ExprWithoutSuffix::Call {
                 lt,
@@ -642,7 +648,7 @@ pub mod walk {
 
                 v.visit_paren_end(close);
             }
-            syntax::ExprWithoutSuffix::Set(set) => walk_set(v, set),
+            syntax::ExprWithoutSuffix::Set(set) => v.visit_set(set),
             syntax::ExprWithoutSuffix::Str(lit) => v.visit_lit_str(lit),
             syntax::ExprWithoutSuffix::Unicode(lit) => v.visit_lit_unicode(lit),
             syntax::ExprWithoutSuffix::Reference(ident) => v.visit_ident(ident),
@@ -854,10 +860,8 @@ pub mod walk {
         }
     }
 
-    /// `'[' ( SetItem ',' )* SetItem? ']'`, which [`Punctuated`] reads.
-    ///
-    /// [`Punctuated`]: parserc::syntax::Punctuated
-    fn walk_set<'ast, I: UnsynInput, V: ?Sized + Visit<'ast, I>>(
+    /// `'[' ( SetItem ',' )* SetItem? ']'`, which [`syntax::Set`] spells.
+    pub fn walk_set<'ast, I: UnsynInput, V: ?Sized + Visit<'ast, I>>(
         v: &mut V,
         node: &'ast syntax::Set<I>,
     ) {
@@ -909,9 +913,10 @@ pub mod walk {
     // -----------------------------------------------------------------------
     // The terminals a `syntax` production is written with
     //
-    // Every one of them is the same three fields: the run before, the word, the
-    // run after. A generator writes one walk per terminal for the same reason it
-    // writes one type per terminal.
+    // Every one of them is the word and nothing else, so every walk hands over
+    // that text alone; the runs about it belong to the sequence, whose walk
+    // reaches them through `visit_s`. A generator writes one walk per terminal
+    // for the same reason it writes one type per terminal.
     // -----------------------------------------------------------------------
 
     macro_rules! walk_terminal {
@@ -1211,20 +1216,7 @@ pub mod walk {
         node: &'ast lexer::LitDec<I>,
     ) {
         v.visit_dec_digit(&node.head);
-
-        for part in &node.tail {
-            v.visit_digit_or_underscore(part);
-        }
-    }
-
-    pub fn walk_digit_or_underscore<'ast, I: UnsynInput, V: ?Sized + Visit<'ast, I>>(
-        v: &mut V,
-        node: &'ast lexer::DigitOrUnderscore<I>,
-    ) {
-        match node {
-            lexer::DigitOrUnderscore::Dec(digit) => v.visit_dec_digit(digit),
-            lexer::DigitOrUnderscore::Underscore(underscore) => v.visit_text(&underscore.0),
-        }
+        v.visit_text(&node.tail);
     }
 
     pub fn walk_lit_unicode<'ast, I: UnsynInput, V: ?Sized + Visit<'ast, I>>(

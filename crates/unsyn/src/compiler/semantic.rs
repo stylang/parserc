@@ -790,7 +790,7 @@ impl<'ast, I: UnsynInput> Visit<'ast, I> for Checker<'ast, I> {
         let pattern = match node {
             // `'~' […]` and `[…]` differ in what they ask of the character here,
             // and not in what they can begin with or in what they mention.
-            syntax::ExprWithoutSuffix::Tilde(_, set) | syntax::ExprWithoutSuffix::Set(set) => {
+            syntax::ExprWithoutSuffix::Tilde { set, .. } | syntax::ExprWithoutSuffix::Set(set) => {
                 self.set(set)
             }
             // A call of an external is a link the caller of the parser binds, and
@@ -1136,7 +1136,7 @@ mod tests {
             .filter(|lint| lint.kind == LintKind::UnnamedAlternative)
             .count();
 
-        assert_eq!(unnamed, 9, "the choices of unsyn.us that name no node");
+        assert_eq!(unnamed, 7, "the choices of unsyn.us that name no node");
     }
 
     #[test]

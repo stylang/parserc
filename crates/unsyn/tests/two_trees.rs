@@ -85,9 +85,13 @@ recorder! {
         fn visit_expr_no_top_alt: unsyn::compiler::syntax::ExprNoTopAlt<I> => unsyn::compiler::visit::walk::walk_expr_no_top_alt,
         fn visit_expr_without_suffix:
             unsyn::compiler::syntax::ExprWithoutSuffix<I> => unsyn::compiler::visit::walk::walk_expr_without_suffix,
+        fn visit_set: unsyn::compiler::syntax::Set<I> => unsyn::compiler::visit::walk::walk_set,
+        fn visit_suffix: unsyn::compiler::syntax::Suffix<I> => unsyn::compiler::visit::walk::walk_suffix,
         fn visit_expr_with_suffix:
             unsyn::compiler::syntax::ExprWithSuffix<I> => unsyn::compiler::visit::walk::walk_expr_with_suffix,
         fn visit_repeat: unsyn::compiler::syntax::Repeat<I> => unsyn::compiler::visit::walk::walk_repeat,
+        fn visit_repeat_bound:
+            unsyn::compiler::syntax::RepeatBound<I> => unsyn::compiler::visit::walk::walk_repeat_bound,
         fn visit_range: unsyn::compiler::syntax::Range<I> => unsyn::compiler::visit::walk::walk_range,
         fn visit_set_item: unsyn::compiler::syntax::SetItem<I> => unsyn::compiler::visit::walk::walk_set_item,
         fn visit_ident_or_keyword:
@@ -138,9 +142,13 @@ recorder! {
         fn visit_expr_no_top_alt: crate::generated::ExprNoTopAlt<I> => crate::generated::walk::walk_expr_no_top_alt,
         fn visit_expr_without_suffix:
             crate::generated::ExprWithoutSuffix<I> => crate::generated::walk::walk_expr_without_suffix,
+        fn visit_set: crate::generated::Set<I> => crate::generated::walk::walk_set,
+        fn visit_suffix: crate::generated::Suffix<I> => crate::generated::walk::walk_suffix,
         fn visit_expr_with_suffix:
             crate::generated::ExprWithSuffix<I> => crate::generated::walk::walk_expr_with_suffix,
         fn visit_repeat: crate::generated::Repeat<I> => crate::generated::walk::walk_repeat,
+        fn visit_repeat_bound:
+            crate::generated::RepeatBound<I> => crate::generated::walk::walk_repeat_bound,
         fn visit_range: crate::generated::Range<I> => crate::generated::walk::walk_range,
         fn visit_set_item: crate::generated::SetItem<I> => crate::generated::walk::walk_set_item,
         fn visit_ident_or_keyword: crate::generated::IdentOrKeyword<I> => crate::generated::walk::walk_ident_or_keyword,
@@ -177,24 +185,57 @@ recorder! {
 #[path = "generated/unsyn_us.rs"]
 mod generated;
 
-/// The two trees over `unsyn.us` say the same rules over the same text.
-#[test]
-fn the_two_trees_say_the_same_rules_over_the_same_text() {
+/// A rule the generated code reads as one piece of text — `NonKeywordIdent`
+/// beside the `except` it holds, the literals whose digits and escapes are
+/// asked for their values rather than their parts — has no interior of its own
+/// in the generated tree, and the hand events inside one are the parts of a
+/// node the generated file does not have. Everything else the two trees say
+/// identically.
+///
+/// The list is the set of rules the generated code reads as one piece of text,
+/// not the subset a given file happens to reach: an escape lies inside a
+/// `LitStr`, so it is covered by that interval already, and a block comment
+/// appears nowhere in the spec — both are named so that the projection says
+/// what the generated file *is*, and stays right when the spec changes.
+const TEXT_INTERIORS: &[&str] = &[
+    "visit_non_keyword_ident",
+    "visit_lit_str",
+    "visit_lit_unicode",
+    "visit_unicode_escape",
+    "visit_ascii_escape",
+    "visit_block_comment",
+    "visit_block_comment_or_doc",
+    "visit_inner_block_doc",
+    "visit_outer_block_doc",
+];
+
+/// Reads `source` with both parsers, walks both trees with both visitors, and
+/// returns the events of each: the generated ones as they came, the hand ones
+/// with the parts of a partless node projected away.
+///
+/// Nothing else is done to either sequence. The spans are the nodes' own text,
+/// trivia and all, because both trees file a run of trivia in the same place —
+/// beside the operands of the sequence that reads them.
+fn both_trees(source: &str) -> (Vec<Event>, Vec<Event>) {
     use parserc::{Input, syntax::SyntaxInput};
 
-    const SOURCE: &str = include_str!("../unsyn.us");
-
-    let mut hand_input = unsyn::compiler::input::TokenStream::from(SOURCE);
+    let mut hand_input = unsyn::compiler::input::TokenStream::from(source);
     let hand_tree = hand_input
         .parse::<unsyn::compiler::syntax::Crate<_>>()
-        .expect("the hand parser reads the spec");
-    assert!(hand_input.is_empty());
+        .unwrap_or_else(|error| panic!("the hand parser reads {source:?}: {error}"));
+    assert!(
+        hand_input.is_empty(),
+        "the hand parser left text of {source:?}"
+    );
 
-    let mut generated_input = parserc::chars::TokenStream::<parserc::Kind>::from(SOURCE);
+    let mut generated_input = parserc::chars::TokenStream::<parserc::Kind>::from(source);
     let generated_tree = generated_input
         .parse::<generated::Crate<_>>()
-        .expect("the generated parser reads the spec");
-    assert!(generated_input.is_empty());
+        .unwrap_or_else(|error| panic!("the generated parser reads {source:?}: {error}"));
+    assert!(
+        generated_input.is_empty(),
+        "the generated parser left text of {source:?}"
+    );
 
     let mut hand_recorder = Hand::default();
     unsyn::compiler::visit::Visit::visit_crate(&mut hand_recorder, &hand_tree);
@@ -202,49 +243,18 @@ fn the_two_trees_say_the_same_rules_over_the_same_text() {
     let mut generated_recorder = Generated::default();
     generated::Visit::visit_crate(&mut generated_recorder, &generated_tree);
 
-    assert!(!hand_recorder.events.is_empty());
-
-    // Every event of every rule must agree exactly: a node at a different
-    // place, of a different extent, or in a different order fails.
-    //
-    // The one projection the comparison needs is the other kind of
-    // difference, a real one: a rule the generated code reads as text —
-    // `NonKeywordIdent` beside the `except` it holds, the literals whose
-    // digits and escapes are asked for their values rather than their
-    // parts — has no interior of its own in the generated tree, and the
-    // hand events inside one are the parts of a node the generated file
-    // does not have. Everything else the two trees must say identically.
-    //
-    // The list is the set of rules the generated code reads as one piece of
-    // text, not the subset today's file happens to reach: an escape lies
-    // inside a `LitStr`, so it is covered by that interval already, and a
-    // block comment appears nowhere in the spec — both are named so that the
-    // projection says what the generated file is, and stays right when the
-    // spec changes.
-    const TEXT_INTERIORS: &[&str] = &[
-        "visit_non_keyword_ident",
-        "visit_lit_str",
-        "visit_lit_unicode",
-        "visit_unicode_escape",
-        "visit_ascii_escape",
-        "visit_block_comment",
-        "visit_block_comment_or_doc",
-        "visit_inner_block_doc",
-        "visit_outer_block_doc",
-    ];
-
     let mut hand_projected: Vec<Event> = Vec::new();
     let mut interiors: Vec<(usize, usize)> = Vec::new();
 
-    for event in hand_recorder.events.clone() {
+    for event in hand_recorder.events {
         let (start, end) = match &event.1 {
-            Span::Range(e) => (e.start, e.end),
+            Span::Range(range) => (range.start, range.end),
             _ => (0, 0),
         };
 
-        // Events come in a depth-first order: an interval is open exactly
-        // over the run of events whose spans it covers, so an event outside
-        // the top interval closes it, and every interval beneath it too.
+        // Events come in a depth-first order: an interval is open exactly over
+        // the run of events whose spans it covers, so an event outside the top
+        // interval closes it, and every interval beneath it too.
         while let Some(top) = interiors.last() {
             if start >= top.0 && end <= top.1 {
                 break;
@@ -254,8 +264,8 @@ fn the_two_trees_say_the_same_rules_over_the_same_text() {
         }
 
         // The text rule's own event, when it is not inside another rule's
-        // interior, is a node of both trees; what lies inside an open
-        // interval — the parts of another partless node — is not.
+        // interior, is a node of both trees; what lies inside an open interval
+        // — the parts of another partless node — is not.
         if !interiors.is_empty() {
             continue;
         }
@@ -267,22 +277,83 @@ fn the_two_trees_say_the_same_rules_over_the_same_text() {
         hand_projected.push(event);
     }
 
-    let generated = &generated_recorder.events;
+    (generated_recorder.events, hand_projected)
+}
 
-    for (i, (g, h)) in generated.iter().zip(hand_projected.iter()).enumerate() {
+/// Says the two event sequences are one sequence, and points at the first
+/// event where they part.
+fn assert_one_sequence(generated: &[Event], hand: &[Event], source: &str) {
+    for (i, (g, h)) in generated.iter().zip(hand.iter()).enumerate() {
         if g != h {
-            println!("G: {:?}", generated[i.saturating_sub(3)..i + 5].to_vec());
-            println!(
-                "H: {:?}",
-                hand_projected[i.saturating_sub(3)..i + 5].to_vec()
-            );
-            panic!("first disagreement at event {}", i);
+            println!("G: {:?}", &generated[i.saturating_sub(3)..i + 5]);
+            println!("H: {:?}", &hand[i.saturating_sub(3)..i + 5]);
+            panic!("first disagreement at event {i} of {source:?}");
         }
     }
 
     assert_eq!(
         generated.len(),
-        hand_projected.len(),
-        "the two trees said a different number of rules"
+        hand.len(),
+        "the two trees said a different number of rules over {source:?}"
     );
+}
+
+/// The two trees over `unsyn.us` say the same rules over the same text.
+#[test]
+fn the_two_trees_say_the_same_rules_over_the_same_text() {
+    let (generated, hand) = both_trees(include_str!("../unsyn.us"));
+
+    assert!(!hand.is_empty());
+
+    assert_one_sequence(&generated, &hand, "unsyn.us");
+
+    // A rule the spec names and both trees therefore walk has to show up in
+    // what they said, or the comparison of it would be vacuous. The three
+    // groups the spec took the trouble to name are the ones this says.
+    for reached in ["visit_set", "visit_suffix", "visit_repeat_bound"] {
+        assert!(
+            generated.iter().any(|(hook, _)| *hook == reached),
+            "the generated tree never reached {reached}"
+        );
+        assert!(
+            hand.iter().any(|(hook, _)| *hook == reached),
+            "the hand tree never reached {reached}"
+        );
+    }
+}
+
+/// A count of more than one digit is a token `unsyn.us` never writes, and the
+/// one place the two trees had agreed only because the file was too small to
+/// show otherwise: the hand tree used to hold the digits of a number one by
+/// one, where the generated code takes the run after the first digit as text.
+///
+/// No bound in `unsyn.us` is above a single digit (`{1, 6}`), so the spec
+/// itself cannot tell the two readings apart. This file can.
+#[test]
+fn a_count_above_one_digit_is_one_token_in_both_trees() {
+    let source = r#"whitespace S -> [' '];
+syntax A -> 'b'{12, 340};
+syntax C -> 'd'{1_000};
+syntax E -> 'f'{60, 7};
+syntax G -> 'h'{,99};
+"#;
+
+    let (generated, hand) = both_trees(source);
+
+    // The counts are read: every bound is reached, and a bound of two numbers
+    // leaves the first digit of each — six across the four bounds written,
+    // because two of them spell a lower and an upper.
+    let digits = generated
+        .iter()
+        .filter(|(hook, _)| *hook == "visit_dec_digit")
+        .count();
+    assert_eq!(digits, 6, "the first digit of each count written");
+
+    let bounds = generated
+        .iter()
+        .filter(|(hook, _)| *hook == "visit_repeat_bound")
+        .count();
+    assert_eq!(bounds, 4, "each of the four bounds written");
+
+    assert_one_sequence(&generated, &hand, source);
 }

@@ -381,27 +381,14 @@ where
 // `lexer LitDec -> DecDigit ( DecDigit | '_' )*;`
 // ---------------------------------------------------------------------------
 
-/// The `( DecDigit | '_' )` that continues a decimal literal.
-///
-/// The group names no rule of the spec, which is what the analyzer's
-/// [`UnnamedAlternative`](super::errors::LintKind::UnnamedAlternative) lint says
-/// of a file that writes one; the hand tree names it here.
-#[derive(Debug, PartialEq, Eq, PartialOrd, Ord, Clone, Syntax)]
-#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
-pub enum DigitOrUnderscore<I>
-where
-    I: UnsynInput,
-{
-    /// A digit of the number.
-    Dec(DecDigit<I>),
-    /// The `_` that separates digits and carries no value.
-    Underscore(Char<I, '_'>),
-}
-
 /// A decimal number, which is how the bound of a repetition is written.
 ///
-/// An underscore is part of the token and carries no value; the count of the
-/// literal is read from its digits, which the tree holds one by one.
+/// The first digit is a node because the rule names it; every character after
+/// it is one run of text, which is how the generated code reads the same
+/// production — `take_while` over the two characters the rule allows, and the
+/// fastest reading of a number a grammar can name. An underscore is part of the
+/// token and carries no value, so the count is taken from the text with the
+/// separators dropped, which is what `count` does.
 #[derive(Debug, PartialEq, Eq, PartialOrd, Ord, Clone, Syntax)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct LitDec<I>
@@ -410,8 +397,9 @@ where
 {
     /// The digit the number begins with.
     pub head: DecDigit<I>,
-    /// Every digit and separator after it.
-    pub tail: Vec<DigitOrUnderscore<I>>,
+    /// Every digit and separator after it, as one run.
+    #[parserc(parser = take_while(|c: char| matches!(c, '0'..='9' | '_')))]
+    pub tail: I,
 }
 
 impl<I: UnsynInput> LitDec<I> {
@@ -421,15 +409,9 @@ impl<I: UnsynInput> LitDec<I> {
     /// `None` says the number is past what a count of repetitions can be kept
     /// to, which no reading of the digits can turn into a count.
     pub fn count(&self) -> Option<u32> {
-        let mut digits = String::new();
+        let mut digits = String::from(self.head.0.as_str());
 
-        digits.push_str(self.head.0.as_str());
-
-        for part in &self.tail {
-            if let DigitOrUnderscore::Dec(digit) = part {
-                digits.push_str(digit.0.as_str());
-            }
-        }
+        digits.extend(self.tail.as_str().chars().filter(|c| *c != '_'));
 
         digits.parse::<u32>().ok()
     }
@@ -438,12 +420,7 @@ impl<I: UnsynInput> LitDec<I> {
     pub fn text(&self) -> String {
         let mut text = String::from(self.head.0.as_str());
 
-        for part in &self.tail {
-            text.push_str(match part {
-                DigitOrUnderscore::Dec(digit) => digit.0.as_str(),
-                DigitOrUnderscore::Underscore(underscore) => underscore.0.as_str(),
-            });
-        }
+        text.push_str(self.tail.as_str());
 
         text
     }

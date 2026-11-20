@@ -38,3 +38,9 @@ serde = ["dep:serde", "parserc/serde"]
 [[test]]
 name = "unsyn_us"
 required-features = ["compiler"]
+
+# The two trees are the hand parser and the generated parser over one spec, and
+# the generated half is code only the compiler feature writes.
+[[test]]
+name = "two_trees"
+required-features = ["compiler"]

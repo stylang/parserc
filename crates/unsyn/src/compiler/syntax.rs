@@ -349,12 +349,14 @@ fn map_expr_no_top_alt_err(err: UnsynError) -> UnsynError {
 /// member, the run before the comma, and the comma.
 pub type SetMember<I> = (Option<S<I>>, SetItem<I>, Option<S<I>>, Comma<I>);
 
-/// `('[' ( SetItem ',' )* SetItem? ']')`: a list of members, most of them
-/// followed by a comma, and a member the closing bracket may keep without one.
+/// `syntax Set -> '[' ( SetItem ',' )* SetItem? ']';`: a list of members, most
+/// of them followed by a comma, and a member the closing bracket may keep
+/// without one.
 ///
-/// The group of a right side is written as the sequence it is — the brackets
-/// and the members are fields, and the runs between them are the sequence's
-/// own, which is the shape the generated code gives the same pattern.
+/// The brackets and the members are fields of the sequence, and the runs
+/// between them are the sequence's own — the shape the generated code gives the
+/// same production. A rule of its own because a pattern is asked of a set in two
+/// ways, as the values it denotes and as the one character `~` refuses.
 #[derive(Debug, PartialEq, Eq, PartialOrd, Ord, Clone, Syntax)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct Set<I>
@@ -400,18 +402,24 @@ pub enum ExprWithoutSuffix<I>
 where
     I: UnsynInput,
 {
-    /// `'~' […]`, the one character a set does not denote.
+    /// `'~' Set`, the one character a set does not denote.
     ///
     /// What `~` asks is answered by the character here, and takes it, so the
     /// complement fails where the set would have fitted and always consumes
     /// input. That is what lets a line document read to the end of its line with
     /// `~[LF,CR]*` rather than stopping short of it.
-    Tilde(
+    ///
+    /// The punct and the set are two operands of one sequence, so the run
+    /// between them is the variant's own field: `'~' [' a ']'` is written with
+    /// the space, and the tree has to keep it.
+    Tilde {
         /// The `~` punct.
-        Tilde<I>,
+        tilde: Tilde<I>,
+        /// The run between the punct and the set.
+        s: Option<S<I>>,
         /// The negated set, whose members are the values refused here.
-        Set<I>,
-    ),
+        set: Set<I>,
+    },
     /// `'<' Ident '>'`, a call of an external the caller of the parser binds,
     /// read as the sequence of its parts.
     Call {
@@ -461,12 +469,11 @@ where
 // `    | ExprWithoutSuffix 'except' ExprWithoutSuffix ;`
 // ---------------------------------------------------------------------------
 
-/// The group `('*' | '?' | '+' | Repeat)`, the four quantity operators.
+/// The four quantity operators: `syntax Suffix -> '*' | '?' | '+' | Repeat;`.
 ///
-/// The group names no rule of the spec, which is what the analyzer's
-/// [`UnnamedAlternative`](super::errors::LintKind::UnnamedAlternative) lint says
-/// of a file that writes one; the hand tree names it here, because a reader of
-/// an operand with a suffix has to tell the four operators apart anyway.
+/// A rule of its own because a reader of an operand with a suffix has to tell
+/// the four operators apart, which is what the left side of a production names
+/// to earn a type.
 #[derive(Debug, PartialEq, Eq, PartialOrd, Ord, Clone, Syntax)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub enum Suffix<I>
@@ -485,10 +492,9 @@ where
 
 /// An operand carrying one suffix.
 ///
-/// The four quantity operators are the one alternative the production writes them
-/// as, and not one alternative apiece: a node is named for the left side of a
-/// production, and the group on this right side is named [`Suffix`], which the
-/// hand tree gives the unnamed choice of the spec.
+/// The quantity operators are the [`Suffix`] rule the spec names, so they are
+/// one operand of this sequence and not a group the production leaves for the
+/// reader to unpack.
 #[derive(Debug, PartialEq, Eq, PartialOrd, Ord, Clone, Syntax)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub enum ExprWithSuffix<I>
@@ -585,19 +591,13 @@ where
     pub close: BraceEnd<I>,
 }
 
-/// The group `(',' LitDec | LitDec ',' LitDec? | LitDec)` of the [`Repeat`] rule.
+/// The bounds a [`Repeat`] is written with: `syntax RepeatBound -> ',' LitDec
+/// | LitDec ',' LitDec? | LitDec;`.
 ///
-/// A group on the right side of a production names no rule of the spec, which is
-/// what the analyzer's
-/// [`UnnamedAlternative`](super::errors::LintKind::UnnamedAlternative) lint says
-/// of a file that writes one; the hand tree names it here because it is exactly
-/// the choice a reader has to make: whatever counts the repetitions has to tell
-/// the three forms apart, and this enum is the flat match for it.
-///
-/// The variants are tried in the order they are written, and that order carries
-/// the weight: the comma form comes before the bare count, which is what lets
-/// `{2, 3}` be two bounds rather than a count of two followed by a closing brace
-/// that finds a comma and fails fatally.
+/// The spec names this one because a reader of a pattern has to tell the three
+/// forms apart: the comma form comes before the bare count, which is what lets
+/// `{2, 3}` be two bounds rather than a count of two followed by a brace that
+/// finds a comma and fails fatally.
 #[derive(Debug, PartialEq, Eq, PartialOrd, Ord, Clone, Syntax)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub enum RepeatBound<I>
@@ -1040,9 +1040,31 @@ mod tests {
         // matches is exactly one character.
         assert!(matches!(
             whole::<ExprWithoutSuffix<_>>("~['a', 'b']"),
-            Ok(ExprWithoutSuffix::Tilde(..))
+            Ok(ExprWithoutSuffix::Tilde { .. })
         ));
         assert!(whole::<ExprWithoutSuffix<_>>("~'a'").is_err());
+    }
+
+    #[test]
+    fn a_negation_keeps_the_run_between_its_punct_and_its_set() {
+        // `~` and the set are two operands of one sequence, so a space written
+        // between them is a field of the variant and not a character any
+        // terminal hides — the same shape the generated tree gives the rule.
+        let negated = whole::<ExprWithoutSuffix<_>>("~  ['a']").unwrap();
+        let ExprWithoutSuffix::Tilde { tilde, s, set } = negated else {
+            panic!("not a negation");
+        };
+
+        assert_eq!(tilde.to_span(), Span::Range(0..1));
+        assert_eq!(s.unwrap().0.as_str(), "  ");
+        assert_eq!(set.to_span(), Span::Range(3..8));
+
+        // Nothing between them leaves the field empty rather than misplaced.
+        let tight = whole::<ExprWithoutSuffix<_>>("~['a']").unwrap();
+        let ExprWithoutSuffix::Tilde { s, .. } = tight else {
+            panic!("not a negation");
+        };
+        assert!(s.is_none());
     }
 
     #[test]
@@ -1167,10 +1189,10 @@ mod tests {
             })
             .collect::<Vec<_>>();
 
-        // One `whitespace`, twenty-four `lexer` and twelve `syntax` rules.
-        assert_eq!(statements.len(), 37);
+        // One `whitespace`, twenty-four `lexer` and fifteen `syntax` rules.
+        assert_eq!(statements.len(), 40);
         assert_eq!(statements.iter().filter(|k| *k == "lexer").count(), 24);
-        assert_eq!(statements.iter().filter(|k| *k == "syntax").count(), 12);
+        assert_eq!(statements.iter().filter(|k| *k == "syntax").count(), 15);
         assert_eq!(statements.iter().filter(|k| *k == "whitespace").count(), 1);
 
         // Every one of them is named, which is what says that a rule of the spec
@@ -1184,7 +1206,7 @@ mod tests {
             })
             .collect::<Vec<_>>();
 
-        assert_eq!(names.len(), 37, "a definition without a name");
+        assert_eq!(names.len(), 40, "a definition without a name");
         for name in [
             "S",
             "IdentOrKeyword",
@@ -1195,6 +1217,9 @@ mod tests {
             "ExprNoTopAlt",
             "ExprWithoutSuffix",
             "ExprWithSuffix",
+            "Set",
+            "Suffix",
+            "RepeatBound",
             "Repeat",
             "Range",
             "SetItem",

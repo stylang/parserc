@@ -111,38 +111,47 @@ syntax Expr -> ExprNoTopAlt+ ( '|' ExprNoTopAlt+ )*;
 
 syntax ExprNoTopAlt -> ExprWithSuffix | ExprWithoutSuffix;
 
+/// A list of the values one character can be drawn from.
+///
+/// The set is a rule of its own because a pattern asks about it in two ways:
+/// as the values it denotes, and as the one character `~` refuses.
+syntax Set -> '[' ( SetItem ',' )* SetItem? ']';
+
 syntax ExprWithoutSuffix ->
-      '~' '[' ( SetItem ',' )* SetItem? ']'
+      '~' Set
     | '<' Ident '>'
     | '(' Expr ')'
-    | '[' ( SetItem ',' )* SetItem? ']'
+    | Set
     | LitStr
     | LitUnicode
     | Ident
     ;
 
+/// How many times an operand is read: as many as please, at most once, at
+/// least once, or a bounded number of times.
+syntax Suffix ->
+      '*'
+    | '?'
+    | '+'
+    | Repeat
+    ;
+
 syntax ExprWithSuffix ->
-      ExprWithoutSuffix
-      (
-          '*'
-        | '?'
-        | '+'
-        | Repeat
-      )
+      ExprWithoutSuffix Suffix
     | ExprWithoutSuffix 'concat' ExprNoTopAlt
     | ExprWithoutSuffix 'followed' ExprNoTopAlt
     | ExprWithoutSuffix 'except' ExprWithoutSuffix
     ;
 
-syntax Repeat ->
-    '{'
-    (
-          ',' LitDec
-        | LitDec ',' LitDec?
-        | LitDec
-    )
-    '}'
+/// The bounds a repetition is written with, which the reader of a pattern has
+/// to tell apart: a number above, a number below, or a number of times.
+syntax RepeatBound ->
+      ',' LitDec
+    | LitDec ',' LitDec?
+    | LitDec
     ;
+
+syntax Repeat -> '{' RepeatBound '}';
 
 syntax Range ->
       LitUnicode '-' LitUnicode

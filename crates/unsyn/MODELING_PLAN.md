@@ -141,6 +141,59 @@
       手写序列按区间栈投影掉。其余 900+ 事件严格相等：规则、顺序、区间
       完全一致。`TEXT_INTERIORS` 列的是「生成代码按文本读取的规则」全集，
       而非今日 `unsyn.us` 恰好触及的子集，规范变化时投影仍然成立。
-- [ ] **M8.2 完全自举**：semantic/codegen 两个 pass 迁移到只经 visit 接口 +
-      值访问器读取树（不依赖具体节点类型），以生成的 parser 替换手写
-      parser 解析 `.us` 文件，形成编译自身的闭环。
+- [ ] **M8.2 完全自举**：以生成的 parser 替换手写 parser，形成编译自身的闭环。
+      审计结论（三份调查）：`semantic.rs` 的语义逻辑本身已与类型无关（lattice /
+      区间代数 / 名字解析 / 递归 worklist 全跑在 `Vec<Rule>` + `String` 上），
+      耦合集中在 ~66 行；`codegen.rs` 有 52/93 个函数直接读节点，但读的全是
+      **产生式结构**，从不读手写类型的 Rust 名字（唯一例外 `ty_shape` 把自己
+      吐出的类型串再解析回来，~135 行，应删）。两树 visit 钩子 67 vs 38。
+      收敛方向（已定）：**分层** —— syntax 层的组补规则名让生成侧产出真节点；
+      lexer 层保住 `take_while`/`read_*`/external 快路径，pass 需要的字符值由
+      pass 自己从文本解码。
+  - [x] **M8.2a syntax 层补名**：`unsyn.us` 新增 `Set` / `Suffix` / `RepeatBound`
+        三条规则，`ExprWithoutSuffix`/`ExprWithSuffix`/`Repeat` 改为引用它们。
+        生成侧随之产出 `struct Set` / `enum Suffix` / `enum RepeatBound` 三个真
+        节点，手写侧对应钩子 `visit_set`（`walk_set` 转 pub、经钩子下钻）。
+        顺带修一个真实缺陷：`ExprWithoutSuffix::Tilde` 原为 tuple 变体，`~` 与
+        `[` 之间的 run 无处存放（`~  ['a']` 不可回读）；改为 struct 变体
+        `{tilde, s, set}` 与生成侧 `F1{f1,f2,set}` 对齐，并加测试
+        `a_negation_keeps_the_run_between_its_punct_and_its_set` 钉住。
+        未命名 or 组 9→7；定义数 37→40；`two_trees` 记录器加入
+        `visit_set`/`visit_suffix`/`visit_repeat_bound` 三个钩子以钉住收敛，
+        并加断言：这三个钩子在**两侧事件序列里都真的出现过**，否则对等检验
+        对这些规则是空转的。
+  - [ ] **M8.2b lexer 层对齐**：手写侧去掉自造名内部节点，改为与生成侧相同
+        的“文本 + 边界”形状；新增 `compiler::decode` 模块，把
+        `LitStr::chars`/`LitUnicode::value`/`LitDec::count`/`Ident::text` 从节点
+        方法变成对源文本的解码器（带 span）。验收：`two_trees` 的
+        `TEXT_INTERIORS` 投影清空，两树事件序列裸相等。
+    - [x] **M8.2b-1 `LitDec`**：删掉 `DigitOrUnderscore`，`LitDec` 改为
+          `{head: DecDigit, tail: I}` + `take_while(['0'-'9' '_'])`，与生成侧
+          `{dec_digit, f1}` 对齐；`count()`/`text()` 改为对 tail 文本去 `_`。
+          **修掉一个真实潜伏缺陷**：多字符计数（`{12, 340}`、`{1_000}`）原先
+          两树不等——手写逐字符发 `visit_dec_digit`，生成侧只有一段文本。
+          `two_trees` 重构出 `both_trees(source)` + `assert_one_sequence`，新增
+          `a_count_above_one_digit_is_one_token_in_both_trees`：`unsyn.us` 的计数
+          全是单字符，规格自己发现不了这个分歧，故另造一份含多位计数的源。
+          已验证该测试有牙（往 `walk_lit_dec` 里添一个多余事件即失败）。
+    - [ ] **M8.2b-2 `LitUnicode`**：生成侧是 `read_lit_unicode` 不透明文本，
+          手写侧仍是 `{prefix, Vec<HexDigit>}`；改为单字段文本 + 解码。
+    - [ ] **M8.2b-3 `LitStr` / escape 家族**：手写 `Vec<LitStrContent>` → 文本，
+          删 `LitStrContent`/`EscapeDigit`；bad-escape 的 span 由解码器给出。
+    - [ ] **M8.2b-4 注释/文档家族**：删 `BlockCommentHead`/`BlockCommentTail`/
+          `OuterBlockDocHead`/`LineDocBody`，对齐 `read_block_comment_*`。
+    - [ ] **M8.2b-5 `Ident` 家族**：`RawIdent`/`NonKeywordIdent` 对齐不透明文本。
+  - [ ] **M8.2c codegen 去类型化**：`Builder::new` 改收类型无关的视图
+        （definitions / branches / operands / atoms / quantity / bound / value /
+        text / span），52 个函数签名重指向；删 `ty_shape` 的字符串回转，改为在
+        构造 `Field` 时就携带 `TyShape`；`Stmt::decl()` 的关键字→Decl 映射搬到
+        pass 侧（对关键字文本做比较）。
+  - [ ] **M8.2d 生成 AST 进 crate**：`Builder` 参数化「输入 trait 路径、错误
+        kind 路径、外部符号的 crate 根、可选 derive（serde）」，使 `unsyn.us`
+        的生成代码能作为 `src/compiler/ast.rs` 在 crate 内对 `UnsynInput` 编译；
+        补 codegen 输出 `cfg_attr(feature = "serde", ...)`。
+  - [ ] **M8.2e 不动点**：手写 AST 退役，两个 pass 只吃生成 AST；测试断言
+        `build()` 读生成树 == 现有生成文件（逐 token），`unsyn.us` 由生成
+        parser 解析。
+- [ ] **M8.3 门禁补齐**：`two_trees` 已加 `required-features = ["compiler"]`；
+      CI 目前不跑 `--all-features`/clippy/rustdoc，可考虑补。
