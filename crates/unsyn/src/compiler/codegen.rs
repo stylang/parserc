@@ -20,12 +20,16 @@
 //! |-------------------------|--------------------------------------------------------|
 //! | `'a'`, `U+0009`         | `::parserc::next(c)`                                     |
 //! | `'abc'`                 | `::parserc::keyword("abc")`                              |
-//! | `Name` as a whole rule  | the node `Name<I>`                                       |
-//! | `Name` beside others    | the text the rule read, of the input it was handed       |
+//! | `Name` in a `syntax` sequence | the node `Name<I>`, boxed where `Name` is a `syntax` rule |
+//! | `Name` in a `lexer` sequence  | the one run of text `Name` read, folded in beside the rest |
+//! | `Name` as a whole rule, or as one name of a choice | the node `Name<I>` |
+//! | `( Name )`, `[ 'a', Name ]`, `Name except …` | the text `Name` read — and `Name` itself still keeps its own shape for whoever reads it whole |
 //! | `A \| B` of names only    | `pub enum` with one variant per name                      |
 //! | `<Ext>`                 | the tokens the caller bound `Ext` to                     |
-//! | `['a'-'z', '_']`        | `::parserc::next_if(\|c: char\| matches!(c, …))`           |
-//! | `~[…]`, `A \| B`        | the same predicate refused, or a fold of `.or()`         |
+//! | `['a'-'z', '_']`        | one `::parserc::next_if(\|c: char\| matches!(c, …))` — a class, when every member denotes characters |
+//! | `['/*','*/']`            | a fold of `.or()` over the members' own parsers — no class, when any member is wider |
+//! | `~[…]`                  | the class refused; or, of a fold, a probe of it that must not match, then one character taken whatever it is |
+//! | `A \| B` inside a group   | a nested `Or` of the two — structure with no name of its own |
 //! | `A B`                   | a field for `A`, a field for `B`, in that order          |
 //! | `A?`, `A*`              | `Option<A<I>>`, `Vec<A<I>>` — the derive's own shapes    |
 //! | `A+`, `{n}`, `{n, m}`   | a `read_` function that counts the nodes it took         |
@@ -47,18 +51,17 @@
 //!
 //! Which rules come out as nodes and which as the text they read is settled
 //! over the whole file before any rule is written, because it is a fact about
-//! the other rules' code as much as about its own. A name whose answer flows
-//! back as text — an alternative of a folded choice, a member of a set read
-//! one character at a time, the operand an `except` is written over, the one
-//! name a rule or a group answers with whole — asks its rule for the text, and
-//! the rule asked for is written as text even where its own right side is a
-//! choice of names or a sequence of fields; and a text rule folds arms that
-//! reach names of its own, so the question is asked again of what the first
-//! answers settle, until the two sets hold still. What comes out is that a
-//! choice of names is an enum only where nothing reads the choice beside
-//! another thing: `Ident` and `Keywords` are enums, while `BlockCommentOrDoc`
-//! — read among the alternatives of `BlockComment` — is the text its three
-//! rules read.
+//! the other rules' code as much as about its own. A name is forced to text at
+//! three sites — as the whole of a group, as one member of a set of several,
+//! and as the target of an `except` — and is then written as one field of text
+//! even where its own right side is a choice of names or a sequence of fields;
+//! a text rule folds arms that reach names of its own, so the question is asked
+//! again of what the first answers settle, until the two sets hold still. A
+//! name read *beside* others inside a fold is not forced: it keeps the shape
+//! its own production writes, and the fold wraps the reading of it in `text_of`
+//! rather than flattening it. So `Ident` and `BlockCommentOrDoc` are both enums
+//! of the names they choose between, while the group of `BlockCommentBody` that
+//! reads `BlockCommentOrDoc` among its parts answers with one run of text.
 //!
 //! Three of the combinators of [`parserc`] are worth knowing about, since the
 //! generator reaches for them whenever a rule fits: a set of single characters
@@ -116,6 +119,15 @@
 //!   matches on them, and text where nobody does, which is what the
 //!   [`UnnamedAlternative`](super::errors::LintKind::UnnamedAlternative) lint
 //!   asks of the author of a file either way.
+//! - A single character of the described language is a field of
+//!   [`Char`](parserc::syntax::Char) in a generated `syntax` node, wearing the
+//!   character in its type. The hand file holds no `Char` at all: each
+//!   punctuator is a type of its own — `Tilde`, `Star`, `Or`, `ParenStart` —
+//!   named by the `syntax_terminal!` macro, which is what lets a refusal say
+//!   which punctuator it expected and lets a reader of the tree name what it
+//!   matched on. So the same `~` is `Char<I, '~'>` in generated code and
+//!   `Tilde<I>` here, and the two trees agree on the span while disagreeing on
+//!   the type that carries it.
 //! - A refusal the generated code reports is a [`Kind`](parserc::Kind) of the
 //!   combinator that met it, where the hand-written file names what it expected
 //!   with its own [`UnsynError`] variants. Naming them

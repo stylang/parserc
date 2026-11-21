@@ -48,8 +48,10 @@
 //! run is filed away, which is why a rule over nodes names the trivia of its own
 //! language at most once.
 //!
-//! The `compiler` module's own documents say how the rule is decided and what the
-//! generated types look like once it has been.
+//! The mapping from a production to a Rust type, and the rules for naming what
+//! the mapping produces, are written down once in `README.md` beside this
+//! crate's sources. The `compiler` module's documents go on from there to how
+//! each is implemented.
 //!
 //! # Two phases, two features
 //!
