@@ -32,15 +32,3 @@ default = ["serde", "compiler", "runtimes"]
 runtimes = []
 compiler = ["dep:proc-macro2", "dep:quote", "dep:thiserror", "dep:unicode-ident", "parserc/syntax"]
 serde = ["dep:serde", "parserc/serde"]
-
-# The generated file is the code of a spec that calls two externals, and only the
-# generator writes it; without the feature there is nothing to check.
-[[test]]
-name = "unsyn_us"
-required-features = ["compiler"]
-
-# The two trees are the hand parser and the generated parser over one spec, and
-# the generated half is code only the compiler feature writes.
-[[test]]
-name = "two_trees"
-required-features = ["compiler"]
