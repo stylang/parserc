@@ -33,7 +33,7 @@
 //! the result. Closing it is a matter of giving the hand tree the ten rules as
 //! rules, which is the step this test will then stop needing.
 
-use parserc::Span;
+use parserc::{Span, ToSpan};
 
 /// The scan the generated file binds `<IdentOrKeyword>` to, at this crate's
 /// root, which is the path the binding reaches.
@@ -75,7 +75,6 @@ macro_rules! recorder {
 
             $(
                 fn $hook(&mut self, node: &'ast $ty) {
-                    use parserc::syntax::Syntax as _;
 
                     self.events.push((stringify!($hook), node.to_span()));
 

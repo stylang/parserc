@@ -5,10 +5,7 @@
 //! and every closure `FnOnce(&mut I) -> Result<O, I::Error>` already implements
 //! the trait.
 
-use crate::{
-    errors::{ControlFlow, ParseError},
-    input::Input,
-};
+use crate::{ParseError, errors::ControlFlow, input::Input};
 
 /// A parser combinator.
 ///
@@ -224,7 +221,7 @@ where
 mod tests {
     use super::*;
     use crate::Kind;
-    use crate::input::{AsStr, Input, chars};
+    use crate::input::{AsStr, Input, ToSpan, chars};
 
     type Chars = chars::TokenStream<'static>;
 

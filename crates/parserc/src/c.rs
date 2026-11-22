@@ -203,7 +203,7 @@ mod tests {
     use std::ops::Bound;
 
     use super::*;
-    use crate::input::{AsStr, Input, bytes, chars};
+    use crate::input::{AsStr, Input, ToSpan, bytes, chars};
     use crate::{ControlFlow, Kind, Span, parser::Parser};
 
     type Bytes = bytes::TokenStream<'static>;

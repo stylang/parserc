@@ -147,7 +147,7 @@
 //! Every reference it writes is rooted at `::parserc`, so the crate that holds a
 //! generated file must have a dependency *named* `parserc`. Every node is generic
 //! over one parameter, and it is always named `I`: the derive of
-//! [`Syntax`] reads the input type off that name unless the item says otherwise.
+//! [`Syntax`](parserc::syntax::Syntax) reads the input type off that name unless the item says otherwise.
 //!
 //! That parameter is bounded by
 //! [`CharsInput`](parserc::chars::CharsInput), which is what a stream of
@@ -173,7 +173,7 @@
 
 use std::collections::{HashMap, HashSet};
 
-use parserc::{Span, syntax::Syntax};
+use parserc::{Span, ToSpan};
 use proc_macro2::{Ident, Literal, TokenStream, TokenTree};
 use quote::{ToTokens, format_ident, quote};
 use unicode_ident::{is_xid_continue, is_xid_start};
@@ -3873,6 +3873,7 @@ where
 
 #[cfg(test)]
 mod tests {
+
     use parserc::{Input, syntax::SyntaxInput};
 
     use super::*;

@@ -1,4 +1,4 @@
-use std::{cmp, fmt::Debug};
+use std::{cmp, fmt::Debug, ops::Range};
 
 use crate::{ParseError, Span};
 
@@ -83,7 +83,7 @@ impl Item for char {
 }
 
 /// A source code stream consumed by parsers.
-pub trait Input: PartialEq + Debug {
+pub trait Input: PartialEq + Debug + ToSpan {
     /// Sequence item of this stream.
     type Item: Item;
     /// Parsing error type.
@@ -126,12 +126,6 @@ pub trait Input: PartialEq + Debug {
         self.len() == 0
     }
 
-    /// Returns the region of this input in the whole source code.
-    #[inline]
-    fn to_span(&self) -> Span {
-        Span::Range(self.start()..self.end())
-    }
-
     /// Returns a span covering `at` bytes from the start of this input,
     /// clamped to its end.
     #[inline]
@@ -140,23 +134,83 @@ pub trait Input: PartialEq + Debug {
     }
 }
 
-/// Extension trait exposing [`to_span`](ToSpan::to_span).
+/// A region of source code.
+///
+/// Held by both halves of a parse: a stream reports what it still covers, and a
+/// node reports what it was read from. Making this a supertrait of
+/// [`Input`](crate::Input) rather than a method on it is what lets one name mean
+/// one thing, so a node holding a stream — `Char<I, 'a'>` — can ask
+/// `self.0.to_span()` without choosing between two same-named traits, and so
+/// [`as_str`] speaks of any region without naming an input type at all.
 pub trait ToSpan {
-    /// Returns the region of this input.
+    /// Returns the region of this value.
     fn to_span(&self) -> Span;
 }
 
-impl<I> ToSpan for Option<I>
+/// Returns the source text `t` covers, read out of `input`.
+///
+/// `input` is any stream over the same source as `t` — the whole file at its
+/// start is the usual one — and `t` is anything that reports a span, which is
+/// both a node and a token. Nothing of `t` is taken apart to rebuild its text:
+/// the span is the one account of what `t` covered, and the answer is that piece
+/// of the source, byte for byte, however many parts `t` kept and whatever stood
+/// between them.
+///
+/// The borrow lives as long as `input`, which is why `input` is taken by
+/// reference rather than cloned: the text belongs to the source `input` points
+/// into, and only the stream it was asked of keeps it reachable. Whoever needs
+/// the text to outlive that copies it here, and nobody who only looks at it pays
+/// for a copy.
+///
+/// Answers empty when `input` no longer reaches the region — it has been
+/// consumed past it, or `t` came from another source entirely — and for a span
+/// that is not a plain range. A missing text is a question about the caller's
+/// input, not something this can report without failing to be total.
+#[must_use]
+pub fn as_str<'a, I, T>(input: &'a I, t: &T) -> &'a str
 where
-    I: Input,
+    T: ToSpan,
+    I: Input + AsStr,
 {
-    #[inline]
-    fn to_span(&self) -> Span {
-        match self {
-            Some(input) => input.to_span(),
-            None => Span::None,
-        }
-    }
+    let Some(range) = region(input, t) else {
+        return "";
+    };
+
+    // `get` rather than indexing twice: a span whose ends fall inside the
+    // remaining text but not on a character boundary is not a `&str`, and an
+    // empty answer beats a panic in a function that only reports.
+    input.as_str().get(range).unwrap_or("")
+}
+
+/// The bytes `t` covers, read out of `input`.
+///
+/// The [`AsBytes`] twin of [`as_str`], for a stream over bytes. Same contract
+/// about what is in reach and about the empty answer.
+#[must_use]
+pub fn as_bytes<'a, I, T>(input: &'a I, t: &T) -> &'a [u8]
+where
+    T: ToSpan,
+    I: Input + AsBytes,
+{
+    let Some(range) = region(input, t) else {
+        return &[];
+    };
+
+    input.as_bytes().get(range).unwrap_or(&[])
+}
+
+/// Where `t` lies inside the text `input` still holds, as a range of it.
+///
+/// Both spans count from the start of the whole source, so the piece is
+/// intersected with what `input` has left — which drops a `t` that lies behind
+/// it entirely — and then recounted from `input`'s own start.
+fn region<I: Input, T: ToSpan>(input: &I, t: &T) -> Option<Range<usize>> {
+    let held = input.to_span();
+
+    t.to_span()
+        .intersect(&held)
+        .shift(held.start()?)?
+        .as_range()
 }
 
 /// Byte-oriented input implementations.
@@ -235,6 +289,18 @@ pub mod bytes {
                 value: value.1,
                 _marker: Default::default(),
             }
+        }
+    }
+
+    impl<'a, E> ToSpan for TokenStream<'a, E>
+    where
+        E: ParseError,
+    {
+        /// The region still held: from this stream's own offset to the end of
+        /// the source it was taken from.
+        #[inline]
+        fn to_span(&self) -> Span {
+            Span::Range(self.offset..self.offset + self.value.len())
         }
     }
 
@@ -452,6 +518,18 @@ pub mod chars {
                 value: value.1,
                 _marker: Default::default(),
             }
+        }
+    }
+
+    impl<'a, E> ToSpan for TokenStream<'a, E>
+    where
+        E: ParseError,
+    {
+        /// The region still held: from this stream's own offset to the end of
+        /// the source it was taken from.
+        #[inline]
+        fn to_span(&self) -> Span {
+            Span::Range(self.offset..self.offset + self.value.len())
         }
     }
 
@@ -707,14 +785,6 @@ mod tests {
         assert_eq!(input.to_span_at(0), Span::Range(5..5));
         assert_eq!(input.to_span_at(3), Span::Range(5..6));
         assert_eq!(Bytes::from((5, "abc")).to_span_at(2), Span::Range(5..7));
-    }
-
-    #[test]
-    fn to_span_of_an_optional_input_is_none_without_a_value() {
-        let input = Bytes::from((5, "abc"));
-
-        assert_eq!(Some(input).to_span(), Span::Range(5..8));
-        assert_eq!(Option::<Bytes>::None.to_span(), Span::None);
     }
 
     #[test]

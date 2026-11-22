@@ -38,7 +38,7 @@
 //! therefore comes first, and takes the word whole.
 
 use parserc::syntax::Syntax;
-use parserc::{ControlFlow, Input, Kind, Parser, keyword, next, next_if, take_while};
+use parserc::{ControlFlow, Input, Kind, Parser, ToSpan, keyword, next, next_if, take_while};
 use unicode_ident::{is_xid_continue, is_xid_start};
 
 use crate::compiler::errors::{KeywordKind, PunctKind, SemanticsKind, SyntaxKind, UnsynError};
@@ -281,7 +281,7 @@ where
 /// the rule writes, and the variant is the one that was read.
 #[derive(Debug, PartialEq, Eq, PartialOrd, Ord, Clone, Syntax)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
-#[parserc(map_err = map_leading_keywords_err)]
+#[parserc(map_err = SyntaxKind::LeadingKeywords.map())]
 pub enum LeadingKeywords<I>
 where
     I: UnsynInput,
@@ -292,21 +292,6 @@ where
     Syntax(#[parserc(keyword = "syntax", map_err = KeywordKind::Syntax.map())] I),
     /// `whitespace`, which declares the trivia of the language.
     Whitespace(#[parserc(keyword = "whitespace", map_err = KeywordKind::Whitespace.map())] I),
-}
-
-/// Names the set the word belongs to, which is more than the bare combinator
-/// error of the enum says.
-///
-/// The three words are mutually exclusive heads, so a position that begins none
-/// of them can only be told as the set that is missing here.
-#[inline]
-fn map_leading_keywords_err(err: UnsynError) -> UnsynError {
-    match err {
-        UnsynError::Kind(Kind::Syntax("LeadingKeywords", control_flow, span)) => {
-            UnsynError::Syntax(SyntaxKind::LeadingKeywords, control_flow, span)
-        }
-        err => err,
-    }
 }
 
 impl<I: UnsynInput> LeadingKeywords<I> {
@@ -324,7 +309,7 @@ impl<I: UnsynInput> LeadingKeywords<I> {
 /// The word that joins two operands of a pattern into one construct.
 #[derive(Debug, PartialEq, Eq, PartialOrd, Ord, Clone, Syntax)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
-#[parserc(map_err = map_following_keywords_err)]
+#[parserc(map_err = SyntaxKind::FollowingKeywords.map())]
 pub enum FollowingKeywords<I>
 where
     I: UnsynInput,
@@ -335,17 +320,6 @@ where
     Except(#[parserc(keyword = "except", map_err = KeywordKind::Except.map())] I),
     /// `followed`, which asks that an operand come next without being taken.
     Followed(#[parserc(keyword = "followed", map_err = KeywordKind::Followed.map())] I),
-}
-
-/// Names the set the word belongs to, as the leading words are named.
-#[inline]
-fn map_following_keywords_err(err: UnsynError) -> UnsynError {
-    match err {
-        UnsynError::Kind(Kind::Syntax("FollowingKeywords", control_flow, span)) => {
-            UnsynError::Syntax(SyntaxKind::FollowingKeywords, control_flow, span)
-        }
-        err => err,
-    }
 }
 
 impl<I: UnsynInput> FollowingKeywords<I> {
@@ -885,11 +859,7 @@ impl<I: UnsynInput> OuterLineDoc<I> {
     /// The text of the document, as it was written.
     #[inline]
     pub fn text(&self) -> String {
-        let mut text = String::from(self.open.as_str());
-
-        text.push_str(self.body.as_str());
-
-        text
+        self.open.as_str().to_owned() + self.body.as_str()
     }
 }
 
@@ -1180,6 +1150,8 @@ impl<I: UnsynInput> BlockCommentOrDoc<I> {
 
 #[cfg(test)]
 mod tests {
+
+    use parserc::ToSpan;
     use parserc::{AsStr, Span, syntax::SyntaxInput};
 
     use super::*;
@@ -1405,11 +1377,21 @@ mod tests {
         );
 
         // Where no word of the set begins at all, it is the set that the
-        // position is missing.
+        // position is missing. Both sets are asked, since each names itself
+        // through its own `map_err` on the enum.
         assert_eq!(
             parse::<LeadingKeywords<_>>("| 'a';"),
             Err(UnsynError::Syntax(
                 SyntaxKind::LeadingKeywords,
+                ControlFlow::Recovable,
+                Span::Range(0..1)
+            ))
+        );
+
+        assert_eq!(
+            parse::<FollowingKeywords<_>>("| 'a';"),
+            Err(UnsynError::Syntax(
+                SyntaxKind::FollowingKeywords,
                 ControlFlow::Recovable,
                 Span::Range(0..1)
             ))

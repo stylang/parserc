@@ -56,7 +56,15 @@ pub fn derive_tuple_syntax(args: TokenStream) -> TokenStream {
 
                     Ok((#(#types),*))
                 }
+            }
 
+            // The region a tuple covers is the union of its parts and mentions
+            // no input type, which is why it hangs off `ToSpan` and not off the
+            // `Syntax` impl above.
+            impl<#(#types),*> ToSpan for (#(#types),*)
+            where
+                #(#types: ToSpan),*
+            {
                 #[inline]
                 fn to_span(&self) -> Span {
                     let mut lhs = Span::None;

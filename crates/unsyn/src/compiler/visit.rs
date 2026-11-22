@@ -1119,6 +1119,8 @@ pub mod walk {
 
 #[cfg(test)]
 mod tests {
+
+    use parserc::ToSpan;
     use parserc::{AsStr, Input, Span, syntax::SyntaxInput};
 
     use super::{Visit, walk};

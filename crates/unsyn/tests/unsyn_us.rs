@@ -19,7 +19,7 @@
 use std::path::Path;
 use std::str::FromStr;
 
-use parserc::syntax::SyntaxInput;
+use parserc::{ToSpan, syntax::SyntaxInput};
 use quote::ToTokens;
 use unsyn::compiler::{codegen::Builder, input::TokenStream, semantic, syntax};
 
@@ -366,7 +366,7 @@ mod and_it_reads_this_crate {
 #[test]
 fn the_generated_parser_reads_the_spec_it_was_generated_from() {
     use parserc::chars::TokenStream as Chars;
-    use parserc::syntax::{Syntax, SyntaxInput as _};
+    use parserc::syntax::SyntaxInput as _;
     use parserc::{AsStr, Input};
 
     use crate::generated::{Crate as GeneratedCrate, Item as GeneratedItem};

@@ -120,7 +120,12 @@ fn leaf_impl(
 
                 #read
             }
+        }
 
+        // What the node covers is told apart from how it is read: the region is
+        // the same whatever stream it was read from, so it goes on `ToSpan`,
+        // which is a supertrait and names no input.
+        impl #impl_generics parserc::ToSpan for #ident #type_generics #where_clause {
             #[inline]
             fn to_span(&self) -> parserc::Span {
                 use parserc::ToSpan;
@@ -358,7 +363,11 @@ fn derive_syntax_for_struct(item: ItemStruct) -> Result<proc_macro2::TokenStream
 
                 #built
             }
+        }
 
+        // What the node covers is told apart from how it is read: the region is
+        // the same whatever stream read it, so it goes on `ToSpan`.
+        impl #impl_generics parserc::ToSpan for #ident #type_generics #where_clause {
             #[inline]
             fn to_span(&self) -> parserc::Span {
                 use parserc::ToSpan;
@@ -449,7 +458,11 @@ fn derive_syntax_for_enum(item: ItemEnum) -> Result<proc_macro2::TokenStream> {
                 )
                 .into())#map_err
             }
+        }
 
+        // What the node covers is told apart from how it is read: the region is
+        // the same whatever stream read it, so it goes on `ToSpan`.
+        impl #impl_generics parserc::ToSpan for #ident #type_generics #where_clause {
             #[inline]
             fn to_span(&self) -> parserc::Span {
                 use parserc::ToSpan;

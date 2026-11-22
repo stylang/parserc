@@ -7,7 +7,7 @@
 
 use std::{fmt::Debug, marker::PhantomData};
 
-use crate::{ControlFlow, Kind, Span, next};
+use crate::{ControlFlow, Kind, Span, ToSpan, next};
 use crate::{input::Input, parser::Parser};
 
 /// Extension trait parsing a [`Syntax`] value from an [`Input`].
@@ -29,15 +29,17 @@ impl<I> SyntaxInput for I where I: Input {}
 ///
 /// Implement it for AST structs/enums (or use the `Syntax` derive macro) to
 /// parse them from an [`Input`].
-pub trait Syntax<I>: Sized
+///
+/// What a node covers is a [`ToSpan`] and nothing more: the region a node holds
+/// does not depend on which stream it was read from, so the two capabilities are
+/// asked apart, and anything that can report a span — a node, a token, a stream
+/// itself — can be spoken of by [`as_str`](crate::as_str) without naming an input type.
+pub trait Syntax<I>: Sized + ToSpan
 where
     I: Input,
 {
     /// Parses `input` at its current position and builds a new node.
     fn parse(input: &mut I) -> Result<Self, I::Error>;
-
-    /// Returns the source region covered by this node.
-    fn to_span(&self) -> Span;
 
     /// Returns a [`Parser`] that parses `Self`.
     fn into_parser() -> impl Parser<I, Output = Self> {
@@ -68,11 +70,6 @@ where
     fn parse(_input: &mut I) -> Result<Self, I::Error> {
         Ok(PhantomData)
     }
-
-    #[inline]
-    fn to_span(&self) -> Span {
-        Span::None
-    }
 }
 
 impl<T, I> Syntax<I> for Option<T>
@@ -84,11 +81,6 @@ where
     fn parse(input: &mut I) -> Result<Self, I::Error> {
         T::into_parser().ok().parse(input)
     }
-
-    #[inline]
-    fn to_span(&self) -> Span {
-        self.as_ref().map_or(Span::None, |value| value.to_span())
-    }
 }
 
 impl<T, I> Syntax<I> for Box<T>
@@ -98,11 +90,6 @@ where
 {
     fn parse(input: &mut I) -> Result<Self, I::Error> {
         T::into_parser().boxed().parse(input)
-    }
-
-    #[inline]
-    fn to_span(&self) -> Span {
-        self.as_ref().to_span()
     }
 }
 
@@ -125,13 +112,106 @@ where
 
         Ok(elms)
     }
+}
 
+// ---------------------------------------------------------------------------
+// The region each node covers.
+//
+// None of these mentions an input type: what a node spans is a fact about the
+// source it came from, not about the stream that happened to read it, which is
+// why `ToSpan` is a supertrait of `Syntax` and not another method on it.
+// ---------------------------------------------------------------------------
+
+impl<T> ToSpan for PhantomData<T> {
+    #[inline]
+    fn to_span(&self) -> Span {
+        Span::None
+    }
+}
+
+impl<T: ToSpan> ToSpan for Option<T> {
+    #[inline]
+    fn to_span(&self) -> Span {
+        self.as_ref().map_or(Span::None, |value| value.to_span())
+    }
+}
+
+impl<T: ToSpan> ToSpan for Box<T> {
+    #[inline]
+    fn to_span(&self) -> Span {
+        self.as_ref().to_span()
+    }
+}
+
+impl<T: ToSpan> ToSpan for Vec<T> {
     #[inline]
     fn to_span(&self) -> Span {
         let first = self.first().map_or(Span::None, |v| v.to_span());
         let last = self.last().map_or(Span::None, |v| v.to_span());
 
         first.union(&last)
+    }
+}
+
+impl<I: Input + ToSpan, const C: char> ToSpan for Char<I, C> {
+    #[inline]
+    fn to_span(&self) -> Span {
+        self.0.to_span()
+    }
+}
+
+impl<I: Input + ToSpan, const C: u8> ToSpan for Byte<I, C> {
+    #[inline]
+    fn to_span(&self) -> Span {
+        self.0.to_span()
+    }
+}
+
+impl<Start: ToSpan, End: ToSpan, Body: ToSpan> ToSpan for Delimiter<Start, End, Body> {
+    #[inline]
+    fn to_span(&self) -> Span {
+        let start = self.start.to_span();
+        let end = self.end.to_span();
+
+        start.union(&end)
+    }
+}
+
+impl<T: ToSpan, const N: usize> ToSpan for LimitsTo<T, N> {
+    #[inline]
+    fn to_span(&self) -> Span {
+        self.0.to_span()
+    }
+}
+
+impl<T: ToSpan, const LOWER: usize, const HIGHER: usize> ToSpan for Limits<T, LOWER, HIGHER> {
+    #[inline]
+    fn to_span(&self) -> Span {
+        self.0.to_span()
+    }
+}
+
+impl<T: ToSpan, const LOWER: usize> ToSpan for LimitsFrom<T, LOWER> {
+    #[inline]
+    fn to_span(&self) -> Span {
+        self.0.to_span()
+    }
+}
+
+impl<T: ToSpan, P: ToSpan> ToSpan for Punctuated<T, P> {
+    #[inline]
+    fn to_span(&self) -> Span {
+        self.pairs.to_span().union(&self.tail.to_span())
+    }
+}
+
+impl<F: ToSpan, S: ToSpan> ToSpan for Or<F, S> {
+    #[inline]
+    fn to_span(&self) -> Span {
+        match self {
+            Or::First(value) => value.to_span(),
+            Or::Second(value) => value.to_span(),
+        }
     }
 }
 
@@ -150,11 +230,6 @@ where
     fn parse(input: &mut I) -> Result<Self, <I as Input>::Error> {
         next(C).map(|input| Self(input)).parse(input)
     }
-
-    #[inline]
-    fn to_span(&self) -> Span {
-        self.0.to_span()
-    }
 }
 
 /// A syntax node matching a single [`u8`] literal `C`.
@@ -171,11 +246,6 @@ where
     #[inline]
     fn parse(input: &mut I) -> Result<Self, <I as Input>::Error> {
         next(C).map(|input| Self(input)).parse(input)
-    }
-
-    #[inline]
-    fn to_span(&self) -> Span {
-        self.0.to_span()
     }
 }
 
@@ -210,14 +280,6 @@ where
 
         Ok(Self { start, body, end })
     }
-
-    #[inline]
-    fn to_span(&self) -> Span {
-        let start = self.start.to_span();
-        let end = self.end.to_span();
-
-        start.union(&end)
-    }
 }
 
 /// Accepts `T` only when its span is at most `N` units long.
@@ -251,10 +313,6 @@ where
         }
 
         Ok(Self(t))
-    }
-
-    fn to_span(&self) -> Span {
-        self.0.to_span()
     }
 }
 
@@ -291,10 +349,6 @@ where
 
         Ok(Self(t))
     }
-
-    fn to_span(&self) -> Span {
-        self.0.to_span()
-    }
 }
 
 /// Accepts `T` only when its span is at least `LOWER` units long.
@@ -328,10 +382,6 @@ where
         }
 
         Ok(Self(t))
-    }
-
-    fn to_span(&self) -> Span {
-        self.0.to_span()
     }
 }
 
@@ -387,11 +437,6 @@ where
             pairs.push((t, p));
         }
     }
-
-    #[inline]
-    fn to_span(&self) -> Span {
-        self.pairs.to_span().union(&self.tail.to_span())
-    }
 }
 
 /// Ordered choice between two syntax nodes: tries `F` first and falls back to `S`.
@@ -418,14 +463,6 @@ where
         };
 
         Ok(Self::First(first))
-    }
-
-    #[inline]
-    fn to_span(&self) -> Span {
-        match self {
-            Or::First(v) => v.to_span(),
-            Or::Second(v) => v.to_span(),
-        }
     }
 }
 
@@ -498,10 +535,7 @@ mod tests {
 
         let node = <PhantomData<()> as Syntax<Chars>>::parse(&mut input).unwrap();
 
-        assert_eq!(
-            <PhantomData<()> as Syntax<Chars>>::to_span(&node),
-            Span::None
-        );
+        assert_eq!(<PhantomData<()> as ToSpan>::to_span(&node), Span::None);
         assert_eq!(input.as_str(), "ab");
     }
 

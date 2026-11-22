@@ -47,7 +47,7 @@ impl<'a> UnsynInput for TokenStream<'a> {}
 
 #[cfg(test)]
 mod tests {
-    use parserc::{AsBytes, AsStr, Find, Input, Span, StartWith};
+    use parserc::{AsBytes, AsStr, Find, Input, Span, StartWith, ToSpan};
 
     use super::*;
 

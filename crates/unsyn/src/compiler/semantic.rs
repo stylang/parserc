@@ -50,7 +50,7 @@ use std::{
     marker::PhantomData,
 };
 
-use parserc::{Span, syntax::Syntax};
+use parserc::{Span, ToSpan};
 
 use super::errors::{Diagnostics, LintKind, SemanticsKind, UnsynError};
 use super::input::UnsynInput;
@@ -1132,6 +1132,7 @@ fn intersects(one: &[(u32, u32)], other: &[(u32, u32)]) -> bool {
 
 #[cfg(test)]
 mod tests {
+
     use parserc::{Input, syntax::SyntaxInput};
 
     use super::*;

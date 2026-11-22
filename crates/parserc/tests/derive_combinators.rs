@@ -9,7 +9,7 @@
 
 use parserc::chars::CharsInput;
 use parserc::syntax::{Syntax, SyntaxInput};
-use parserc::{AsStr, Input, Kind, Span};
+use parserc::{AsStr, Input, Kind, Span, ToSpan};
 
 type Stream<'a> = parserc::chars::TokenStream<'a, Kind>;
 

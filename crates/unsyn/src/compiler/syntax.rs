@@ -26,11 +26,11 @@
 //! [`Ident`] or [`LitStr`]: it keeps no trivia either, since its text is read
 //! into the text of the rule that reaches it.
 
-use parserc::{ControlFlow, Kind, syntax::Syntax};
+use parserc::syntax::Syntax;
 
 use crate::compiler::lexer::{Ident, LeadingKeywords, LitDec, LitStr, LitUnicode, S};
 use crate::compiler::{
-    errors::{PunctKind, SemanticsKind, SyntaxKind, UnsynError},
+    errors::{PunctKind, SyntaxKind},
     input::UnsynInput,
 };
 
@@ -235,7 +235,6 @@ where
 /// alternative `'a'` against the sequence of `'b'` then `'c'`.
 #[derive(Debug, PartialEq, Eq, PartialOrd, Ord, Clone, Syntax)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
-#[parserc(map_err = map_expr_err)]
 pub struct Expr<I>
 where
     I: UnsynInput,
@@ -280,23 +279,6 @@ pub type Alternative<I> = (
     OneOrMore<I, ExprNoTopAlt<I>>,
 );
 
-/// Turns an expression that ran into a keyword into the definition that should
-/// have ended before it.
-///
-/// A definition's pattern is followed by `;`, so the next keyword can only mean
-/// that the `;` was left out. Reporting a missing `;` where the pattern ends is
-/// more useful than reporting an unexpected keyword there, since the file is
-/// otherwise read as one definition glued to the next.
-#[inline]
-fn map_expr_err(err: UnsynError) -> UnsynError {
-    match err {
-        UnsynError::Semantics(SemanticsKind::Keyword, span) => {
-            UnsynError::Punct(PunctKind::Semi, ControlFlow::Fatal, span)
-        }
-        err => err,
-    }
-}
-
 // ---------------------------------------------------------------------------
 // `syntax ExprNoTopAlt -> ExprWithSuffix | ExprWithoutSuffix;`
 // ---------------------------------------------------------------------------
@@ -305,7 +287,7 @@ fn map_expr_err(err: UnsynError) -> UnsynError {
 /// same thing with one suffix.
 #[derive(Debug, PartialEq, Eq, PartialOrd, Ord, Clone, Syntax)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
-#[parserc(map_err = map_expr_no_top_alt_err)]
+#[parserc(map_err = SyntaxKind::ExprNoTopAlt.map())]
 pub enum ExprNoTopAlt<I>
 where
     I: UnsynInput,
@@ -314,23 +296,6 @@ where
     WithSuffix(ExprWithSuffix<I>),
     /// An operand that stands alone.
     WithoutSuffix(ExprWithoutSuffix<I>),
-}
-
-/// Reports that no operand of an alternative matched here.
-///
-/// An enum that has tried every variant ends with the bare combinator error of
-/// its own name, which is the one error of this node that says nothing beyond "no
-/// operand"; it is given the [`SyntaxKind`] the other nodes report with. An error
-/// from inside a variant is left as it is: the operand that met it has already
-/// named what it expected there, which is more than this node can say.
-#[inline]
-fn map_expr_no_top_alt_err(err: UnsynError) -> UnsynError {
-    match err {
-        UnsynError::Kind(Kind::Syntax("ExprNoTopAlt", control_flow, span)) => {
-            UnsynError::Syntax(SyntaxKind::ExprNoTopAlt, control_flow, span)
-        }
-        err => err,
-    }
 }
 
 // ---------------------------------------------------------------------------
@@ -852,10 +817,15 @@ where
 
 #[cfg(test)]
 mod tests {
-    use parserc::{AsStr, Input, Span, syntax::SyntaxInput};
+
+    use parserc::ToSpan;
+    use parserc::{AsStr, ControlFlow, Input, ParseError, Span, syntax::SyntaxInput};
 
     use super::*;
-    use crate::compiler::input::TokenStream;
+    use crate::compiler::{
+        errors::{SemanticsKind, UnsynError},
+        input::TokenStream,
+    };
 
     /// Parses `source` as the node `T`, refusing whatever is left of it.
     fn whole<'a, T>(source: &'a str) -> Result<T, UnsynError>
@@ -943,19 +913,41 @@ mod tests {
     }
 
     #[test]
-    fn a_missing_semicolon_is_reported_where_the_pattern_ends() {
-        // The next definition can only mean that the `;` was left out, and that is
-        // more useful here than a report of an unexpected keyword.
+    fn a_pattern_that_runs_into_the_next_keyword_is_not_read_as_one_definition() {
+        // What is met at the end of a pattern is what was asked for there: this
+        // `Expr` tried to read one more operand and found `syntax`, which is a
+        // word of the language and so no name. Reporting a missing `;` instead
+        // would say the parser wanted a terminator it never reached for — and the
+        // semantics error is already `Fatal`, so nothing is gained by renaming
+        // it: no alternative past this one is tried, and the second definition
+        // is never glued to the first.
         let mut input = TokenStream::from("syntax A -> 'a' syntax B -> 'b';");
 
+        let error = input
+            .parse::<Stmt<_>>()
+            .expect_err("a definition left open");
+
         assert_eq!(
-            input.parse::<Stmt<_>>(),
-            Err(UnsynError::Punct(
-                PunctKind::Semi,
-                ControlFlow::Fatal,
-                Span::Range(16..22),
-            )),
+            error,
+            UnsynError::Semantics(SemanticsKind::Keyword, Span::Range(16..22)),
+            "the error names what was wanted where it was wanted"
         );
+        assert!(
+            error.is_fatal(),
+            "and stops the read rather than backtracking"
+        );
+        assert!(
+            error.is_fatal(),
+            "and stops the read rather than backtracking"
+        );
+
+        // The read is not rewound, which is what makes it fatal in the first
+        // place: the name is taken as one token and *then* refused for being a
+        // word of the language, so the position already sits past `syntax` and
+        // no alternative can be retried from where the pattern ended. The span
+        // of the error is that word, which is the thing worth telling the
+        // author — not a `;` the parser never asked for.
+        assert_eq!(input.as_str(), " B -> 'b';", "the offending word was taken");
     }
 
     #[test]
@@ -1090,6 +1082,37 @@ mod tests {
         // and the space between them is trivia that belongs to no rule.
         assert!(whole::<Stmt<_>>("syntaxExpr -> 'a';").is_ok());
         assert!(whole::<Stmt<_>>("syntax Expr -> 'a'").is_err());
+    }
+
+    #[test]
+    fn an_alternative_that_matched_none_names_the_set_it_tried() {
+        // The enum's own refusal arrives as a bare combinator error carrying its
+        // name, which says nothing beyond "no operand"; the item's `map_err`
+        // gives it the [`SyntaxKind`] every other node reports with.
+        assert_eq!(
+            whole::<ExprNoTopAlt<_>>("|"),
+            Err(UnsynError::Syntax(
+                SyntaxKind::ExprNoTopAlt,
+                ControlFlow::Recovable,
+                Span::Range(0..1)
+            ))
+        );
+
+        // A recoverable failure inside one alternative is *not* what reaches the
+        // caller: trying the next alternative is what an enum does, so the
+        // alternatives are all given the chance and the node's own refusal is
+        // what is left. This is the case the item's `map_err` is for.
+        let error = whole::<ExprNoTopAlt<_>>("<").expect_err("an unterminated call");
+
+        assert_eq!(
+            error,
+            UnsynError::Syntax(
+                SyntaxKind::ExprNoTopAlt,
+                ControlFlow::Recovable,
+                Span::Range(0..1)
+            ),
+            "a recoverable inner failure gives way to the set"
+        );
     }
 
     #[test]
