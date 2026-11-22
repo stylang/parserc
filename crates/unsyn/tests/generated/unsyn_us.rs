@@ -26,16 +26,16 @@ fn is_s(c: char) -> bool {
     matches ! (c , '\t' ..= '\r' | ' ' | '\u{85}' | '\u{a0}' | '\u{1680}' | '\u{2000}' ..= '\u{200a}' | '\u{2028}' | '\u{2029}' | '\u{202f}' | '\u{205f}' | '\u{3000}')
 }
 #[derive(Debug, PartialEq, Eq, PartialOrd, Ord, Clone, :: parserc :: syntax :: Syntax)]
-# [parserc (take_while = is_s)]
+# [parserc (take_while_with = (1 .. , is_s))]
 pub struct S<I>(pub I)
 where
     I: ::parserc::chars::CharsInput;
 #[derive(Debug, PartialEq, Eq, PartialOrd, Ord, Clone, :: parserc :: syntax :: Syntax)]
-pub struct LF<I>(# [parserc (parser = :: parserc :: next ('\n'))] pub I)
+pub struct LF<I>(#[parserc(next = '\n')] pub I)
 where
     I: ::parserc::chars::CharsInput;
 #[derive(Debug, PartialEq, Eq, PartialOrd, Ord, Clone, :: parserc :: syntax :: Syntax)]
-pub struct CR<I>(# [parserc (parser = :: parserc :: next ('\r'))] pub I)
+pub struct CR<I>(#[parserc(next = '\r')] pub I)
 where
     I: ::parserc::chars::CharsInput;
 #[derive(Debug, PartialEq, Eq, PartialOrd, Ord, Clone, :: parserc :: syntax :: Syntax)]
@@ -47,7 +47,7 @@ pub struct RawIdent<I>
 where
     I: ::parserc::chars::CharsInput,
 {
-    # [parserc (parser = :: parserc :: keyword ("r#"))]
+    #[parserc(keyword = "r#")]
     pub f1: I,
     pub ident_or_keyword: IdentOrKeyword<I>,
 }
@@ -106,18 +106,18 @@ pub enum LeadingKeywords<I>
 where
     I: ::parserc::chars::CharsInput,
 {
-    Lexer(# [parserc (parser = :: parserc :: keyword ("lexer"))] I),
-    Syntax(# [parserc (parser = :: parserc :: keyword ("syntax"))] I),
-    Whitespace(# [parserc (parser = :: parserc :: keyword ("whitespace"))] I),
+    Lexer(#[parserc(keyword = "lexer")] I),
+    Syntax(#[parserc(keyword = "syntax")] I),
+    Whitespace(#[parserc(keyword = "whitespace")] I),
 }
 #[derive(Debug, PartialEq, Eq, PartialOrd, Ord, Clone, :: parserc :: syntax :: Syntax)]
 pub enum FollowingKeywords<I>
 where
     I: ::parserc::chars::CharsInput,
 {
-    Concat(# [parserc (parser = :: parserc :: keyword ("concat"))] I),
-    Except(# [parserc (parser = :: parserc :: keyword ("except"))] I),
-    Followed(# [parserc (parser = :: parserc :: keyword ("followed"))] I),
+    Concat(#[parserc(keyword = "concat")] I),
+    Except(#[parserc(keyword = "except")] I),
+    Followed(#[parserc(keyword = "followed")] I),
 }
 fn read_lit_str_1<I>(input: &mut I) -> ::core::result::Result<I, <I as ::parserc::Input>::Error>
 where
@@ -148,14 +148,14 @@ where
 }
 #[derive(Debug, PartialEq, Eq, PartialOrd, Ord, Clone, :: parserc :: syntax :: Syntax)]
 pub struct LitStr<I>(
-    # [parserc (parser = :: parserc :: next ('\''))] pub I,
+    #[parserc(next = '\'')] pub I,
     # [parserc (parser = read_lit_str_1)] pub I,
-    # [parserc (parser = :: parserc :: next ('\''))] pub I,
+    #[parserc(next = '\'')] pub I,
 )
 where
     I: ::parserc::chars::CharsInput;
 #[derive(Debug, PartialEq, Eq, PartialOrd, Ord, Clone, :: parserc :: syntax :: Syntax)]
-pub struct QuoteEscape<I>(# [parserc (parser = :: parserc :: keyword ("\\'"))] pub I)
+pub struct QuoteEscape<I>(#[parserc(keyword = "\\'")] pub I)
 where
     I: ::parserc::chars::CharsInput;
 #[derive(Debug, PartialEq, Eq, PartialOrd, Ord, Clone, :: parserc :: syntax :: Syntax)]
@@ -164,18 +164,18 @@ where
     I: ::parserc::chars::CharsInput,
 {
     AsciiHexEscape(AsciiHexEscape<I>),
-    F2(# [parserc (parser = :: parserc :: keyword ("\\n"))] I),
-    F3(# [parserc (parser = :: parserc :: keyword ("\\r"))] I),
-    F4(# [parserc (parser = :: parserc :: keyword ("\\t"))] I),
-    F5(# [parserc (parser = :: parserc :: keyword ("\\\\"))] I),
-    F6(# [parserc (parser = :: parserc :: keyword ("\\0"))] I),
+    F2(#[parserc(keyword = "\\n")] I),
+    F3(#[parserc(keyword = "\\r")] I),
+    F4(#[parserc(keyword = "\\t")] I),
+    F5(#[parserc(keyword = "\\\\")] I),
+    F6(#[parserc(keyword = "\\0")] I),
 }
 #[derive(Debug, PartialEq, Eq, PartialOrd, Ord, Clone, :: parserc :: syntax :: Syntax)]
 pub struct AsciiHexEscape<I>
 where
     I: ::parserc::chars::CharsInput,
 {
-    # [parserc (parser = :: parserc :: keyword ("\\x"))]
+    #[parserc(keyword = "\\x")]
     pub f1: I,
     pub oct_digit: OctDigit<I>,
     pub hex_digit: HexDigit<I>,
@@ -212,11 +212,11 @@ pub struct UnicodeEscape<I>
 where
     I: ::parserc::chars::CharsInput,
 {
-    # [parserc (parser = :: parserc :: keyword ("\\u{"))]
+    #[parserc(keyword = "\\u{")]
     pub f1: I,
     # [parserc (parser = read_unicode_escape_1)]
     pub hex_digit: ::std::vec::Vec<HexDigit<I>>,
-    # [parserc (parser = :: parserc :: next ('}'))]
+    #[parserc(next = '}')]
     pub f2: I,
 }
 #[derive(Debug, PartialEq, Eq, PartialOrd, Ord, Clone, :: parserc :: syntax :: Syntax)]
@@ -244,7 +244,7 @@ where
     I: ::parserc::chars::CharsInput,
 {
     pub dec_digit: DecDigit<I>,
-    # [parserc (parser = :: parserc :: take_while (| c : char | matches ! (c , '0' ..= '9' | '_')))]
+    # [parserc (take_while = | c : char | matches ! (c , '0' ..= '9' | '_'))]
     pub f1: I,
 }
 fn read_lit_unicode_1<I>(
@@ -279,7 +279,7 @@ pub struct LitUnicode<I>
 where
     I: ::parserc::chars::CharsInput,
 {
-    # [parserc (parser = :: parserc :: keyword ("U+"))]
+    #[parserc(keyword = "U+")]
     pub f1: I,
     # [parserc (parser = read_lit_unicode_1)]
     pub hex_digit: ::std::vec::Vec<HexDigit<I>>,
@@ -290,8 +290,8 @@ where
     I: ::parserc::chars::CharsInput,
 {
     BlockCommentBody(BlockCommentBody<I>),
-    F2(# [parserc (parser = :: parserc :: keyword ("/**/"))] I),
-    F3(# [parserc (parser = :: parserc :: keyword ("/***/"))] I),
+    F2(#[parserc(keyword = "/**/")] I),
+    F3(#[parserc(keyword = "/***/")] I),
 }
 fn read_block_comment_body_1<I>(
     input: &mut I,
@@ -372,20 +372,19 @@ where
 }
 #[derive(Debug, PartialEq, Eq, PartialOrd, Ord, Clone, :: parserc :: syntax :: Syntax)]
 pub struct BlockCommentBody<I>(
-    # [parserc (parser = :: parserc :: keyword ("/*"))] pub I,
+    #[parserc(keyword = "/*")] pub I,
     # [parserc (parser = read_block_comment_body_1 . or (:: parserc :: keyword ("**")) . or (| input : & mut I | { text_of (< BlockCommentOrDoc < I > as :: parserc :: syntax :: Syntax < I >> :: into_parser () , input) }))]
     pub I,
     # [parserc (parser = read_block_comment_body_3)] pub I,
-    # [parserc (parser = :: parserc :: keyword ("*/"))] pub I,
+    #[parserc(keyword = "*/")] pub I,
 )
 where
     I: ::parserc::chars::CharsInput;
 #[derive(Debug, PartialEq, Eq, PartialOrd, Ord, Clone, :: parserc :: syntax :: Syntax)]
 pub struct InnerLineDoc<I>(
-    # [parserc (parser = :: parserc :: keyword ("//!"))]
+    #[parserc(keyword = "//!")]
     pub I,
-    # [parserc (parser = :: parserc :: take_while (| c : char | ! (matches ! (c , '\n' | '\r'))))]
-    pub I,
+    # [parserc (take_while = | c : char | ! (matches ! (c , '\n' | '\r')))] pub I,
 )
 where
     I: ::parserc::chars::CharsInput;
@@ -440,9 +439,9 @@ where
 }
 #[derive(Debug, PartialEq, Eq, PartialOrd, Ord, Clone, :: parserc :: syntax :: Syntax)]
 pub struct InnerBlockDoc<I>(
-    # [parserc (parser = :: parserc :: keyword ("/*!"))] pub I,
+    #[parserc(keyword = "/*!")] pub I,
     # [parserc (parser = read_inner_block_doc_2)] pub I,
-    # [parserc (parser = :: parserc :: keyword ("*/"))] pub I,
+    #[parserc(keyword = "*/")] pub I,
 )
 where
     I: ::parserc::chars::CharsInput;
@@ -473,7 +472,7 @@ where
 }
 #[derive(Debug, PartialEq, Eq, PartialOrd, Ord, Clone, :: parserc :: syntax :: Syntax)]
 pub struct OuterLineDoc<I>(
-    # [parserc (parser = :: parserc :: keyword ("///"))]
+    #[parserc(keyword = "///")]
     pub I,
     # [parserc (parser = read_outer_line_doc_2)] pub I,
 )
@@ -557,11 +556,11 @@ where
 }
 #[derive(Debug, PartialEq, Eq, PartialOrd, Ord, Clone, :: parserc :: syntax :: Syntax)]
 pub struct OuterBlockDoc<I>(
-    # [parserc (parser = :: parserc :: keyword ("/**"))] pub I,
+    #[parserc(keyword = "/**")] pub I,
     # [parserc (parser = read_outer_block_doc_1 . or (| input : & mut I | { text_of (< BlockCommentOrDoc < I > as :: parserc :: syntax :: Syntax < I >> :: into_parser () , input) }))]
     pub I,
     # [parserc (parser = read_outer_block_doc_3)] pub I,
-    # [parserc (parser = :: parserc :: keyword ("*/"))] pub I,
+    #[parserc(keyword = "*/")] pub I,
 )
 where
     I: ::parserc::chars::CharsInput;

@@ -56,7 +56,7 @@ use crate::compiler::input::UnsynInput;
 /// trivia is owned by exactly one of the two terminals it lies between.
 #[derive(Debug, PartialEq, Eq, PartialOrd, Ord, Clone, Syntax)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
-#[parserc(take_while = is_trivia)]
+#[parserc(take_while_with = (1.., is_trivia))]
 pub struct S<I>(pub I)
 where
     I: UnsynInput;
@@ -89,7 +89,7 @@ fn is_trivia(c: char) -> bool {
 /// A line feed, the end of a line of text.
 #[derive(Debug, PartialEq, Eq, PartialOrd, Ord, Clone, Syntax)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
-#[parserc(char = '\u{000A}')]
+#[parserc(next = '\u{000A}')]
 pub struct LF<I>(pub I)
 where
     I: UnsynInput;
@@ -97,7 +97,7 @@ where
 /// A carriage return, which a line document has to end at as much as a line feed.
 #[derive(Debug, PartialEq, Eq, PartialOrd, Ord, Clone, Syntax)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
-#[parserc(char = '\u{000D}')]
+#[parserc(next = '\u{000D}')]
 pub struct CR<I>(pub I)
 where
     I: UnsynInput;

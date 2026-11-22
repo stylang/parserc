@@ -139,7 +139,7 @@ of what the two levels differ in once §1's shape question is settled:
 | operand                | the field holds                                   |
 |------------------------|---------------------------------------------------|
 | `Name` (a rule)        | `Name<I>`, boxed if `Name` is a `syntax` rule      |
-| `'a'` / `U+0009`       | **level-dependent**: in a `syntax` rule, `Char<I, 'a'>` — a node of one punctuator. In a `lexer` rule, a field of `I` with `#[parserc(parser = next('a'))]`, because a terminal holds text and not nodes |
+| `'a'` / `U+0009`       | **level-dependent**: in a `syntax` rule, `Char<I, 'a'>` — a node of one punctuator. In a `lexer` rule, a field of `I` with `#[parserc(next = 'a')]`, because a terminal holds text and not nodes |
 | `'abc'`, `'->'`        | a field of `I` with `#[parserc(keyword = "abc")]` — **at either level**. A word is never a `Char`, since `Char` is one character |
 | `['a'-'z', '_']`       | **a class**, if every member denotes characters: one field of `I` with `next_if(\|c\| matches!(c, …))` — one test, not a choice. **A fold**, if any member is wider: `.or()` over each member's own parser |
 | `~[…]`                 | **one character**, whatever the set is: the class refused — `next_if(\|c\| !matches!(…))` — or, with no class to test, a probe of the members' fold that must not match, then one character taken |
@@ -205,10 +205,9 @@ Two consequences worth stating because they are load-bearing:
 
   ```rust
   pub struct InnerLineDoc<I>(
-      #[parserc(parser = ::parserc::keyword("//!"))] pub I,
+      #[parserc(keyword = "//!")] pub I,
       // the whole run, in one greedy combinator, holding characters
-      #[parserc(parser = ::parserc::take_while(|c: char| !(matches!(c, '\n' | '\r'))))]
-      pub I,
+      #[parserc(take_while = |c: char| !(matches!(c, '\n' | '\r')))] pub I,
   )
   ```
 
@@ -469,7 +468,49 @@ meaningless to the generator, the analyzer and the lint alike.
 
 ---
 
-## 8. Reading this back
+## 8. What the derive accepts
+
+Everything above is what the generator *writes*; this is what the derive it
+writes against *reads*, and the two are deliberately the same vocabulary.
+
+Every combinator of `parserc` may be written as an attribute at **every**
+position a parser is needed — on a `struct`, on an `enum`, on one of its
+variants, and on a field — under the name of the function it calls:
+
+| attribute                | writes the call          | reads              |
+|--------------------------|--------------------------|--------------------|
+| `next = 'a'`             | `parserc::next('a')`     | one item           |
+| `next_if = f`            | `parserc::next_if(f)`    | one item `f` takes |
+| `keyword = "if"`         | `parserc::keyword("if")` | one word           |
+| `take_until = ";"`       | `parserc::take_until(";")` | the run before a word, leaving it |
+| `take_while = f`         | `parserc::take_while(f)` | the longest run `f` takes, possibly none |
+| `take_while_with = (r, f)` | `parserc::take_while_with(r, f)` | the same, bounded by `r` |
+| `take_till = f`          | `parserc::take_till(f)`  | the longest run `f` rejects |
+| `parser = p`             | `p` itself               | whatever `p` parses — the escape hatch |
+
+Three consequences of that table being uniform, each of which is a limitation
+the derive used to have:
+
+- **a `struct` or `enum` can be one token.** `#[parserc(keyword = "if")] struct
+  If<I>(pub I)` works, and so does an `enum` of exactly one such variant. It
+  demands one unnamed field whose type is the input, and says so when the item
+  has more or different.
+- **a variant can be a leaf of a choice**: `enum Punctuation<I> { #[parserc(next
+  = ',')] Comma(I), Pair(Lhs<I>, Rhs<I>), … }` — one arm read as a run beside
+  arms read from parts.
+- **what a combinator reads is checked where it is written.** Each of them hands
+  back a run of the input, so the thing it is set on must *be* the input type;
+  that used to be checked for `keyword` and `take_while` alone, and `parser =`
+  bypassed it entirely.
+
+`crates/parserc/tests/derive_combinators.rs` pins the whole table at all four
+positions. Three options are about a position rather than a read and are
+therefore restricted: `input = Type` on an item only, `crucial` and
+`left_recursion` on a field only. Two are accepted anywhere: `map_err`, `semantic`.
+
+---
+
+## 9. Reading this back
 
 The fastest check of any claim above is to regenerate and diff:
 

@@ -18,23 +18,30 @@
 //!
 //! | the DSL writes          | the code writes                                        |
 //! |-------------------------|--------------------------------------------------------|
-//! | `'a'`, `U+0009`         | `::parserc::next(c)`                                     |
-//! | `'abc'`                 | `::parserc::keyword("abc")`                              |
+//! | `'a'`, `U+0009`         | `#[parserc(next = 'c')]` on a field of `I`                |
+//! | `'abc'`                 | `#[parserc(keyword = "abc")]` on a field of `I`           |
 //! | `Name` in a `syntax` sequence | the node `Name<I>`, boxed where `Name` is a `syntax` rule |
 //! | `Name` in a `lexer` sequence  | the one run of text `Name` read, folded in beside the rest |
 //! | `Name` as a whole rule, or as one name of a choice | the node `Name<I>` |
 //! | `( Name )`, `[ 'a', Name ]`, `Name except …` | the text `Name` read — and `Name` itself still keeps its own shape for whoever reads it whole |
 //! | `A \| B` of names only    | `pub enum` with one variant per name                      |
 //! | `<Ext>`                 | the tokens the caller bound `Ext` to                     |
-//! | `['a'-'z', '_']`        | one `::parserc::next_if(\|c: char\| matches!(c, …))` — a class, when every member denotes characters |
+//! | `['a'-'z', '_']`        | one `#[parserc(next_if = \|c: char\| matches!(c, …))]` — a class, when every member denotes characters |
 //! | `['/*','*/']`            | a fold of `.or()` over the members' own parsers — no class, when any member is wider |
 //! | `~[…]`                  | the class refused; or, of a fold, a probe of it that must not match, then one character taken whatever it is |
 //! | `A \| B` inside a group   | a nested `Or` of the two — structure with no name of its own |
 //! | `A B`                   | a field for `A`, a field for `B`, in that order          |
-//! | `A?`, `A*`              | `Option<A<I>>`, `Vec<A<I>>` — the derive's own shapes    |
+//! | `A?`, `A*`              | `Option<A<I>>`, `Vec<A<I>>` — the derive's own shapes. A repetition of a class is the exception: one `#[parserc(take_while…)]` over its predicate |
 //! | `A+`, `{n}`, `{n, m}`   | a `read_` function that counts the nodes it took         |
 //! | `except`, `followed`    | a probe the field's reader runs beside the text it took  |
-//! | `whitespace W -> […]`   | `#[parserc(take_while = is_w)]` and the predicate        |
+//! | `whitespace W -> […]`   | `#[parserc(take_while_with = (1.., is_w))]` and the predicate |
+//!
+//! Each of those attributes names the combinator it writes — `keyword = "if"`,
+//! not `parser = ::parserc::keyword("if")` — because the derive accepts every
+//! combinator of `parserc` under the function's own name at every position, and
+//! saying which function an operand asked for keeps the shape the spec declared
+//! visible in the code of it. `parser =` remains for what is no single
+//! combinator: a fold of `.or()`, a probe, a generated `read_` of its own.
 //!
 //! A field that names no rule is the text its operand read, and is called by
 //! its place: `f1`, `f2`, and onward. A rule whose sequence holds nothing but
@@ -167,7 +174,7 @@ use std::collections::{HashMap, HashSet};
 
 use parserc::{Span, syntax::Syntax};
 use proc_macro2::{Ident, Literal, TokenStream, TokenTree};
-use quote::{ToTokens, quote};
+use quote::{ToTokens, format_ident, quote};
 use unicode_ident::{is_xid_continue, is_xid_start};
 
 use super::input::UnsynInput;
@@ -980,15 +987,51 @@ enum Code {
     /// An expression of some [`Parser`](parserc::Parser) over the input, which
     /// takes one match of the operand and hands back the text of it.
     Expr(TokenStream),
+    /// One combinator of `parserc` called with these arguments.
+    ///
+    /// Kept apart from [`Code::Expr`] because a field can be told to read
+    /// itself with a combinator by *name* — `keyword = "if"` — which says what
+    /// it is, where `parser = ::parserc::keyword("if")` only says what to call.
+    /// The identity has to survive from the operand to the attribute for that
+    /// choice to be made, and an expression it has been folded into cannot be
+    /// read back into one.
+    Combinator {
+        /// The combinator's name, which is also the attribute's key.
+        key: &'static str,
+        /// Its argument list, parentheses included, so the call and the
+        /// attribute are both written by setting the name in front of it — and a
+        /// list of two arguments stays one value rather than two attributes.
+        args: TokenStream,
+    },
     /// Statements that take one match of the operand from `input`.
     Stmt(Vec<TokenStream>),
 }
 
 impl Code {
+    /// The combinator call itself, which is what both an expression and an
+    /// attribute are built from.
+    /// expression and an attribute are both written by setting the name in
+    /// front of the arguments.
+    fn call(&self) -> Option<(TokenStream, TokenStream)> {
+        match self {
+            Code::Combinator { key, args } => {
+                let path = format_ident!("{}", key);
+
+                Some((quote! { ::parserc::#path }, args.clone()))
+            }
+            _ => None,
+        }
+    }
+
     /// The statements the code is, which is what a sequence of operands needs.
     fn into_stmts(self) -> Vec<TokenStream> {
         match self {
             Code::Expr(parser) => vec![quote! { #parser.parse(input)?; }],
+            Code::Combinator { key, args } => {
+                let path = format_ident!("{}", key);
+
+                vec![quote! { ::parserc::#path #args.parse(input)?; }]
+            }
             Code::Stmt(stmts) => stmts,
         }
     }
@@ -1201,7 +1244,9 @@ where
         self.descriptors.push((
             name.clone(),
             match &code {
-                Rule::Field(_) | Rule::Read(_) | Rule::TakeWhile(_) => NodeDesc::Text,
+                Rule::Field(_) | Rule::Combinator { .. } | Rule::Read(_) | Rule::TakeWhile(_) => {
+                    NodeDesc::Text
+                }
                 Rule::Fields { tuple, fields } => NodeDesc::Fields {
                     tuple: *tuple,
                     fields: fields
@@ -1224,6 +1269,17 @@ where
                 where
                     I: ::parserc::chars::CharsInput;
             },
+            Rule::Combinator { key, ref args } => {
+                let attr = field_combinator(key, args);
+
+                quote! {
+                    #[derive(Debug, PartialEq, Eq, PartialOrd, Ord, Clone, ::parserc::syntax::Syntax)]
+                    #allow
+                    pub struct #name<I>(#attr pub I)
+                    where
+                        I: ::parserc::chars::CharsInput;
+                }
+            }
             Rule::Read(read) => quote! {
                 #[derive(Debug, PartialEq, Eq, PartialOrd, Ord, Clone, ::parserc::syntax::Syntax)]
                 #allow
@@ -1234,7 +1290,11 @@ where
             Rule::TakeWhile(pred) => quote! {
                 #[derive(Debug, PartialEq, Eq, PartialOrd, Ord, Clone, ::parserc::syntax::Syntax)]
                 #allow
-                #[parserc(take_while = #pred)]
+                // The bound is written here and not left to `take_while` because a
+                // run of the trivia is what separates two operands, and a separator
+                // that could be seen in nothing at all would let a repetition of the
+                // thing it separates ask for the same position forever.
+                #[parserc(take_while_with = (1.., #pred))]
                 pub struct #name<I>(pub I)
                 where
                     I: ::parserc::chars::CharsInput;
@@ -1287,6 +1347,9 @@ where
             // beside the field it reads into. Any function the expression reaches
             // was asked for while it was being read, and stands beside the rule.
             Code::Expr(parser) => Ok(Rule::Field(parser)),
+            // One combinator, still named as itself: a terminal that is nothing
+            // but a word, a character or a class says so in its own attribute.
+            Code::Combinator { key, args } => Ok(Rule::Combinator { key, args }),
             // A rule that is a run of statements is declared by a function that
             // keeps the text those statements took.
             Code::Stmt(stmts) => {
@@ -1446,24 +1509,36 @@ where
             });
         }
 
-        let parser = match bounds {
-            None => {
-                let code = self.code_of_atom(atom)?;
-                self.expr_of(code)?
-            }
+        // The operand's code is kept whole rather than folded straight into an
+        // expression, so that a field reading one combinator can say which one.
+        let code = match bounds {
+            None => self.code_of_atom(atom)?,
             Some(bounds) => match self.class_of(atom) {
-                Some(pred) => bound_combinator(&pred, bounds.0, bounds.1),
-                None => {
-                    let code = self.code_of_repetition(atom, bounds.0, bounds.1)?;
-                    self.expr_of(code)?
-                }
+                // A class repeated is still one combinator, so it stays named as
+                // one — but with the bound it was asked for, which is what tells
+                // a run of digits from the single character beside it.
+                Some(pred) => Code::Combinator {
+                    key: bound_key(bounds.0, bounds.1),
+                    args: bound_args(&pred, bounds.0, bounds.1),
+                },
+                None => self.code_of_repetition(atom, bounds.0, bounds.1)?,
             },
+        };
+
+        let attr = match &code {
+            // One combinator, read straight into the text it took: named as
+            // itself, so the attribute says what the operand asked for rather
+            // than merely what gets called. The bound, where there is one, is
+            // already among the arguments, so a repeated class is named just as
+            // plainly as a single character is.
+            Code::Combinator { key, args } => field_combinator(key, args),
+            _ => field_parser(&self.expr_of(code.clone())?),
         };
 
         Ok(Field {
             name: None,
             ty: quote! { I },
-            attr: Some(field_parser(&parser)),
+            attr: Some(attr),
         })
     }
 
@@ -2564,8 +2639,14 @@ where
         match atom {
             syntax::ExprWithoutSuffix::Str(lit) => self.code_of_str(lit),
             syntax::ExprWithoutSuffix::Unicode(lit) => {
+                // A code point is one item of the input, the same read a
+                // one-character string literal asks for.
                 let c = self.code_of(lit)?;
-                Ok(Code::Expr(quote! { ::parserc::next(#c) }))
+
+                Ok(Code::Combinator {
+                    key: "next",
+                    args: quote! { (#c) },
+                })
             }
             syntax::ExprWithoutSuffix::Reference(ident) => Ok(Code::Expr(self.reference(ident)?)),
             syntax::ExprWithoutSuffix::Call { ident: call, .. } => {
@@ -2671,8 +2752,8 @@ where
     fn code_of_str(&self, lit: &lexer::LitStr<I>) -> Result<Code, UnsynError> {
         let chars = lit.chars();
 
-        let parser = match chars[..] {
-            [c] => quote! { ::parserc::next(#c) },
+        let (key, args) = match chars[..] {
+            [c] => ("next", quote! { (#c) }),
             [] => {
                 return Err(UnsynError::Build(
                     BuildKind::Literal(self.rule.clone()),
@@ -2681,11 +2762,12 @@ where
             }
             _ => {
                 let text: String = chars.into_iter().collect();
-                quote! { ::parserc::keyword(#text) }
+
+                ("keyword", quote! { (#text) })
             }
         };
 
-        Ok(Code::Expr(parser))
+        Ok(Code::Combinator { key, args })
     }
 
     /// The code that reads one rule by name, as the text the rule took.
@@ -2882,14 +2964,23 @@ where
 
     /// The parser an expression is, given a function to be if it is statements.
     fn expr_of(&mut self, code: Code) -> Result<TokenStream, UnsynError> {
+        let named = code.call();
+
         Ok(match code {
             Code::Expr(parser) => parser,
+            Code::Combinator { key, args } => {
+                let path = format_ident!("{}", key);
+
+                quote! { ::parserc::#path #args }
+            }
             Code::Stmt(stmts) => {
                 let seq = self.seq;
                 self.seq += 1;
 
                 let read = self.unique(format!("read_{}_{}", to_snake_case(&self.rule), seq + 1));
                 self.helpers.push(reader(&read, &stmts));
+                let _ = named;
+
                 quote! { #read }
             }
         })
@@ -2990,6 +3081,20 @@ where
 enum Rule {
     /// The rule is one expression, written beside the field it reads into.
     Field(TokenStream),
+    /// The rule is one combinator of `parserc`, named by it.
+    ///
+    /// The same read as [`Rule::Field`] and no different code to the derive;
+    /// kept apart because saying `keyword = "lexer"` on a terminal records which
+    /// thing the production wrote, where `parser = ::parserc::keyword("lexer")`
+    /// records only what ends up being called.
+    Combinator {
+        /// The combinator's name, which is also the attribute's key.
+        key: &'static str,
+        /// Its argument list, parentheses included, so that the call and the
+        /// attribute are both written by setting the name in front of it — and a
+        /// list of two arguments stays one value rather than two attributes.
+        args: TokenStream,
+    },
     /// The rule is a function, named by the rule.
     Read(Ident),
     /// The rule is the trivia, and is one test of a character.
@@ -3501,21 +3606,90 @@ fn struct_item(
     }
 }
 
+/// The attribute key a bounded read of a class is written under: the bound says
+/// whether there is one to write at all.
+fn bound_key(at_least: usize, at_most: Option<usize>) -> &'static str {
+    if at_least == 0 && at_most.is_none() {
+        "take_while"
+    } else {
+        "take_while_with"
+    }
+}
+
+/// The arguments of that combinator: the predicate alone, or the bound and it.
+fn bound_args(pred: &TokenStream, at_least: usize, at_most: Option<usize>) -> TokenStream {
+    if at_least == 0 && at_most.is_none() {
+        return quote! { (#pred) };
+    }
+
+    let range = match at_most {
+        None => quote! { #at_least.. },
+        Some(at_most) => quote! { #at_least..=#at_most },
+    };
+
+    quote! { (#range, #pred) }
+}
+
 /// The attribute that writes a field's reader beside the field.
 fn field_parser(parser: &TokenStream) -> TokenStream {
     quote! { #[parserc(parser = #parser)] }
 }
 
-/// The combinator that reads a class of characters a bounded number of times,
-/// which is one call that counts items and needs no function of its own.
-fn bound_combinator(pred: &TokenStream, at_least: usize, at_most: Option<usize>) -> TokenStream {
-    match (at_least, at_most) {
-        (0, None) => quote! { ::parserc::take_while(#pred) },
-        (at_least, None) => quote! { ::parserc::take_while_with(#at_least.., #pred) },
-        (at_least, Some(at_most)) => {
-            quote! { ::parserc::take_while_with(#at_least..=#at_most, #pred) }
+/// The attribute that says which combinator reads a field, under the name of
+/// the function it calls: `#[parserc(keyword = "if")]`, not
+/// `#[parserc(parser = ::parserc::keyword("if"))]`.
+///
+/// Both mean the same read to the derive. The first is written where the
+/// generator knows which combinator an operand asked for, which it does until
+/// something folds that call into a wider expression — and it is the form the
+/// derive was refactored to accept at every position, so the shape a spec
+/// declares stays visible in the code of it.
+fn field_combinator(key: &str, args: &TokenStream) -> TokenStream {
+    let path = format_ident!("{}", key);
+
+    // `args` is the combinator's whole parenthesised argument list, and is set
+    // as the value of the attribute behind it: an attribute takes one value, so
+    // a call of two arguments has to keep the group that makes them one. A call
+    // of one is the case where the group is only noise, and is taken back off.
+    let value = match one_argument(args) {
+        Some(inner) => inner,
+        None => quote! { #args },
+    };
+
+    quote! { #[parserc(#path = #value)] }
+}
+
+/// The lone argument inside a parenthesised argument list, if it is one.
+///
+/// The test is a depth walk rather than a search for a comma: a range carries
+/// no comma at all, and a predicate like `|c: char| …` carries commas that
+/// belong to *its* groups, not to the call. Only a comma with the outer
+/// parentheses off — depth one — separates two arguments.
+fn one_argument(args: &TokenStream) -> Option<TokenStream> {
+    let mut trees = args.clone().into_iter();
+    let proc_macro2::TokenTree::Group(group) = trees.next()? else {
+        return None;
+    };
+
+    if trees.next().is_some() || group.delimiter() != proc_macro2::Delimiter::Parenthesis {
+        return None;
+    }
+
+    let inner = group.stream();
+    let mut depth = 0usize;
+
+    for tree in inner.clone() {
+        match tree {
+            proc_macro2::TokenTree::Group(_) => depth += 1,
+            proc_macro2::TokenTree::Punct(punct) => match punct.as_char() {
+                ',' if depth == 0 => return None,
+                _ => {}
+            },
+            _ => {}
         }
     }
+
+    Some(inner)
 }
 
 /// The function that reads `stmts` and keeps the text they took.
@@ -3733,17 +3907,14 @@ mod tests {
         let soup = code("lexer A -> 'a';");
 
         assert!(has(&soup, quote! { pub struct A < I > }));
-        assert!(has(
-            &soup,
-            quote! { #[parserc(parser = ::parserc::next('a'))] pub I }
-        ));
+        assert!(has(&soup, quote! { #[parserc(next = 'a')] pub I }));
     }
 
     #[test]
     fn a_word_of_more_than_one_character_is_a_keyword() {
         let soup = code("lexer A -> 'abc';");
 
-        assert!(has(&soup, quote! { ::parserc::keyword("abc") }));
+        assert!(has(&soup, quote! { #[parserc(keyword = "abc")] pub I }));
     }
 
     #[test]
@@ -3817,10 +3988,7 @@ mod tests {
         // own parts.
         let soup = code("lexer A -> 'a'; lexer B -> A 'b';");
 
-        assert!(has(
-            &soup,
-            quote! { #[parserc(parser = ::parserc::next('b'))] pub f1: I, }
-        ));
+        assert!(has(&soup, quote! { #[parserc(next = 'b')] pub f1: I, }));
         assert!(has(&soup, quote! { pub a: A<I>, }));
     }
 
@@ -3864,7 +4032,7 @@ mod tests {
         let soup = code("lexer A -> 'a' 'b' 'c';");
 
         let mut at = 0;
-        for word in ["next ('a')", "next ('b')", "next ('c')"] {
+        for word in ["next = 'a'", "next = 'b'", "next = 'c'"] {
             let found = soup[at..].find(word).expect("the order of the parts");
             at += found + word.len();
         }
@@ -3901,8 +4069,8 @@ mod tests {
             &soup,
             quote! {
                 pub struct A<I>(
-                    #[parserc(parser = ::parserc::keyword("ab"))] pub I,
-                    #[parserc(parser = ::parserc::keyword("cd"))] pub I,
+                    #[parserc(keyword = "ab")] pub I,
+                    #[parserc(keyword = "cd")] pub I,
                 )
                 where
                     I: ::parserc::chars::CharsInput;
@@ -3916,10 +4084,7 @@ mod tests {
         // The sequence is a field apiece, and no field of a lexer node is a
         // run of the trivia: a literal's field is the keyword's own text.
         let soup = code("lexer A -> 'a'; lexer C -> A 'x';");
-        assert!(has(
-            &soup,
-            quote! { #[parserc(parser = ::parserc::next('x'))] pub f1: I, }
-        ));
+        assert!(has(&soup, quote! { #[parserc(next = 'x')] pub f1: I, }));
         assert!(!soup.contains("whole . split_to"));
 
         // A choice of alternatives is an enum of one variant apiece even when
@@ -3930,8 +4095,8 @@ mod tests {
         assert!(
             soup.contains(
                 "pub enum A < I > where I : :: parserc :: chars :: CharsInput , { \
-                 A (# [parserc (parser = :: parserc :: next ('a'))] I ,) , \
-                 B (# [parserc (parser = :: parserc :: next ('b'))] I ,) }"
+                 A (# [parserc (next = 'a')] I ,) , \
+                 B (# [parserc (next = 'b')] I ,) }"
             ),
             "{soup}"
         );
@@ -3941,7 +4106,7 @@ mod tests {
         assert!(has(
             &soup,
             quote! {
-                pub struct A<I>(#[parserc(parser = ::parserc::keyword("ab"))] pub I)
+                pub struct A<I>(#[parserc(keyword = "ab")] pub I)
                 where
                     I: ::parserc::chars::CharsInput;
             }
@@ -3986,11 +4151,47 @@ mod tests {
     }
 
     #[test]
+    fn a_class_repeated_keeps_its_bound() {
+        // The bound is the whole of what a number is: read one character at a
+        // time, `340` is a `3` with two left over, and the rule that took it
+        // still succeeds — so a lost bound shows up as a parser that accepts
+        // less than its spec says, which nothing here would otherwise notice.
+        let soup = code("lexer Dec -> ['0'-'9']; lexer Num -> Dec ['0'-'9']*;");
+
+        assert!(
+            has(
+                &soup,
+                quote! { #[parserc(take_while = |c: char| matches!(c, '0'..='9'))] }
+            ),
+            "{soup}"
+        );
+
+        let soup = code("lexer Num -> ['0'-'9'] ['0'-'9']{1, 3};");
+        assert!(
+            has(
+                &soup,
+                quote! {
+                    #[parserc(take_while_with = (1usize..=3usize, |c: char| matches!(c, '0'..='9')))]
+                }
+            ),
+            "{soup}"
+        );
+    }
+
+    #[test]
     fn whitespace_is_one_test_of_a_character() {
         let soup = code("whitespace W -> [' ', '\\t'];");
 
         assert!(soup.contains("fn is_w (c : char) -> bool"));
-        assert!(soup.contains("# [parserc (take_while = is_w)] pub struct W < I > (pub I)"));
+        // The lower bound is part of what a separator is: `take_while` alone
+        // would accept an empty run, and a repetition of a rule that separates
+        // itself from nothing at all asks the same position again forever.
+        assert!(
+            soup.contains(
+                "# [parserc (take_while_with = (1 .. , is_w))] pub struct W < I > (pub I)"
+            ),
+            "{soup}"
+        );
     }
 
     #[test]
