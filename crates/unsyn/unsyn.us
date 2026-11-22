@@ -144,7 +144,7 @@ syntax ExprWithoutSuffix ->
 
 /// The characters a set does not denote, which is how a pattern asks for one
 /// character by refusing every other.
-/// 
+///
 /// A rule of its own because the refusal is a node of the tree: the operand
 /// the reader picks out of it is the set, and the `~` that says so stands
 /// beside it. Called a negated set rather than a complement because what it
@@ -152,7 +152,7 @@ syntax ExprWithoutSuffix ->
 syntax NegatedSet -> '~' Set;
 
 /// An external the caller of the parser binds, named between `<` and `>`.
-/// 
+///
 /// The name here is not a rule of the file, and so names no definition; the
 /// node it reads is the caller's, and this rule holds the pair of brackets
 /// and the name between them.
@@ -179,7 +179,7 @@ syntax ExprWithSuffix ->
     ;
 
 /// An operand with one of the quantity operators written after it.
-/// 
+///
 /// The three keywords beside it join, look past or take away, and each says
 /// which by the word it reads. This one reads no word, only the operator
 /// written as a mark, so it is the rule that has to say what it is.
@@ -207,7 +207,7 @@ syntax Range ->
     ;
 
 /// A range whose two ends are both written as code points.
-/// 
+///
 /// The two forms of a range reach for the same word, `concat`, so one of them
 /// would be left named by its place alone; naming both says which end of a
 /// range each was written from.
