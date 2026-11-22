@@ -819,7 +819,7 @@ where
 mod tests {
 
     use parserc::ToSpan;
-    use parserc::{AsStr, ControlFlow, Input, ParseError, Span, syntax::SyntaxInput};
+    use parserc::{AsStr, ControlFlow, Input, ParseError, Span, as_str, syntax::SyntaxInput};
 
     use super::*;
     use crate::compiler::{
@@ -1065,7 +1065,7 @@ mod tests {
         let stmt = whole::<Stmt<_>>(source).unwrap();
 
         assert_eq!(stmt.keyword.word(), "syntax");
-        assert_eq!(stmt.ident.text(), "Expr");
+        assert_eq!(as_str(&TokenStream::from(source), &stmt.ident), "Expr");
         assert_eq!(stmt.to_span(), Span::Range(0..source.len()));
 
         // The sequence carries every run between its operands as a field of
@@ -1220,11 +1220,12 @@ mod tests {
 
         // Every one of them is named, which is what says that a rule of the spec
         // and a type of this crate are the same thing under the same name.
+        let stream = TokenStream::from(source);
         let names = file
             .items
             .iter()
             .filter_map(|item| match item {
-                Item::Stmt(stmt) => Some(stmt.ident.text()),
+                Item::Stmt(stmt) => Some(as_str(&stream, &stmt.ident).to_owned()),
                 _ => None,
             })
             .collect::<Vec<_>>();

@@ -35,12 +35,14 @@ fn header_of(kept: &str) -> &str {
 fn main() {
     let source = include_str!("../unsyn.us");
 
+    let whole = TokenStream::from(source);
+
     let mut input = TokenStream::from(source);
     let file = input
         .parse::<syntax::Crate<_>>()
         .expect("unsyn.us should be a file of the language");
 
-    let report = semantic::analyze(&file);
+    let report = semantic::analyze(&whole, &file);
     assert!(report.errors.is_empty(), "unsyn.us: {:#?}", report.errors);
     assert!(
         report.lints.is_empty(),
@@ -49,7 +51,7 @@ fn main() {
         report.lints
     );
 
-    let mut builder = Builder::new(&file);
+    let mut builder = Builder::new(&whole, &file);
     builder.external(
         "IdentOrKeyword",
         proc_macro2::TokenStream::from_str("crate::scan_ident_or_keyword").unwrap(),

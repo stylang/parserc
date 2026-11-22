@@ -45,15 +45,17 @@ pub use scan::scan_ident_or_keyword;
 fn code_of_the_spec() -> String {
     let source = include_str!("../unsyn.us");
 
+    let whole = TokenStream::from(source);
+
     let mut input = TokenStream::from(source);
     let file = input
         .parse::<syntax::Crate<_>>()
         .expect("unsyn.us should be a file of the language");
 
-    let report = semantic::analyze(&file);
+    let report = semantic::analyze(&whole, &file);
     assert!(report.errors.is_empty(), "unsyn.us: {:#?}", report.errors);
 
-    let mut builder = Builder::new(&file);
+    let mut builder = Builder::new(&whole, &file);
     builder.external(
         "IdentOrKeyword",
         proc_macro2::TokenStream::from_str("crate::scan_ident_or_keyword").unwrap(),

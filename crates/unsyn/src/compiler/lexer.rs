@@ -142,14 +142,6 @@ where
     Ok(whole.split_to(before - input.len()))
 }
 
-impl<I: UnsynInput> IdentOrKeyword<I> {
-    /// The whole of the name.
-    #[inline]
-    pub fn text(&self) -> String {
-        self.0.as_str().to_owned()
-    }
-}
-
 // ---------------------------------------------------------------------------
 // `lexer RawIdent -> 'r#' IdentOrKeyword;`
 // `lexer NonKeywordIdent -> IdentOrKeyword except Keywords;`
@@ -178,14 +170,6 @@ where
     /// The name the sigil marks, read as a name and not as a word, which is
     /// what lets a raw name be a word of the language.
     pub name: IdentOrKeyword<I>,
-}
-
-impl<I: UnsynInput> RawIdent<I> {
-    /// The whole of the name, sigil and all.
-    #[inline]
-    pub fn text(&self) -> String {
-        self.sigil.as_str().to_owned() + self.name.0.as_str()
-    }
 }
 
 /// A name that is not a word of the language.
@@ -241,17 +225,6 @@ where
     Raw(RawIdent<I>),
     /// A name that is no word of the language.
     NonKeyword(NonKeywordIdent<I>),
-}
-
-impl<I: UnsynInput> Ident<I> {
-    /// The text of the name, sigil and all.
-    #[inline]
-    pub fn text(&self) -> String {
-        match self {
-            Ident::Raw(raw) => raw.text(),
-            Ident::NonKeyword(ident) => ident.0.as_str().to_owned(),
-        }
-    }
 }
 
 // ---------------------------------------------------------------------------
@@ -402,15 +375,6 @@ impl<I: UnsynInput> LitDec<I> {
 
         digits.parse::<u32>().ok()
     }
-
-    /// The text of the literal, underscores and all.
-    pub fn text(&self) -> String {
-        let mut text = String::from(self.head.0.as_str());
-
-        text.push_str(self.tail.as_str());
-
-        text
-    }
 }
 
 // ---------------------------------------------------------------------------
@@ -484,17 +448,6 @@ impl<I: UnsynInput> LitUnicode<I> {
         u32::from_str_radix(&digits, 16)
             .ok()
             .and_then(char::from_u32)
-    }
-
-    /// The text of the literal, `U+` and all.
-    pub fn text(&self) -> String {
-        let mut text = String::from(self.prefix.as_str());
-
-        for digit in &self.digits {
-            text.push_str(digit.0.as_str());
-        }
-
-        text
     }
 }
 
@@ -574,20 +527,6 @@ impl<I: UnsynInput> AsciiEscape<I> {
             AsciiEscape::Zero(_) => '\0',
         }
     }
-
-    /// The text of the escape, as it was written.
-    pub fn text(&self) -> String {
-        match self {
-            AsciiEscape::Hex { marker, oct, hex } => {
-                format!("{}{}{}", marker.as_str(), oct.0.as_str(), hex.0.as_str())
-            }
-            AsciiEscape::N(word)
-            | AsciiEscape::R(word)
-            | AsciiEscape::T(word)
-            | AsciiEscape::Backslash(word)
-            | AsciiEscape::Zero(word) => word.as_str().to_owned(),
-        }
-    }
 }
 
 /// An escape of a code point, as `\u{1F600}` is.
@@ -656,19 +595,6 @@ impl<I: UnsynInput> UnicodeEscape<I> {
         u32::from_str_radix(&digits, 16)
             .ok()
             .and_then(char::from_u32)
-    }
-
-    /// The text of the escape, as it was written.
-    pub fn text(&self) -> String {
-        let mut text = String::from(self.marker.as_str());
-
-        for digit in &self.digits {
-            text.push_str(digit.0.as_str());
-        }
-
-        text.push_str(self.close.as_str());
-
-        text
     }
 }
 
@@ -762,16 +688,6 @@ impl<I: UnsynInput> LitStr<I> {
     pub fn chars(&self) -> Vec<char> {
         self.decoded().chars
     }
-
-    /// The text of the literal, both quotes and all, as it was written.
-    pub fn text(&self) -> String {
-        let mut text = String::from(self.open.as_str());
-
-        text.push_str(self.body.as_str());
-
-        text.push_str(self.close.as_str());
-        text
-    }
 }
 
 // ---------------------------------------------------------------------------
@@ -800,14 +716,6 @@ where
     /// refused character arrives at, and nothing below it says more.
     #[parserc(take_while = stays_on_the_line)]
     pub body: I,
-}
-
-impl<I: UnsynInput> InnerLineDoc<I> {
-    /// The text of the document, as it was written.
-    #[inline]
-    pub fn text(&self) -> String {
-        self.open.as_str().to_owned() + self.body.as_str()
-    }
 }
 
 /// A line document that describes the definition after it.
@@ -853,14 +761,6 @@ where
     _ = body.ok().parse(input)?;
 
     Ok(whole.split_to(before - input.len()))
-}
-
-impl<I: UnsynInput> OuterLineDoc<I> {
-    /// The text of the document, as it was written.
-    #[inline]
-    pub fn text(&self) -> String {
-        self.open.as_str().to_owned() + self.body.as_str()
-    }
 }
 
 // ---------------------------------------------------------------------------
@@ -1116,38 +1016,6 @@ pub struct BlockCommentOrDoc<I>(pub I)
 where
     I: UnsynInput;
 
-/// The text of a block group, as it was written.
-///
-/// The four forms answer for their text the same way, so this is what each
-/// `text` of the family is.
-impl<I: UnsynInput> BlockComment<I> {
-    /// The text of the comment, as it was written.
-    pub fn text(&self) -> String {
-        self.0.as_str().to_owned()
-    }
-}
-
-impl<I: UnsynInput> InnerBlockDoc<I> {
-    /// The text of the document, as it was written.
-    pub fn text(&self) -> String {
-        self.0.as_str().to_owned()
-    }
-}
-
-impl<I: UnsynInput> OuterBlockDoc<I> {
-    /// The text of the document, as it was written.
-    pub fn text(&self) -> String {
-        self.0.as_str().to_owned()
-    }
-}
-
-impl<I: UnsynInput> BlockCommentOrDoc<I> {
-    /// The text of the group, as it was written.
-    pub fn text(&self) -> String {
-        self.0.as_str().to_owned()
-    }
-}
-
 #[cfg(test)]
 mod tests {
 
@@ -1156,6 +1024,7 @@ mod tests {
 
     use super::*;
     use crate::compiler::input::TokenStream;
+    use parserc::as_str;
 
     /// Parses `source` as the node `T`.
     fn parse<'a, T>(source: &'a str) -> Result<T, UnsynError>
@@ -1165,149 +1034,20 @@ mod tests {
         TokenStream::from(source).parse::<T>()
     }
 
-    /// The text a node of this module read.
-    fn text<T>(node: &T) -> String
+    /// The text a node read, taken from the source under its span.
+    ///
+    /// The tests ask this of a node they parse from a literal source, and the
+    /// answer comes from the span rather than from the parts the node kept:
+    /// that is the property worth pinning, since a node rebuilt from its fields
+    /// agrees with its span only while those lie flush, and nothing but a check
+    /// like this one says whether they do.
+    fn text<'a, T>(source: &'a str) -> String
     where
-        T: ToText,
+        T: Syntax<TokenStream<'a>> + ToSpan,
     {
-        node.text()
-    }
+        let whole = TokenStream::from(source);
 
-    trait ToText {
-        fn text(&self) -> String;
-    }
-
-    /// Pins the text of every node that is one run of text of its own.
-    macro_rules! holds_its_own_text {
-        ($($name:ident),* $(,)?) => {
-            $(
-                impl ToText for $name<TokenStream<'_>> {
-                    #[inline]
-                    fn text(&self) -> String {
-                        self.0.as_str().to_owned()
-                    }
-                }
-            )*
-        };
-    }
-
-    holds_its_own_text!(
-        S,
-        LF,
-        CR,
-        IdentOrKeyword,
-        OctDigit,
-        DecDigit,
-        HexDigit,
-        QuoteEscape,
-    );
-
-    // The nodes that are modelled as the shapes their right sides write answer
-    // for their text from those shapes.
-
-    impl ToText for RawIdent<TokenStream<'_>> {
-        #[inline]
-        fn text(&self) -> String {
-            self.text()
-        }
-    }
-
-    impl ToText for NonKeywordIdent<TokenStream<'_>> {
-        #[inline]
-        fn text(&self) -> String {
-            self.0.as_str().to_owned()
-        }
-    }
-
-    impl ToText for LeadingKeywords<TokenStream<'_>> {
-        #[inline]
-        fn text(&self) -> String {
-            self.word().to_owned()
-        }
-    }
-
-    impl ToText for FollowingKeywords<TokenStream<'_>> {
-        #[inline]
-        fn text(&self) -> String {
-            self.word().to_owned()
-        }
-    }
-
-    impl ToText for LitDec<TokenStream<'_>> {
-        #[inline]
-        fn text(&self) -> String {
-            self.text()
-        }
-    }
-
-    impl ToText for LitUnicode<TokenStream<'_>> {
-        #[inline]
-        fn text(&self) -> String {
-            self.text()
-        }
-    }
-
-    impl ToText for AsciiEscape<TokenStream<'_>> {
-        #[inline]
-        fn text(&self) -> String {
-            self.text()
-        }
-    }
-
-    impl ToText for UnicodeEscape<TokenStream<'_>> {
-        #[inline]
-        fn text(&self) -> String {
-            self.text()
-        }
-    }
-
-    impl ToText for LitStr<TokenStream<'_>> {
-        #[inline]
-        fn text(&self) -> String {
-            self.text()
-        }
-    }
-
-    impl ToText for BlockComment<TokenStream<'_>> {
-        #[inline]
-        fn text(&self) -> String {
-            self.text()
-        }
-    }
-
-    impl ToText for InnerBlockDoc<TokenStream<'_>> {
-        #[inline]
-        fn text(&self) -> String {
-            self.text()
-        }
-    }
-
-    impl ToText for OuterBlockDoc<TokenStream<'_>> {
-        #[inline]
-        fn text(&self) -> String {
-            self.text()
-        }
-    }
-
-    impl ToText for BlockCommentOrDoc<TokenStream<'_>> {
-        #[inline]
-        fn text(&self) -> String {
-            self.text()
-        }
-    }
-
-    impl ToText for InnerLineDoc<TokenStream<'_>> {
-        #[inline]
-        fn text(&self) -> String {
-            self.text()
-        }
-    }
-
-    impl ToText for OuterLineDoc<TokenStream<'_>> {
-        #[inline]
-        fn text(&self) -> String {
-            self.text()
-        }
+        as_str(&whole, &parse::<T>(source).expect(source)).to_owned()
     }
 
     #[test]
@@ -1327,8 +1067,8 @@ mod tests {
         }
 
         // The run is greedy, and it takes the whole of what the text offers.
-        assert_eq!(text(&parse::<S<_>>(" \n\t ").unwrap()), " \n\t ");
-        assert_eq!(text(&parse::<S<_>>("  x").unwrap()), "  ");
+        assert_eq!(text::<S<_>>(" \n\t "), " \n\t ");
+        assert_eq!(text::<S<_>>("  x"), "  ");
 
         // A run of nothing at all is not a run.
         assert!(parse::<S<_>>("x").is_err());
@@ -1336,19 +1076,19 @@ mod tests {
 
     #[test]
     fn a_line_ending_is_its_own_token() {
-        assert_eq!(text(&parse::<LF<_>>("\n").unwrap()), "\n");
+        assert_eq!(text::<LF<_>>("\n"), "\n");
         assert!(parse::<LF<_>>("\r").is_err());
-        assert_eq!(text(&parse::<CR<_>>("\r").unwrap()), "\r");
+        assert_eq!(text::<CR<_>>("\r"), "\r");
     }
 
     #[test]
     fn a_name_is_a_start_and_a_run() {
         for source in ["x", "_", "XID_Continue", "a1", "café"] {
-            assert_eq!(text(&parse::<IdentOrKeyword<_>>(source).unwrap()), source);
+            assert_eq!(text::<IdentOrKeyword<_>>(source), source);
         }
 
         // A name starts where a continuing character cannot.
-        assert_eq!(text(&parse::<IdentOrKeyword<_>>("_a-b").unwrap()), "_a");
+        assert_eq!(text::<IdentOrKeyword<_>>("_a-b"), "_a");
         assert!(parse::<IdentOrKeyword<_>>("1a").is_err());
         assert!(parse::<IdentOrKeyword<_>>("-a").is_err());
     }
@@ -1356,10 +1096,10 @@ mod tests {
     #[test]
     fn a_keyword_is_a_word_whatever_stands_behind_it() {
         for word in ["lexer", "syntax", "whitespace"] {
-            assert_eq!(text(&parse::<LeadingKeywords<_>>(word).unwrap()), word);
+            assert_eq!(text::<LeadingKeywords<_>>(word), word);
         }
         for word in ["concat", "except", "followed"] {
-            assert_eq!(text(&parse::<FollowingKeywords<_>>(word).unwrap()), word);
+            assert_eq!(text::<FollowingKeywords<_>>(word), word);
         }
 
         // The rule writes a word and nothing else, so the word is read wherever
@@ -1367,14 +1107,8 @@ mod tests {
         // about it — the `except` that keeps the words out of the names, and the
         // name that has to follow the word — that decide what the rest of the
         // text is.
-        assert_eq!(
-            text(&parse::<LeadingKeywords<_>>("lexerX").unwrap()),
-            "lexer"
-        );
-        assert_eq!(
-            text(&parse::<FollowingKeywords<_>>("excepting").unwrap()),
-            "except"
-        );
+        assert_eq!(text::<LeadingKeywords<_>>("lexerX"), "lexer");
+        assert_eq!(text::<FollowingKeywords<_>>("excepting"), "except");
 
         // Where no word of the set begins at all, it is the set that the
         // position is missing. Both sets are asked, since each names itself
@@ -1422,14 +1156,14 @@ mod tests {
         }
 
         for source in ["WHITESPACE_", "_x", "lexerX", "xlet", "syntaxes"] {
-            assert_eq!(text(&parse::<NonKeywordIdent<_>>(source).unwrap()), source);
+            assert_eq!(text::<NonKeywordIdent<_>>(source), source);
         }
     }
 
     #[test]
     fn a_raw_name_may_be_a_word_of_the_language() {
-        assert_eq!(text(&parse::<RawIdent<_>>("r#where").unwrap()), "r#where");
-        assert_eq!(text(&parse::<RawIdent<_>>("r#lexer").unwrap()), "r#lexer");
+        assert_eq!(text::<RawIdent<_>>("r#where"), "r#where");
+        assert_eq!(text::<RawIdent<_>>("r#lexer"), "r#lexer");
         assert!(parse::<RawIdent<_>>("r#1").is_err());
 
         // The raw form is read first, because `NonKeywordIdent` would settle for
@@ -1443,10 +1177,10 @@ mod tests {
 
     #[test]
     fn the_digits_of_the_sets_are_one_character() {
-        assert_eq!(text(&parse::<OctDigit<_>>("7").unwrap()), "7");
+        assert_eq!(text::<OctDigit<_>>("7"), "7");
         assert!(parse::<OctDigit<_>>("8").is_err());
-        assert_eq!(text(&parse::<DecDigit<_>>("9").unwrap()), "9");
-        assert_eq!(text(&parse::<HexDigit<_>>("f").unwrap()), "f");
+        assert_eq!(text::<DecDigit<_>>("9"), "9");
+        assert_eq!(text::<HexDigit<_>>("f"), "f");
         assert!(parse::<HexDigit<_>>("g").is_err());
 
         // A set is one character, so it takes no second one.
@@ -1459,27 +1193,30 @@ mod tests {
     #[test]
     fn a_decimal_literal_separates_with_underscores() {
         for source in ["0", "12", "1_000", "1_2_3_4"] {
-            assert_eq!(text(&parse::<LitDec<_>>(source).unwrap()), source);
+            assert_eq!(text::<LitDec<_>>(source), source);
         }
 
         // An underscore cannot open the literal, and a run of digits ends where
         // a name would continue.
         assert!(parse::<LitDec<_>>("_1").is_err());
-        assert_eq!(text(&parse::<LitDec<_>>("12x").unwrap()), "12");
+        assert_eq!(text::<LitDec<_>>("12x"), "12");
     }
 
     #[test]
     fn a_unicode_literal_is_exactly_four_digits() {
-        assert_eq!(text(&parse::<LitUnicode<_>>("U+2029").unwrap()), "U+2029");
+        assert_eq!(text::<LitUnicode<_>>("U+2029"), "U+2029");
 
         // Four digits is the whole token. A fifth is not a miswritten literal
         // but the text that follows it, which is what the bound says and what
         // the generated reading of the same rule does — the two parsers have
         // to accept one language for a spec to compile itself.
+        let whole = TokenStream::from("U+11234");
         let mut input = TokenStream::from("U+11234");
         let lit = input.parse::<LitUnicode<_>>().unwrap();
         assert_eq!(lit.to_span(), Span::Range(0..6));
-        assert_eq!(lit.text(), "U+1123");
+        // The text is the source under the span, read through the stream rather
+        // than rebuilt from the prefix and the four digits the node kept.
+        assert_eq!(as_str(&whole, &lit), "U+1123");
         assert_eq!(input.as_str(), "4");
 
         // Fewer than four is the literal written short. The span covers the
@@ -1511,10 +1248,10 @@ mod tests {
     #[test]
     fn an_ascii_escape_is_seven_bits() {
         for source in ["\\n", "\\r", "\\t", "\\\\", "\\0"] {
-            assert_eq!(text(&parse::<AsciiEscape<_>>(source).unwrap()), source);
+            assert_eq!(text::<AsciiEscape<_>>(source), source);
         }
 
-        assert_eq!(text(&parse::<AsciiEscape<_>>("\\x7F").unwrap()), "\\x7F");
+        assert_eq!(text::<AsciiEscape<_>>("\\x7F"), "\\x7F");
 
         // The two digits of the escape are the escape's own once its marker has
         // been read: whatever stands where a digit must is a written escape
@@ -1530,13 +1267,13 @@ mod tests {
             );
         }
 
-        assert_eq!(text(&parse::<QuoteEscape<_>>(r"\'").unwrap()), r"\'");
+        assert_eq!(text::<QuoteEscape<_>>(r"\'"), r"\'");
     }
 
     #[test]
     fn a_unicode_escape_is_one_to_six_digits() {
         for source in ["\\u{1}", "\\u{1F600}", "\\u{abcdef}"] {
-            assert_eq!(text(&parse::<UnicodeEscape<_>>(source).unwrap()), source);
+            assert_eq!(text::<UnicodeEscape<_>>(source), source);
         }
 
         // No digits at all is the lower bound of the escape refusing its own
@@ -1595,13 +1332,13 @@ mod tests {
             "'a\nb'",
             "'U+0041'",
         ] {
-            assert_eq!(text(&parse::<LitStr<_>>(source).unwrap()), source);
+            assert_eq!(text::<LitStr<_>>(source), source);
         }
 
         // A double quote is nothing special here, and a bare apostrophe closes
         // the literal wherever it stands.
-        assert_eq!(text(&parse::<LitStr<_>>("'\"'").unwrap()), "'\"'");
-        assert_eq!(text(&parse::<LitStr<_>>("'a'b'").unwrap()), "'a'");
+        assert_eq!(text::<LitStr<_>>("'\"'"), "'\"'");
+        assert_eq!(text::<LitStr<_>>("'a'b'"), "'a'");
 
         // A body that runs to the end of the input, and a `CR` that is no piece
         // of a body, both end the reading where they stand: what was asked for
@@ -1636,30 +1373,21 @@ mod tests {
 
     #[test]
     fn a_line_document_ends_at_either_line_ending() {
+        assert_eq!(text::<InnerLineDoc<_>>("//! about\nnext"), "//! about");
+        assert_eq!(text::<InnerLineDoc<_>>("//!about\r\nnext"), "//!about");
         assert_eq!(
-            text(&parse::<InnerLineDoc<_>>("//! about\nnext").unwrap()),
-            "//! about"
-        );
-        assert_eq!(
-            text(&parse::<InnerLineDoc<_>>("//!about\r\nnext").unwrap()),
-            "//!about"
-        );
-        assert_eq!(
-            text(&parse::<InnerLineDoc<_>>("//!").unwrap()),
+            text::<InnerLineDoc<_>>("//!"),
             "//!",
             "the body of a line document is optional"
         );
 
-        assert_eq!(
-            text(&parse::<OuterLineDoc<_>>("/// about").unwrap()),
-            "/// about"
-        );
-        assert_eq!(text(&parse::<OuterLineDoc<_>>("///").unwrap()), "///");
+        assert_eq!(text::<OuterLineDoc<_>>("/// about"), "/// about");
+        assert_eq!(text::<OuterLineDoc<_>>("///"), "///");
 
         // The fourth `/` is refused by `~['/']`, which leaves the body of the
         // document unfilled: the document is its three slashes, and whatever
         // stands after them belongs to the file to read.
-        assert_eq!(text(&parse::<OuterLineDoc<_>>("////").unwrap()), "///");
+        assert_eq!(text::<OuterLineDoc<_>>("////"), "///");
     }
 
     /// The table of the forms a comment takes, which the third character
@@ -1675,8 +1403,8 @@ mod tests {
 
         for &(source, expected) in cases {
             assert_eq!(
-                parse::<BlockComment<_>>(source).map(|node| text(&node)),
-                Ok(expected.to_string()),
+                text::<BlockComment<_>>(source),
+                expected.to_string(),
                 "{source}"
             );
             assert!(parse::<BlockCommentOrDoc<_>>(source).is_ok(), "{source}");
@@ -1692,7 +1420,7 @@ mod tests {
         // `/*/*/ */` opens twice and closes once.
         assert!(parse::<BlockComment<_>>("/*/*/ */").is_err());
         // A lone `/` is only text, so this one does close.
-        assert_eq!(text(&parse::<BlockComment<_>>("/*/ */").unwrap()), "/*/ */");
+        assert_eq!(text::<BlockComment<_>>("/*/ */"), "/*/ */");
     }
 
     #[test]
@@ -1754,15 +1482,15 @@ mod tests {
             "/** a /* b /* c */ d */ e */",
         ] {
             assert_eq!(
-                parse::<BlockCommentOrDoc<_>>(source).map(|node| text(&node)),
-                Ok(source.to_string()),
+                text::<BlockCommentOrDoc<_>>(source),
+                source.to_string(),
                 "{source}"
             );
         }
 
         // The opening of three stars is the comment's, and the document of the
         // same opening never sees the fourth character.
-        assert_eq!(text(&parse::<BlockComment<_>>("/***/").unwrap()), "/***/");
+        assert_eq!(text::<BlockComment<_>>("/***/"), "/***/");
         assert!(parse::<OuterBlockDoc<_>>("/***/").is_err());
 
         // A nested group that closes the outer one leaves nothing to close the

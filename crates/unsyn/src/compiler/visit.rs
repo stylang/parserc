@@ -45,20 +45,24 @@
 //! matter and call the walk to keep going:
 //!
 //! ```
-//! use parserc::AsStr;
+//! use parserc::as_str;
 //! use unsyn::compiler::input::TokenStream;
 //! use unsyn::compiler::syntax::Stmt;
 //! use unsyn::compiler::visit::{Visit, walk};
 //!
-//! #[derive(Default)]
-//! pub struct Definitions {
+//! /// The name of a rule is the text its node covers, and reading that text
+//! /// asks the stream the tree was cut from: a visitor holds it beside its
+//! /// answers, the way the analyzer and the generator do.
+//! pub struct Definitions<'a> {
+//!     /// The source every node of the tree was read from.
+//!     pub source: TokenStream<'a>,
 //!     /// The name of every rule the file defines, in the order it defined them.
 //!     pub names: Vec<String>,
 //! }
 //!
-//! impl<'ast> Visit<'ast, TokenStream<'ast>> for Definitions {
+//! impl<'a, 'ast> Visit<'ast, TokenStream<'ast>> for Definitions<'a> {
 //!     fn visit_stmt(&mut self, node: &'ast Stmt<TokenStream<'ast>>) {
-//!         self.names.push(node.ident.text());
+//!         self.names.push(as_str(&self.source, &node.ident).to_owned());
 //!         walk::walk_stmt(self, node);
 //!     }
 //! }
@@ -1121,7 +1125,7 @@ pub mod walk {
 mod tests {
 
     use parserc::ToSpan;
-    use parserc::{AsStr, Input, Span, syntax::SyntaxInput};
+    use parserc::{AsStr, Input, Span, as_str, syntax::SyntaxInput};
 
     use super::{Visit, walk};
     use crate::compiler::input::TokenStream;
@@ -1184,17 +1188,18 @@ mod tests {
 
     #[test]
     fn a_visitor_reaches_every_definition_of_a_file() {
-        #[derive(Default)]
-        struct Definitions {
+        struct Definitions<'a> {
+            source: TokenStream<'a>,
             keywords: Vec<&'static str>,
             names: Vec<String>,
             patterns: usize,
         }
 
-        impl<'ast> Visit<'ast, TokenStream<'ast>> for Definitions {
+        impl<'a, 'ast> Visit<'ast, TokenStream<'ast>> for Definitions<'a> {
             fn visit_stmt(&mut self, node: &'ast Stmt<TokenStream<'ast>>) {
                 self.keywords.push(node.keyword.word());
-                self.names.push(node.ident.text());
+                self.names
+                    .push(as_str(&self.source, &node.ident).to_owned());
                 walk::walk_stmt(self, node);
             }
 
@@ -1207,7 +1212,12 @@ mod tests {
         // the pattern never reaches the tokens inside it.
         let source = "lexer LF -> U+000A;\nwhitespace S -> [' '];\nsyntax Item -> LF | S;\n";
         let tree = file(source);
-        let mut seen = Definitions::default();
+        let mut seen = Definitions {
+            source: TokenStream::from(source),
+            keywords: Vec::new(),
+            names: Vec::new(),
+            patterns: 0,
+        };
         seen.visit_crate(&tree);
 
         assert_eq!(seen.keywords, ["lexer", "whitespace", "syntax"]);

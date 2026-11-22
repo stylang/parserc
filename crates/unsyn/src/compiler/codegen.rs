@@ -173,7 +173,7 @@
 
 use std::collections::{HashMap, HashSet};
 
-use parserc::{Span, ToSpan};
+use parserc::{Span, ToSpan, as_str};
 use proc_macro2::{Ident, Literal, TokenStream, TokenTree};
 use quote::{ToTokens, format_ident, quote};
 use unicode_ident::{is_xid_continue, is_xid_start};
@@ -198,6 +198,7 @@ pub struct Builder<'a, I>
 where
     I: UnsynInput,
 {
+    source: &'a I,
     file: &'a syntax::Crate<I>,
     external: HashMap<String, TokenStream>,
 }
@@ -206,10 +207,18 @@ impl<'a, I> Builder<'a, I>
 where
     I: UnsynInput,
 {
-    /// Prepares to generate the code of `file`.
+    /// Prepares to generate the code of `file`, which was read out of `source`.
+    ///
+    /// `source` is the input `file` was parsed from, at the position it had
+    /// before anything was read. It is needed because a name is a token and a
+    /// token holds only its own text: to read what an `Ident` was written as,
+    /// which for the raw form is the sigil *and* the name behind it, the read
+    /// has to come from a stream that reaches across both — and the only such
+    /// stream is the whole one the file came from.
     #[inline]
-    pub fn new(file: &'a syntax::Crate<I>) -> Self {
+    pub fn new(source: &'a I, file: &'a syntax::Crate<I>) -> Self {
         Self {
+            source,
             file,
             external: HashMap::new(),
         }
@@ -250,12 +259,13 @@ where
     /// name the file never declares, for instance, is refused there and not here,
     /// and the code written for it then names a type that is not.
     pub fn build(&self) -> Result<TokenStream, UnsynError> {
-        let denotations = denotations(self.file);
-        let nodes = node_rules(self.file);
-        let trivia = trivia_rule(self.file);
-        let syntaxes = syntax_rules(self.file);
+        let denotations = denotations(self.source, self.file);
+        let nodes = node_rules(self.source, self.file);
+        let trivia = trivia_rule(self.source, self.file);
+        let syntaxes = syntax_rules(self.source, self.file);
 
         let mut generator = Generator {
+            source: self.source,
             file: self.file,
             external: &self.external,
             denotations: &denotations,
@@ -285,7 +295,7 @@ where
 ///
 /// A file without the declaration has no trivia, and the sequences of its
 /// nodes are written without a run between any two of their operands.
-fn trivia_rule<I>(file: &syntax::Crate<I>) -> Option<String>
+fn trivia_rule<I>(source: &I, file: &syntax::Crate<I>) -> Option<String>
 where
     I: UnsynInput,
 {
@@ -294,12 +304,12 @@ where
             return None;
         };
 
-        matches!(stmt.decl(), Decl::Whitespace).then(|| stmt.ident.text())
+        matches!(stmt.decl(), Decl::Whitespace).then(|| as_str(source, &stmt.ident).to_owned())
     })
 }
 
 /// The keys of the file's `syntax` rules, which a `Box` reaches.
-fn syntax_rules<I>(file: &syntax::Crate<I>) -> HashSet<String>
+fn syntax_rules<I>(source: &I, file: &syntax::Crate<I>) -> HashSet<String>
 where
     I: UnsynInput,
 {
@@ -310,7 +320,7 @@ where
                 return None;
             };
 
-            matches!(stmt.decl(), Decl::Syntax).then(|| external_key(stmt.ident.text().as_str()))
+            matches!(stmt.decl(), Decl::Syntax).then(|| external_key(as_str(source, &stmt.ident)))
         })
         .collect()
 }
@@ -414,7 +424,7 @@ fn written_name(text: &str) -> Ident {
 /// another alternative is still a word the author meant, and a caller that
 /// cannot tell the two apart cannot tell an operand that reads no word from a
 /// name that was taken.
-pub(crate) fn variant_offers<I>(expr: &syntax::Expr<I>) -> Vec<Option<String>>
+pub(crate) fn variant_offers<I>(source: &I, expr: &syntax::Expr<I>) -> Vec<Option<String>>
 where
     I: UnsynInput,
 {
@@ -423,7 +433,7 @@ where
             // A single rule names its variant by the rule; anything else offers
             // the word it reads, if it reads one at all.
             match one_reference(branch) {
-                Some(ident) => Some(ident.text()),
+                Some(ident) => Some(as_str(source, ident).to_owned()),
                 None => variant_word(branch).map(|word| capitalize(&word)),
             }
         })
@@ -440,14 +450,14 @@ where
 /// does, in one place, and the analyzer asks the same function — so a warning
 /// can neither promise a name the code declines to write nor stay silent about
 /// one the code declines.
-pub(crate) fn variant_names<I>(expr: &syntax::Expr<I>) -> Vec<Option<String>>
+pub(crate) fn variant_names<I>(source: &I, expr: &syntax::Expr<I>) -> Vec<Option<String>>
 where
     I: UnsynInput,
 {
     let mut taken: HashSet<String> = HashSet::new();
     let mut names = Vec::new();
 
-    for candidate in variant_offers(expr) {
+    for candidate in variant_offers(source, expr) {
         // A word is the variant's name only where an item can wear it and no
         // alternative wore it first; failing either, the variant is called by
         // its place, and this says so rather than inventing a name.
@@ -494,7 +504,7 @@ fn variant_ident(names: &[Option<String>], index: usize) -> Result<Ident, UnsynE
 /// reads a choice whose other parts then have to be text too, and what is
 /// settled for one rule is a fact about the file rather than about the order
 /// the file declares its rules in.
-fn node_rules<I>(file: &syntax::Crate<I>) -> HashSet<String>
+fn node_rules<I>(source: &I, file: &syntax::Crate<I>) -> HashSet<String>
 where
     I: UnsynInput,
 {
@@ -538,7 +548,7 @@ where
             Shape::Text
         };
 
-        shapes.insert(external_key(stmt.ident.text().as_str()), shape);
+        shapes.insert(external_key(as_str(source, &stmt.ident)), shape);
     }
 
     loop {
@@ -551,7 +561,7 @@ where
 
             let Some(stmt) = file.items.iter().find_map(|item| match item {
                 syntax::Item::Stmt(stmt) => {
-                    (&external_key(stmt.ident.text().as_str()) == key).then_some(stmt)
+                    (&external_key(as_str(source, &stmt.ident)) == key).then_some(stmt)
                 }
                 _ => None,
             }) else {
@@ -571,7 +581,7 @@ where
             // a name it reaches for its text. What does is a set read one
             // character at a time, the operand a removal is written over, and
             // the group whose whole answer is one name.
-            expr_forced(&stmt.expr, &mut forced);
+            expr_forced(source, &stmt.expr, &mut forced);
         }
 
         let mut changed = false;
@@ -640,49 +650,49 @@ where
 /// answer: the alternatives it folds, the member of a set read as a choice of
 /// characters, the group whose whole answer is one name, and the operand a
 /// removal is written over.
-fn expr_forced<I>(expr: &syntax::Expr<I>, forced: &mut HashSet<String>)
+fn expr_forced<I>(source: &I, expr: &syntax::Expr<I>, forced: &mut HashSet<String>)
 where
     I: UnsynInput,
 {
     for branch in expr.branches() {
         for element in branch.elements() {
-            operand_forced(element, forced);
+            operand_forced(source, element, forced);
         }
     }
 }
 
-fn operand_forced<I>(operand: &syntax::ExprNoTopAlt<I>, forced: &mut HashSet<String>)
+fn operand_forced<I>(source: &I, operand: &syntax::ExprNoTopAlt<I>, forced: &mut HashSet<String>)
 where
     I: UnsynInput,
 {
     match operand {
-        syntax::ExprNoTopAlt::WithoutSuffix(atom) => atom_forced(atom, forced),
+        syntax::ExprNoTopAlt::WithoutSuffix(atom) => atom_forced(source, atom, forced),
         syntax::ExprNoTopAlt::WithSuffix(suffix) => match suffix {
-            syntax::ExprWithSuffix::Grouped { target, .. } => atom_forced(target, forced),
+            syntax::ExprWithSuffix::Grouped { target, .. } => atom_forced(source, target, forced),
             syntax::ExprWithSuffix::Concat {
                 target,
                 suffix: next,
                 ..
             } => {
-                atom_forced(target, forced);
-                operand_forced(next, forced);
+                atom_forced(source, target, forced);
+                operand_forced(source, next, forced);
             }
             // What follows is only probed, and its answer thrown away: the
             // probe asks the shape of the answer of nothing. What a removal is
             // written over is the one operand whose text is read back.
-            syntax::ExprWithSuffix::Followed { target, .. } => atom_forced(target, forced),
+            syntax::ExprWithSuffix::Followed { target, .. } => atom_forced(source, target, forced),
             syntax::ExprWithSuffix::Except { target, tokens, .. } => {
                 if let syntax::ExprWithoutSuffix::Reference(ident) = target {
-                    forced.insert(external_key(ident.text().as_str()));
+                    forced.insert(external_key(as_str(source, ident)));
                 }
 
-                atom_forced(tokens, forced);
+                atom_forced(source, tokens, forced);
             }
         },
     }
 }
 
-fn atom_forced<I>(atom: &syntax::ExprWithoutSuffix<I>, forced: &mut HashSet<String>)
+fn atom_forced<I>(source: &I, atom: &syntax::ExprWithoutSuffix<I>, forced: &mut HashSet<String>)
 where
     I: UnsynInput,
 {
@@ -719,9 +729,9 @@ where
                     .elements()
                     .next()
             {
-                forced.insert(external_key(ident.text().as_str()));
+                forced.insert(external_key(as_str(source, ident)));
             } else {
-                expr_forced(group, forced);
+                expr_forced(source, group, forced);
             }
         }
         // A set of more than one member is a choice of its members, and a
@@ -731,7 +741,7 @@ where
         {
             for item in set_items(set) {
                 if let syntax::SetItem::Reference(ident) = item {
-                    forced.insert(external_key(ident.text().as_str()));
+                    forced.insert(external_key(as_str(source, ident)));
                 }
             }
         }
@@ -777,7 +787,7 @@ impl Arm {
 /// nests itself is absent until it is settled, which it never is. The round that
 /// adds nothing ends the count, so the answer does not depend on the order the
 /// file declares its rules in.
-fn denotations<I>(file: &syntax::Crate<I>) -> HashMap<String, Vec<Arm>>
+fn denotations<I>(source: &I, file: &syntax::Crate<I>) -> HashMap<String, Vec<Arm>>
 where
     I: UnsynInput,
 {
@@ -788,7 +798,7 @@ where
             // A `syntax` rule is no character to be a member of a set of one, and
             // is only ever asked of a file that is refused before it is read.
             if matches!(stmt.decl(), Decl::Whitespace | Decl::Lexer) {
-                bodies.push((stmt.ident.text(), &stmt.expr));
+                bodies.push((as_str(source, &stmt.ident).to_owned(), &stmt.expr));
             }
         }
     }
@@ -803,7 +813,7 @@ where
                 continue;
             }
 
-            if let Some(arms) = expr_arms(body, &known) {
+            if let Some(arms) = expr_arms(source, body, &known) {
                 known.insert(name.clone(), arms);
                 settled = true;
             }
@@ -816,7 +826,11 @@ where
 }
 
 /// The characters the pattern denotes, when a set of them is all it denotes.
-fn expr_arms<I>(expr: &syntax::Expr<I>, known: &HashMap<String, Vec<Arm>>) -> Option<Vec<Arm>>
+fn expr_arms<I>(
+    source: &I,
+    expr: &syntax::Expr<I>,
+    known: &HashMap<String, Vec<Arm>>,
+) -> Option<Vec<Arm>>
 where
     I: UnsynInput,
 {
@@ -833,7 +847,7 @@ where
             return None;
         };
 
-        arms.extend(atom_arms(operand, known)?);
+        arms.extend(atom_arms(source, operand, known)?);
     }
 
     Some(arms)
@@ -841,6 +855,7 @@ where
 
 /// The characters the operand denotes, when a set of them is all it denotes.
 fn atom_arms<I>(
+    source: &I,
     atom: &syntax::ExprWithoutSuffix<I>,
     known: &HashMap<String, Vec<Arm>>,
 ) -> Option<Vec<Arm>>
@@ -855,9 +870,9 @@ where
             _ => None,
         },
         syntax::ExprWithoutSuffix::Unicode(lit) => Some(vec![Arm::Char(lit.value()?)]),
-        syntax::ExprWithoutSuffix::Set(set) => set_arms(set, known),
-        syntax::ExprWithoutSuffix::Paren { expr: group, .. } => expr_arms(group, known),
-        syntax::ExprWithoutSuffix::Reference(ident) => known.get(ident.text().as_str()).cloned(),
+        syntax::ExprWithoutSuffix::Set(set) => set_arms(source, set, known),
+        syntax::ExprWithoutSuffix::Paren { expr: group, .. } => expr_arms(source, group, known),
+        syntax::ExprWithoutSuffix::Reference(ident) => known.get(as_str(source, ident)).cloned(),
         // A refusal of a set is every character the universe holds besides it,
         // which is no set to list, whatever the set itself denotes.
         syntax::ExprWithoutSuffix::Tilde { .. } => None,
@@ -869,7 +884,11 @@ where
 
 /// The characters the members of the set denote, when every one of them denotes
 /// characters and no more.
-fn set_arms<I>(set: &syntax::Set<I>, known: &HashMap<String, Vec<Arm>>) -> Option<Vec<Arm>>
+fn set_arms<I>(
+    source: &I,
+    set: &syntax::Set<I>,
+    known: &HashMap<String, Vec<Arm>>,
+) -> Option<Vec<Arm>>
 where
     I: UnsynInput,
 {
@@ -884,7 +903,7 @@ where
             },
             syntax::SetItem::Unicode(lit) => arms.push(Arm::Char(lit.value()?)),
             syntax::SetItem::Reference(ident) => {
-                arms.extend(known.get(ident.text().as_str())?.iter().copied());
+                arms.extend(known.get(as_str(source, ident))?.iter().copied());
             }
         }
     }
@@ -1046,6 +1065,9 @@ where
 {
     /// The file whose code is being written.
     file: &'a syntax::Crate<I>,
+    /// The whole input `file` was read from, which a node's text is read back
+    /// through. See [`Builder::new`].
+    source: &'a I,
     /// What each external the file calls is written as.
     external: &'a HashMap<String, TokenStream>,
     /// What each name of the file denotes, of the names that denote characters.
@@ -1111,11 +1133,11 @@ where
     /// The code of one definition: the functions its pattern asked for, and the
     /// node its name declares.
     fn stmt(&mut self, stmt: &syntax::Stmt<I>) -> Result<Vec<TokenStream>, UnsynError> {
-        let text = stmt.ident.text();
-        let name = item_name(&text, stmt.ident.to_span())?;
-        let mut allow = wants_allow(&text);
+        let text = as_str(self.source, &stmt.ident);
+        let name = item_name(text, stmt.ident.to_span())?;
+        let mut allow = wants_allow(text);
 
-        self.rule = text.clone();
+        self.rule = text.to_owned();
         self.seq = 0;
         self.helpers.clear();
         self.field_no = 0;
@@ -1127,7 +1149,7 @@ where
         // option of one, the trivia between two operands, or the text of what
         // a punct or a call read.
         if matches!(stmt.decl(), Decl::Syntax) {
-            return self.syntax_item(&text, stmt);
+            return self.syntax_item(text, stmt);
         }
 
         // A `lexer` rule that is a choice of alternatives is an enum with one
@@ -1136,13 +1158,13 @@ where
         // however plain or compound the alternatives are. Which rules are
         // nodes at all was settled over the whole file first, since a rule
         // asked for among the parts of another is not written as one.
-        if self.nodes.contains(&external_key(&text)) && !stmt.expr.is_single() {
+        if self.nodes.contains(&external_key(text)) && !stmt.expr.is_single() {
             let mut variants = Vec::new();
             let mut variant_descs = Vec::new();
             // The names are settled for the whole choice before any of them is
             // worn, since which of two alternatives that offer one word gets it
             // is a question about the choice and not about either alternative.
-            let names = variant_names(&stmt.expr);
+            let names = variant_names(self.source, &stmt.expr);
 
             for (i, branch) in stmt.expr.branches().enumerate() {
                 self.field_no = 0;
@@ -1238,8 +1260,8 @@ where
 
         let code = match stmt.decl() {
             Decl::Syntax => unreachable!("a `syntax` rule is written by `syntax_item`"),
-            Decl::Whitespace => self.whitespace(&text, stmt)?,
-            Decl::Lexer => self.lexer_rule(&text, stmt)?,
+            Decl::Whitespace => self.whitespace(text, stmt)?,
+            Decl::Lexer => self.lexer_rule(text, stmt)?,
         };
 
         self.descriptors.push((
@@ -1305,7 +1327,7 @@ where
     /// The predicate of a `whitespace` rule, which is the one rule the derive of
     /// the syntax asks a function of a character rather than a parser.
     fn whitespace(&mut self, text: &str, stmt: &syntax::Stmt<I>) -> Result<Rule, UnsynError> {
-        let arms = expr_arms(&stmt.expr, self.denotations).ok_or_else(|| {
+        let arms = expr_arms(self.source, &stmt.expr, self.denotations).ok_or_else(|| {
             UnsynError::Build(BuildKind::Whitespace(text.to_owned()), stmt.expr.to_span())
         })?;
 
@@ -1463,14 +1485,14 @@ where
         bounds: Option<(usize, Option<usize>)>,
     ) -> Result<Field, UnsynError> {
         if let syntax::ExprWithoutSuffix::Reference(ident) = atom {
-            let name = ident.text();
+            let name = as_str(self.source, ident);
             let span = ident.to_span();
-            let ty = item_name(&name, span)?;
+            let ty = item_name(name, span)?;
 
             // The field's own name is settled before anything else the field
             // asks, which is what lets the rest of the building borrow the
             // generator once.
-            let field_name = self.named_field(&name);
+            let field_name = self.named_field(name);
 
             // What the reference reads is the node it names, boxed where that
             // node is one the tree can only be built through a pointer: a
@@ -1541,9 +1563,13 @@ where
     fn class_of(&self, atom: &syntax::ExprWithoutSuffix<I>) -> Option<TokenStream> {
         match atom {
             syntax::ExprWithoutSuffix::Tilde { set, .. } => {
-                set_arms(set, self.denotations).as_deref().map(refused_pred)
+                set_arms(self.source, set, self.denotations)
+                    .as_deref()
+                    .map(refused_pred)
             }
-            atom => atom_arms(atom, self.denotations).as_deref().map(class_pred),
+            atom => atom_arms(self.source, atom, self.denotations)
+                .as_deref()
+                .map(class_pred),
         }
     }
 
@@ -1726,7 +1752,7 @@ where
             // The names are settled for the whole choice before any of them is
             // worn, since which of two alternatives that offer one word gets it
             // is a question about the choice and not about either alternative.
-            let names = variant_names(body);
+            let names = variant_names(self.source, body);
 
             for (i, branch) in body.branches().enumerate() {
                 self.field_no = 0;
@@ -1869,7 +1895,7 @@ where
 
         let Some(body) = self.file.items.iter().find_map(|item| match item {
             syntax::Item::Stmt(stmt) => {
-                (external_key(stmt.ident.text().as_str()) == *key).then_some(&stmt.expr)
+                (external_key(as_str(self.source, &stmt.ident)) == *key).then_some(&stmt.expr)
             }
             _ => None,
         }) else {
@@ -1887,7 +1913,7 @@ where
                         syntax::ExprWithoutSuffix::Reference(ident),
                     )),
                     None,
-                ) => self.eats_trivia(&external_key(ident.text().as_str()), seen),
+                ) => self.eats_trivia(&external_key(as_str(self.source, ident)), seen),
                 _ => false,
             }
         })
@@ -1901,7 +1927,10 @@ where
             return true;
         };
 
-        !self.eats_trivia(&external_key(ident.text().as_str()), &mut HashSet::new())
+        !self.eats_trivia(
+            &external_key(as_str(self.source, ident)),
+            &mut HashSet::new(),
+        )
     }
 
     /// One field of an operand repeated: the shape of the operand wrapped in
@@ -2226,9 +2255,10 @@ where
         match atom {
             syntax::ExprWithoutSuffix::Reference(ident) => {
                 let ty = self.reference_type(ident)?;
+                let name = as_str(self.source, ident);
 
                 Ok(Field {
-                    name: self.named_field(ident.text().as_str()),
+                    name: self.named_field(name),
                     ty,
                     attr: None,
                 })
@@ -2264,7 +2294,7 @@ where
                 })
             }
             syntax::ExprWithoutSuffix::Call { ident: call, .. } => {
-                let name = call.text();
+                let name = as_str(self.source, call).to_owned();
 
                 let parser = self.external.get(&external_key(&name)).ok_or_else(|| {
                     UnsynError::Build(
@@ -2284,7 +2314,7 @@ where
                 // members denote, which is one test only while every member
                 // denotes characters; anything wider has no field to read
                 // into at this level.
-                let arms = set_arms(set, self.denotations)
+                let arms = set_arms(self.source, set, self.denotations)
                     .ok_or_else(|| self.unsupported(atom.to_span()))?;
 
                 let pred = match atom {
@@ -2308,10 +2338,10 @@ where
     /// node is of the tree — a cycle of the tree can only be built through a
     /// node of the tree, and the box is what makes the type finite.
     fn reference_type(&self, ident: &lexer::Ident<I>) -> Result<TokenStream, UnsynError> {
-        let text = ident.text();
-        let ty = item_name(&text, ident.to_span())?;
+        let text = as_str(self.source, ident);
+        let ty = item_name(text, ident.to_span())?;
 
-        if self.syntaxes.contains(&external_key(&text)) {
+        if self.syntaxes.contains(&external_key(text)) {
             Ok(quote! { Box<#ty<I>> })
         } else {
             Ok(quote! { #ty<I> })
@@ -2578,9 +2608,9 @@ where
     /// Whether one operand answers with the node of a rule.
     fn atom_yields_node(&self, atom: &syntax::ExprWithoutSuffix<I>) -> bool {
         match atom {
-            syntax::ExprWithoutSuffix::Reference(ident) => {
-                self.nodes.contains(&external_key(ident.text().as_str()))
-            }
+            syntax::ExprWithoutSuffix::Reference(ident) => self
+                .nodes
+                .contains(&external_key(as_str(self.source, ident))),
             // A group around one operand adds nothing to what that operand
             // answers with.
             syntax::ExprWithoutSuffix::Paren { expr: group, .. } => {
@@ -2643,7 +2673,7 @@ where
             }
             syntax::ExprWithoutSuffix::Reference(ident) => Ok(Code::Expr(self.reference(ident)?)),
             syntax::ExprWithoutSuffix::Call { ident: call, .. } => {
-                let name = call.text();
+                let name = as_str(self.source, call).to_owned();
 
                 let parser = self.external.get(&external_key(&name)).ok_or_else(|| {
                     UnsynError::Build(
@@ -2659,7 +2689,7 @@ where
             syntax::ExprWithoutSuffix::Tilde { set, .. } => {
                 // What `~` asks is answered by the character here, and takes it, so
                 // that a refusal of the set is a match of the operand.
-                if let Some(arms) = set_arms(set, self.denotations) {
+                if let Some(arms) = set_arms(self.source, set, self.denotations) {
                     let pred = refused_pred(&arms);
                     return Ok(Code::Combinator {
                         key: "next_if",
@@ -2698,7 +2728,7 @@ where
     /// where it is written, while a fold of `.or()` is a wider expression that
     /// has to be spelled out.
     fn code_of_set(&mut self, set: &syntax::Set<I>) -> Result<Code, UnsynError> {
-        if let Some(arms) = set_arms(set, self.denotations) {
+        if let Some(arms) = set_arms(self.source, set, self.denotations) {
             let pred = class_pred(&arms);
 
             return Ok(Code::Combinator {
@@ -2789,10 +2819,10 @@ where
     /// as parts of its own has no text of a field to hand — the parts are the
     /// node — and reads as itself, which is what [`node_of`] is for.
     fn reference(&self, ident: &lexer::Ident<I>) -> Result<TokenStream, UnsynError> {
-        let text = ident.text();
-        let ty = item_name(&text, ident.to_span())?;
+        let text = as_str(self.source, ident);
+        let ty = item_name(text, ident.to_span())?;
 
-        if self.nodes.contains(&external_key(&text)) {
+        if self.nodes.contains(&external_key(text)) {
             return Ok(node_of(&ty));
         }
 
@@ -2882,9 +2912,13 @@ where
             // A refusal is a class when what it refuses is one, and the class of
             // the refusal is the other half of the characters.
             syntax::ExprWithoutSuffix::Tilde { set, .. } => {
-                set_arms(set, self.denotations).as_deref().map(refused_pred)
+                set_arms(self.source, set, self.denotations)
+                    .as_deref()
+                    .map(refused_pred)
             }
-            atom => atom_arms(atom, self.denotations).as_deref().map(class_pred),
+            atom => atom_arms(self.source, atom, self.denotations)
+                .as_deref()
+                .map(class_pred),
         };
 
         if let Some(pred) = class {
@@ -3042,7 +3076,6 @@ where
             /// walk ends with.
             ///
             /// [`syn`]: https://docs.rs/syn/latest/syn/visit/index.html
-            #[rustfmt::skip]
             pub trait Visit<'ast, I>
             where
                 I: ::parserc::chars::CharsInput,
@@ -3057,15 +3090,12 @@ where
             /// The descents of the visitor, one per rule, public so that a
             /// method which does its own work can still hand the children to
             /// the visitor below it.
-            ///
-            /// The module is machine-written; the skip keeps the formatter
-            /// from rewriting the file into tokens the generator would not
-            /// have written.
-            #[rustfmt::skip]
             #[allow(clippy::needless_borrow, clippy::possible_missing_else)]
             pub mod walk {
                 // The list keeps the order the file declared its rules in,
-                // which is the order the walks below read them.
+                // which is the order the walks below read them — and the
+                // formatter sorts a list of names, so this one stands as
+                // written: a skip of the line, not of the module.
                 #[rustfmt::skip]
                 use super::{Visit, #(#names),*};
 
@@ -3884,6 +3914,7 @@ mod tests {
     /// Reads `source` as a file of the DSL, and asks the analyzer first whether
     /// it is a file a build may be trusted to read.
     fn parse(source: &str) -> syntax::Crate<Spec<'_>> {
+        let whole = Spec::from(source);
         let mut input = Spec::from(source);
 
         let tree = input
@@ -3892,10 +3923,28 @@ mod tests {
 
         assert!(input.is_empty(), "the file left text unread");
 
-        let report = semantic::analyze(&tree);
+        let report = semantic::analyze(&whole, &tree);
         assert!(report.errors.is_empty(), "{:?}", report.errors);
 
         tree
+    }
+
+    /// Reads `source` as a file and analyzes it, keeping the stream the tree
+    /// was read from so the pass can report the text a node covers.
+    ///
+    /// Unlike [`parse`], this does not insist the analysis found nothing: a
+    /// probe of what a file earns in warnings needs the report, not an assertion.
+    fn analyzed(source: &str) -> crate::compiler::errors::Diagnostics {
+        let whole = Spec::from(source);
+        let tree = {
+            let mut input = Spec::from(source);
+
+            input
+                .parse::<syntax::Crate<_>>()
+                .expect("the source should be a file of the language")
+        };
+
+        semantic::analyze(&whole, &tree)
     }
 
     /// The code the file is written as, with what the builder was given.
@@ -3903,8 +3952,9 @@ mod tests {
     /// `<IdentOrKeyword>` is bound to a scan of the module's own, which is what
     /// an external is: the code written for it reaches nothing of the file.
     fn build(source: &str) -> Result<TokenStream, UnsynError> {
+        let whole = Spec::from(source);
         let file = parse(source);
-        let mut builder = Builder::new(&file);
+        let mut builder = Builder::new(&whole, &file);
         builder.external(
             "XID_Start",
             quote! { ::parserc::next_if(::unicode_ident::is_xid_start) },
@@ -3935,6 +3985,7 @@ mod tests {
     /// The code of a file whose `syntax` rules are left out, since a `lexer` rule
     /// reaches no `syntax` one and what is left still reads.
     fn terminals(source: &str) -> String {
+        let whole = Spec::from(source);
         let file = parse(source);
 
         let terminals = syntax::Crate {
@@ -3947,7 +3998,7 @@ mod tests {
                 .collect(),
         };
 
-        let mut builder = Builder::new(&terminals);
+        let mut builder = Builder::new(&whole, &terminals);
         builder.external(
             "IdentOrKeyword",
             quote! {
@@ -4109,8 +4160,10 @@ mod tests {
 
     #[test]
     fn an_unbound_external_is_refused() {
-        let file = parse("lexer A -> <NoSuchCombinator>;");
-        let error = Builder::new(&file).build().unwrap_err();
+        let source = "lexer A -> <NoSuchCombinator>;";
+        let whole = Spec::from(source);
+        let file = parse(source);
+        let error = Builder::new(&whole, &file).build().unwrap_err();
 
         assert!(matches!(
             error,
@@ -4338,8 +4391,10 @@ mod tests {
 
     #[test]
     fn whitespace_that_denotes_no_class_is_refused() {
-        let file = parse("whitespace W -> <XID_Start>;");
-        let error = Builder::new(&file).build().unwrap_err();
+        let source = "whitespace W -> <XID_Start>;";
+        let whole = Spec::from(source);
+        let file = parse(source);
+        let error = Builder::new(&whole, &file).build().unwrap_err();
 
         assert!(matches!(
             error,
@@ -4352,8 +4407,10 @@ mod tests {
         // A call of an external, a set of more than one character's denoting,
         // and a counted bound have no type of `parserc` to stand in a group
         // of the tree, and the file that writes one is told so.
-        let file = parse("lexer A -> 'a'; syntax B -> A{2};");
-        let error = Builder::new(&file).build().unwrap_err();
+        let source = "lexer A -> 'a'; syntax B -> A{2};";
+        let whole = Spec::from(source);
+        let file = parse(source);
+        let error = Builder::new(&whole, &file).build().unwrap_err();
 
         assert!(matches!(
             error,
@@ -4363,8 +4420,10 @@ mod tests {
 
     #[test]
     fn a_name_no_item_can_wear_is_refused() {
-        let file = parse("lexer _ -> 'a';");
-        let error = Builder::new(&file).build();
+        let source = "lexer _ -> 'a';";
+        let whole = Spec::from(source);
+        let file = parse(source);
+        let error = Builder::new(&whole, &file).build();
         assert!(matches!(
             error,
             Err(UnsynError::Build(BuildKind::Name(_), _))
@@ -4405,7 +4464,7 @@ mod tests {
         assert!(soup.contains("Y"), "the word still names its variant");
 
         assert_eq!(
-            semantic::analyze(&parse("lexer A -> 'x'{2} | 'y';"))
+            analyzed("lexer A -> 'x'{2} | 'y';")
                 .lints
                 .iter()
                 .filter(|lint| lint.kind == LintKind::UnnamedAlternative)
@@ -4429,7 +4488,7 @@ mod tests {
         );
 
         assert_eq!(
-            semantic::analyze(&parse("lexer X -> 'x'; lexer A -> X | X;"))
+            analyzed("lexer X -> 'x'; lexer A -> X | X;")
                 .lints
                 .iter()
                 .filter(|lint| lint.kind == LintKind::UnnamedAlternative)
@@ -4452,7 +4511,7 @@ mod tests {
                 .parse::<syntax::Crate<_>>()
                 .expect("two names is a file of the language")
         };
-        let report = semantic::analyze(&tree);
+        let report = semantic::analyze(&Spec::from("lexer gen -> 'a'; lexer r#gen -> 'b';"), &tree);
 
         assert!(
             matches!(

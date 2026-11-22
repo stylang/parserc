@@ -45,12 +45,9 @@
 //! reads of a node is a value the node holds in its parts — a literal decoded
 //! from its digits and escapes — which no walk carries to a visitor either.
 
-use std::{
-    collections::{BTreeMap, BTreeSet},
-    marker::PhantomData,
-};
+use std::collections::{BTreeMap, BTreeSet};
 
-use parserc::{Span, ToSpan};
+use parserc::{Span, ToSpan, as_str};
 
 use super::errors::{Diagnostics, LintKind, SemanticsKind, UnsynError};
 use super::input::UnsynInput;
@@ -62,11 +59,11 @@ use super::{codegen, lexer, syntax, syntax::Decl};
 /// The file is read as a whole, and so is reported as a whole: a definition is
 /// not dropped at the first name that means nothing, since what the rest of the
 /// file says is what the author meant around it.
-pub fn analyze<I>(file: &syntax::Crate<I>) -> Diagnostics
+pub fn analyze<'a, I>(source: &'a I, file: &syntax::Crate<I>) -> Diagnostics
 where
-    I: UnsynInput,
+    I: UnsynInput + 'a,
 {
-    let mut checker = Checker::new();
+    let mut checker = Checker::new(source);
     checker.visit_crate(file);
 
     debug_assert!(
@@ -363,13 +360,16 @@ struct Checker<'ast, I> {
     /// whose every part the tree keeps and has to name. The difference decides
     /// whether a part of a pattern that reads no word costs the tree anything.
     holds_node: bool,
-    /// The input the tree was read from, a piece of which every node holds.
-    _input: PhantomData<&'ast I>,
+    /// The input the tree was read from, whole — not a piece of it. Every node
+    /// holds a stream narrowed to its own token, so none of those reaches the
+    /// text of a node around it; this one does, and is what any part of the pass
+    /// that wants a node's written text reads it out of.
+    source: &'ast I,
 }
 
 impl<'ast, I: UnsynInput> Checker<'ast, I> {
     /// A pass over a file that has found nothing yet.
-    fn new() -> Self {
+    fn new(source: &'ast I) -> Self {
         Self {
             diagnostics: Diagnostics::default(),
             rules: Vec::new(),
@@ -380,7 +380,7 @@ impl<'ast, I: UnsynInput> Checker<'ast, I> {
             bounds: Vec::new(),
             expr_depth: 0,
             holds_node: true,
-            _input: PhantomData,
+            source,
         }
     }
 
@@ -747,7 +747,7 @@ impl<'ast, I: UnsynInput> Visit<'ast, I> for Checker<'ast, I> {
         let body = self.take_one();
 
         self.rules.push(Rule {
-            name: node.ident.text(),
+            name: as_str(self.source, &node.ident).to_owned(),
             kind: node.decl(),
             span: node.ident.to_span(),
             body,
@@ -794,8 +794,8 @@ impl<'ast, I: UnsynInput> Visit<'ast, I> for Checker<'ast, I> {
         // alternatives wrote the same one, and only the whole choice can see
         // that one of them goes unnamed.
         if self.expr_depth == 0 && !node.is_single() {
-            let names = codegen::variant_names(node);
-            let offers = codegen::variant_offers(node);
+            let names = codegen::variant_names(self.source, node);
+            let offers = codegen::variant_offers(self.source, node);
 
             for ((branch, name), offer) in node.branches().zip(names).zip(offers) {
                 let part = branch.elements().count() > 1;
@@ -875,7 +875,7 @@ impl<'ast, I: UnsynInput> Visit<'ast, I> for Checker<'ast, I> {
                 Pattern::terminal()
             }
             syntax::ExprWithoutSuffix::Reference(ident) => {
-                Pattern::bare(ident.text(), ident.to_span())
+                Pattern::bare(as_str(self.source, ident).to_owned(), ident.to_span())
             }
         };
 
@@ -979,15 +979,18 @@ impl<'ast, I: UnsynInput> Visit<'ast, I> for Checker<'ast, I> {
     fn visit_range(&mut self, node: &'ast syntax::Range<I>) {
         walk::walk_range(self, node);
 
+        // The text of a range is the source under its span, which is the three
+        // operands of it read as the one run they were written in — no
+        // rebuilding piece by piece to guess at what stood between them.
+        let written = as_str(self.source, node).to_owned();
+
         let (text, ends) = match node {
-            syntax::Range::Unicode(from, dash, to) => (
-                format!("{}{}{}", from.text(), dash.as_str(), to.text()),
-                [self.code_of(from), self.code_of(to)],
-            ),
-            syntax::Range::Str(from, dash, to) => (
-                format!("{}{}{}", from.text(), dash.as_str(), to.text()),
-                [self.end_of_range(from), self.end_of_range(to)],
-            ),
+            syntax::Range::Unicode(from, _, to) => {
+                (written, [self.code_of(from), self.code_of(to)])
+            }
+            syntax::Range::Str(from, _, to) => {
+                (written, [self.end_of_range(from), self.end_of_range(to)])
+            }
         };
 
         let interval = match ends {
@@ -1033,7 +1036,7 @@ impl<'ast, I: UnsynInput> Visit<'ast, I> for Checker<'ast, I> {
             // is a string, which no character is ever the same value as, and which
             // is only the same as another member when the two are the same string.
             syntax::SetItem::Str(lit) => {
-                let text = lit.text();
+                let text = as_str(self.source, lit).to_owned();
                 let chars = self.chars_of(lit);
 
                 let value = match chars.len() {
@@ -1045,7 +1048,7 @@ impl<'ast, I: UnsynInput> Visit<'ast, I> for Checker<'ast, I> {
                 Member { text, span, value }
             }
             syntax::SetItem::Unicode(lit) => {
-                let text = lit.text();
+                let text = as_str(self.source, lit).to_owned();
 
                 Member {
                     span,
@@ -1057,7 +1060,7 @@ impl<'ast, I: UnsynInput> Visit<'ast, I> for Checker<'ast, I> {
                 }
             }
             syntax::SetItem::Reference(ident) => {
-                let name = ident.text();
+                let name = as_str(self.source, ident).to_owned();
 
                 Member {
                     text: name.clone(),
@@ -1140,6 +1143,7 @@ mod tests {
 
     /// Reads `source` as a whole file and analyzes it.
     fn report(source: &str) -> Diagnostics {
+        let whole = TokenStream::from(source);
         let tree = {
             let mut input = TokenStream::from(source);
             let tree = input
@@ -1151,7 +1155,7 @@ mod tests {
             tree
         };
 
-        analyze(&tree)
+        analyze(&whole, &tree)
     }
 
     /// The kinds of the errors of `source`, in the order they were reported.
