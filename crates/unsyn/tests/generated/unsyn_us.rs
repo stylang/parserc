@@ -220,20 +220,16 @@ where
     pub f2: I,
 }
 #[derive(Debug, PartialEq, Eq, PartialOrd, Ord, Clone, :: parserc :: syntax :: Syntax)]
-pub struct OctDigit<I>(
-    # [parserc (parser = :: parserc :: next_if (| c : char | matches ! (c , '0' ..= '7')))] pub I,
-)
+pub struct OctDigit<I>(# [parserc (next_if = | c : char | matches ! (c , '0' ..= '7'))] pub I)
 where
     I: ::parserc::chars::CharsInput;
 #[derive(Debug, PartialEq, Eq, PartialOrd, Ord, Clone, :: parserc :: syntax :: Syntax)]
-pub struct DecDigit<I>(
-    # [parserc (parser = :: parserc :: next_if (| c : char | matches ! (c , '0' ..= '9')))] pub I,
-)
+pub struct DecDigit<I>(# [parserc (next_if = | c : char | matches ! (c , '0' ..= '9'))] pub I)
 where
     I: ::parserc::chars::CharsInput;
 #[derive(Debug, PartialEq, Eq, PartialOrd, Ord, Clone, :: parserc :: syntax :: Syntax)]
 pub struct HexDigit<I>(
-    # [parserc (parser = :: parserc :: next_if (| c : char | matches ! (c , '0' ..= '9' | 'a' ..= 'f' | 'A' ..= 'F')))]
+    # [parserc (next_if = | c : char | matches ! (c , '0' ..= '9' | 'a' ..= 'f' | 'A' ..= 'F'))]
     pub I,
 )
 where

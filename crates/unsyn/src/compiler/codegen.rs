@@ -40,8 +40,9 @@
 //! not `parser = ::parserc::keyword("if")` — because the derive accepts every
 //! combinator of `parserc` under the function's own name at every position, and
 //! saying which function an operand asked for keeps the shape the spec declared
-//! visible in the code of it. `parser =` remains for what is no single
-//! combinator: a fold of `.or()`, a probe, a generated `read_` of its own.
+//! visible in the code of it. A reader that is a bare name is written the same
+//! way, `#[parserc(read_lit_str_body)]`. `parser =` remains only for what is
+//! neither: a fold of `.or()`, which is one expression and no name.
 //!
 //! A field that names no rule is the text its operand read, and is called by
 //! its place: `f1`, `f2`, and onward. A rule whose sequence holds nothing but
@@ -2669,7 +2670,7 @@ where
 
                 Ok(Code::Expr(parser.clone()))
             }
-            syntax::ExprWithoutSuffix::Set(set) => Ok(Code::Expr(self.code_of_set(set)?)),
+            syntax::ExprWithoutSuffix::Set(set) => self.code_of_set(set),
             syntax::ExprWithoutSuffix::Paren { expr: group, .. } => self.code_of_expr(group),
             syntax::ExprWithoutSuffix::Tilde { set, .. } => {
                 // What `~` asks is answered by the character here, and takes it, so
@@ -2682,7 +2683,10 @@ where
                     });
                 }
 
-                let parser = self.code_of_set(set)?;
+                // The probe is statements, so the set is asked for the
+                // expression it reads as whichever answer it gave.
+                let code = self.code_of_set(set)?;
+                let parser = self.expr_of(code)?;
 
                 Ok(Code::Stmt(vec![quote! {
                     {
@@ -2704,10 +2708,19 @@ where
 
     /// The code of a set: one test of a character where every member is one, and
     /// a choice of its members where any of them is more.
-    fn code_of_set(&mut self, set: &syntax::Set<I>) -> Result<TokenStream, UnsynError> {
+    ///
+    /// The two answers are kept apart in the type rather than left to whoever
+    /// reads the tokens back: a class is one combinator and can be named as such
+    /// where it is written, while a fold of `.or()` is a wider expression that
+    /// has to be spelled out.
+    fn code_of_set(&mut self, set: &syntax::Set<I>) -> Result<Code, UnsynError> {
         if let Some(arms) = set_arms(set, self.denotations) {
             let pred = class_pred(&arms);
-            return Ok(quote! { ::parserc::next_if(#pred) });
+
+            return Ok(Code::Combinator {
+                key: "next_if",
+                args: quote! { (#pred) },
+            });
         }
 
         let mut members = Vec::new();
@@ -2719,7 +2732,10 @@ where
         let mut members = members.into_iter();
 
         let Some(first) = members.next() else {
-            return Ok(quote! { ::parserc::next_if(|_c: char| false) });
+            return Ok(Code::Combinator {
+                key: "next_if",
+                args: quote! { (|_c: char| false) },
+            });
         };
 
         let mut parser = self.expr_of(first)?;
@@ -2729,7 +2745,7 @@ where
             parser = quote! { #parser.or(#other) };
         }
 
-        Ok(parser)
+        Ok(Code::Expr(parser))
     }
 
     /// The code of one member of a set.
@@ -3646,9 +3662,10 @@ fn bound_args(pred: &TokenStream, at_least: usize, at_most: Option<usize>) -> To
 /// A reader that is nothing but a name is written as the name, since
 /// `#[parserc(read_lit_str_body)]` says the same as
 /// `#[parserc(parser = read_lit_str_body)]` in four fewer tokens and one less
-/// word to read past. Anything wider — a fold of `.or()`, a call of a
-/// combinator, a probe — has tokens of its own and keeps the explicit form,
-/// which is the only one an attribute can carry it in.
+/// word to read past. A wider reader keeps the explicit form, which is the only
+/// one an attribute can carry it in: in practice that means a fold of `.or()`,
+/// since a single combinator reaches here as a [`Code::Combinator`] and is
+/// written by [`field_combinator`] under its own name instead.
 fn field_parser(parser: &TokenStream) -> TokenStream {
     match parser_path(parser) {
         Some(path) => quote! { #[parserc(#path)] },
@@ -3963,10 +3980,51 @@ mod tests {
     fn a_class_is_one_test_of_a_character() {
         let soup = code("lexer D -> ['0'-'9', '_'];");
 
-        assert!(has(
-            &soup,
-            quote! { ::parserc::next_if(|c: char| matches!(c, '0'..='9' | '_')) }
-        ));
+        // One test of a character, and named as the combinator it calls: a set
+        // of characters is not a choice of its members, so it has no reason to
+        // be spelled as a call buried in `parser =`.
+        assert!(
+            has(
+                &soup,
+                quote! { #[parserc(next_if = |c: char| matches!(c, '0'..='9' | '_'))] }
+            ),
+            "{soup}"
+        );
+    }
+
+    #[test]
+    fn a_set_of_wider_members_is_a_fold_and_keeps_the_explicit_form() {
+        // The two halves of `code_of_set` answer differently, and only one of
+        // them is a single combinator: members that are each one character
+        // become a class named by `next_if`, while a member that is a word has
+        // no character to test and the set becomes a fold of the members' own
+        // parsers — an expression, which is what `parser =` exists to carry.
+        let soup = code("lexer S -> ['ab', 'c'];");
+
+        assert!(
+            soup.contains(":: parserc :: keyword (\"ab\") . or (:: parserc :: next ('c'))")
+                || soup.contains("::parserc::keyword(\"ab\").or(::parserc::next('c'))"),
+            "the wider set should fold its members: {soup}"
+        );
+        assert!(
+            soup.contains("parser ="),
+            "a fold has to be written as `parser =`, the only form that carries it"
+        );
+
+        // Beside it, the same shape of set with members that are each one
+        // character names one combinator instead.
+        let soup = code("lexer S -> ['a', 'c'];");
+        assert!(
+            has(
+                &soup,
+                quote! { #[parserc(next_if = |c: char| matches!(c, 'a' | 'c'))] }
+            ),
+            "{soup}"
+        );
+        assert!(
+            !soup.contains("parser ="),
+            "a class is one combinator and says so: {soup}"
+        );
     }
 
     #[test]
