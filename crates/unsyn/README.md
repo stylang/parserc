@@ -501,6 +501,50 @@ from rustc (`cannot find value \`read_nope\``), pointing at the attribute; and a
 misspelled *option* — one carrying a value, like `keywor = "if"` — is still
 refused by the derive, because the value is what tells the two apart.
 
+### Where the attribute stands
+
+A reader is said **of the item** when the item is a newtype of the input — one
+unnamed field whose type is the input — and **of the field** everywhere else:
+
+```rust
+// one run of text, and one field to hold it: the type says the whole of itself
+#[parserc(read_ident_or_keyword)]
+pub struct IdentOrKeyword<I>(pub I)
+where
+    I: UnsynInput;
+
+// several parts, each read its own way: an attribute per field
+pub struct LitStr<I>(
+    #[parserc(next = '\'')] pub I,
+    #[parserc(read_lit_str_1)] pub I,
+    #[parserc(next = '\'')] pub I,
+)
+where
+    I: UnsynInput;
+```
+
+The rule is that a field-level attribute exists to say which of several parts is
+read how. A field of one leaves no such question, so the attribute moves out and
+sits beside the `derive`, where it describes the type. An enum's *variants* keep
+their field-level attributes for the same reason in reverse: each is one of
+several, even when it holds only one run — `lexer AsciiEscape` writes
+
+```rust
+pub enum AsciiEscape<I>
+where
+    I: ::parserc::chars::CharsInput,
+{
+    AsciiHexEscape(AsciiHexEscape<I>),
+    F2(#[parserc(keyword = "\n")] I),
+    F3(#[parserc(keyword = "\r")] I),
+    // …
+}
+```
+
+An external `<Ext>` also stays on `parser =` at either level: the builder handed
+over a token stream of unknown shape, so nothing here can know whether it is a
+name, a call, or a fold.
+
 Three consequences of that table being uniform, each of which is a limitation
 the derive used to have:
 

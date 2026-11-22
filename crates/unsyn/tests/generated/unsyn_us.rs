@@ -31,15 +31,18 @@ pub struct S<I>(pub I)
 where
     I: ::parserc::chars::CharsInput;
 #[derive(Debug, PartialEq, Eq, PartialOrd, Ord, Clone, :: parserc :: syntax :: Syntax)]
-pub struct LF<I>(#[parserc(next = '\n')] pub I)
+#[parserc(next = '\n')]
+pub struct LF<I>(pub I)
 where
     I: ::parserc::chars::CharsInput;
 #[derive(Debug, PartialEq, Eq, PartialOrd, Ord, Clone, :: parserc :: syntax :: Syntax)]
-pub struct CR<I>(#[parserc(next = '\r')] pub I)
+#[parserc(next = '\r')]
+pub struct CR<I>(pub I)
 where
     I: ::parserc::chars::CharsInput;
 #[derive(Debug, PartialEq, Eq, PartialOrd, Ord, Clone, :: parserc :: syntax :: Syntax)]
-pub struct IdentOrKeyword<I>(#[parserc(crate::scan_ident_or_keyword)] pub I)
+#[parserc(crate::scan_ident_or_keyword)]
+pub struct IdentOrKeyword<I>(pub I)
 where
     I: ::parserc::chars::CharsInput;
 #[derive(Debug, PartialEq, Eq, PartialOrd, Ord, Clone, :: parserc :: syntax :: Syntax)]
@@ -82,7 +85,8 @@ where
     Ok(whole.split_to(before - input.len()))
 }
 #[derive(Debug, PartialEq, Eq, PartialOrd, Ord, Clone, :: parserc :: syntax :: Syntax)]
-pub struct NonKeywordIdent<I>(#[parserc(read_non_keyword_ident)] pub I)
+#[parserc(read_non_keyword_ident)]
+pub struct NonKeywordIdent<I>(pub I)
 where
     I: ::parserc::chars::CharsInput;
 #[derive(Debug, PartialEq, Eq, PartialOrd, Ord, Clone, :: parserc :: syntax :: Syntax)]
@@ -155,7 +159,8 @@ pub struct LitStr<I>(
 where
     I: ::parserc::chars::CharsInput;
 #[derive(Debug, PartialEq, Eq, PartialOrd, Ord, Clone, :: parserc :: syntax :: Syntax)]
-pub struct QuoteEscape<I>(#[parserc(keyword = "\\'")] pub I)
+#[parserc(keyword = "\\'")]
+pub struct QuoteEscape<I>(pub I)
 where
     I: ::parserc::chars::CharsInput;
 #[derive(Debug, PartialEq, Eq, PartialOrd, Ord, Clone, :: parserc :: syntax :: Syntax)]
@@ -220,18 +225,18 @@ where
     pub f2: I,
 }
 #[derive(Debug, PartialEq, Eq, PartialOrd, Ord, Clone, :: parserc :: syntax :: Syntax)]
-pub struct OctDigit<I>(# [parserc (next_if = | c : char | matches ! (c , '0' ..= '7'))] pub I)
+# [parserc (next_if = | c : char | matches ! (c , '0' ..= '7'))]
+pub struct OctDigit<I>(pub I)
 where
     I: ::parserc::chars::CharsInput;
 #[derive(Debug, PartialEq, Eq, PartialOrd, Ord, Clone, :: parserc :: syntax :: Syntax)]
-pub struct DecDigit<I>(# [parserc (next_if = | c : char | matches ! (c , '0' ..= '9'))] pub I)
+# [parserc (next_if = | c : char | matches ! (c , '0' ..= '9'))]
+pub struct DecDigit<I>(pub I)
 where
     I: ::parserc::chars::CharsInput;
 #[derive(Debug, PartialEq, Eq, PartialOrd, Ord, Clone, :: parserc :: syntax :: Syntax)]
-pub struct HexDigit<I>(
-    # [parserc (next_if = | c : char | matches ! (c , '0' ..= '9' | 'a' ..= 'f' | 'A' ..= 'F'))]
-    pub I,
-)
+# [parserc (next_if = | c : char | matches ! (c , '0' ..= '9' | 'a' ..= 'f' | 'A' ..= 'F'))]
+pub struct HexDigit<I>(pub I)
 where
     I: ::parserc::chars::CharsInput;
 #[derive(Debug, PartialEq, Eq, PartialOrd, Ord, Clone, :: parserc :: syntax :: Syntax)]

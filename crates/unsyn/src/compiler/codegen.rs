@@ -1263,51 +1263,35 @@ where
 
         let mut items = std::mem::take(&mut self.helpers);
         items.push(match code {
+            // A newtype of the input is declared by what reads it, and that is
+            // said of the *type*: the attribute stands on the item, beside the
+            // `derive`, because a field of one leaves nothing for a field-level
+            // attribute to narrow. `#[parserc(read_x)] struct X<I>(pub I)`.
             Rule::Field(parser) => {
-                let parser_attr = field_parser(&parser);
-
-                quote! {
-                    #[derive(Debug, PartialEq, Eq, PartialOrd, Ord, Clone, ::parserc::syntax::Syntax)]
-                    #allow
-                    pub struct #name<I>(#parser_attr pub I)
-                    where
-                        I: ::parserc::chars::CharsInput;
-                }
+                newtype(&name, &allow, &field_parser(&parser), &quote! { pub I })
             }
-            Rule::Combinator { key, ref args } => {
-                let attr = field_combinator(key, args);
-
-                quote! {
-                    #[derive(Debug, PartialEq, Eq, PartialOrd, Ord, Clone, ::parserc::syntax::Syntax)]
-                    #allow
-                    pub struct #name<I>(#attr pub I)
-                    where
-                        I: ::parserc::chars::CharsInput;
-                }
-            }
-            Rule::Read(read) => {
-                let read_attr = field_parser(&read.to_token_stream());
-
-                quote! {
-                    #[derive(Debug, PartialEq, Eq, PartialOrd, Ord, Clone, ::parserc::syntax::Syntax)]
-                    #allow
-                    pub struct #name<I>(#read_attr pub I)
-                    where
-                        I: ::parserc::chars::CharsInput;
-                }
-            }
-            Rule::TakeWhile(pred) => quote! {
-                #[derive(Debug, PartialEq, Eq, PartialOrd, Ord, Clone, ::parserc::syntax::Syntax)]
-                #allow
-                // The bound is written here and not left to `take_while` because a
-                // run of the trivia is what separates two operands, and a separator
-                // that could be seen in nothing at all would let a repetition of the
-                // thing it separates ask for the same position forever.
-                #[parserc(take_while_with = (1.., #pred))]
-                pub struct #name<I>(pub I)
-                where
-                    I: ::parserc::chars::CharsInput;
-            },
+            Rule::Combinator { key, ref args } => newtype(
+                &name,
+                &allow,
+                &field_combinator(key, args),
+                &quote! { pub I },
+            ),
+            Rule::Read(read) => newtype(
+                &name,
+                &allow,
+                &field_parser(&read.to_token_stream()),
+                &quote! { pub I },
+            ),
+            // The bound is written here and not left to `take_while` because a
+            // run of the trivia is what separates two operands, and a separator
+            // that could be seen in nothing at all would let a repetition of the
+            // thing it separates ask for the same position forever.
+            Rule::TakeWhile(pred) => newtype(
+                &name,
+                &allow,
+                &quote! { #[parserc(take_while_with = (1.., #pred))] },
+                &quote! { pub I },
+            ),
             Rule::Fields { tuple, fields } => {
                 use quote::ToTokens as _;
 
@@ -3633,6 +3617,30 @@ fn struct_item(
     }
 }
 
+/// The newtype of the input that one whole rule came out as.
+///
+/// The attribute is written on the *item*, beside the `derive`, and not on the
+/// field: a rule that is one run of text has a field of one, so a field-level
+/// attribute could only restate the type it sits on. Saying it of the item is
+/// what lets the field stay `pub I` and the type say the whole of itself in one
+/// place — which is also how the hand-written terminals of this crate are
+/// declared, so the two shapes of code agree.
+fn newtype(
+    name: &Ident,
+    allow: &dyn quote::ToTokens,
+    attr: &TokenStream,
+    field: &TokenStream,
+) -> TokenStream {
+    quote! {
+        #[derive(Debug, PartialEq, Eq, PartialOrd, Ord, Clone, ::parserc::syntax::Syntax)]
+        #allow
+        #attr
+        pub struct #name<I>(#field)
+        where
+            I: ::parserc::chars::CharsInput;
+    }
+}
+
 /// The attribute key a bounded read of a class is written under: the bound says
 /// whether there is one to write at all.
 fn bound_key(at_least: usize, at_most: Option<usize>) -> &'static str {
@@ -3966,14 +3974,28 @@ mod tests {
         let soup = code("lexer A -> 'a';");
 
         assert!(has(&soup, quote! { pub struct A < I > }));
-        assert!(has(&soup, quote! { #[parserc(next = 'a')] pub I }));
+        // Said of the item: a rule that is one run of text has a field of one,
+        // so a field-level attribute would only restate the type under it.
+        assert!(
+            has(
+                &soup,
+                quote! { #[parserc(next = 'a')] pub struct A < I > (pub I) }
+            ),
+            "{soup}"
+        );
     }
 
     #[test]
     fn a_word_of_more_than_one_character_is_a_keyword() {
         let soup = code("lexer A -> 'abc';");
 
-        assert!(has(&soup, quote! { #[parserc(keyword = "abc")] pub I }));
+        assert!(
+            has(
+                &soup,
+                quote! { #[parserc(keyword = "abc")] pub struct A < I > (pub I) }
+            ),
+            "{soup}"
+        );
     }
 
     #[test]
@@ -4068,10 +4090,20 @@ mod tests {
     fn an_external_is_written_as_the_builder_was_given_it() {
         let soup = code("lexer A -> <XID_Start>;");
 
-        assert!(has(
-            &soup,
-            quote! { #[parserc(parser = ::parserc::next_if(::unicode_ident::is_xid_start))] pub I }
-        ));
+        // An external is whatever token stream the builder was handed, so
+        // nothing here knows whether it is a name, a call or a fold, and the
+        // explicit `parser =` is the only form that carries any of them. It is
+        // still said of the item, which a newtype always can be.
+        assert!(
+            has(
+                &soup,
+                quote! {
+                    #[parserc(parser = ::parserc::next_if(::unicode_ident::is_xid_start))]
+                    pub struct A < I > (pub I)
+                }
+            ),
+            "{soup}"
+        );
     }
 
     #[test]
@@ -4206,12 +4238,16 @@ mod tests {
             "{soup}"
         );
 
-        // Only a single operand is the text of the token it read.
+        // Only a single operand is the text of the token it read. A newtype of
+        // one says that of the item, while the enum above keeps the attribute on
+        // each variant's field — a variant has parts beside it to tell apart,
+        // which is what a field-level attribute is for.
         let soup = code("lexer A -> 'ab';");
         assert!(has(
             &soup,
             quote! {
-                pub struct A<I>(#[parserc(keyword = "ab")] pub I)
+                #[parserc(keyword = "ab")]
+                pub struct A<I>(pub I)
                 where
                     I: ::parserc::chars::CharsInput;
             }

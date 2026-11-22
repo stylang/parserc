@@ -102,7 +102,7 @@ where
 /// Takes a fixed two items, which is enough to tell "the attribute was
 /// understood" apart from "the field quietly fell back to parsing its own
 /// type" — the failure a bare name could hide, since both read *something*.
-fn read_two_chars<I>(input: &mut I) -> Result<I, I::Error>
+pub fn read_two_chars<I>(input: &mut I) -> Result<I, I::Error>
 where
     I: parserc::Input<Item = char> + Clone,
 {
@@ -116,6 +116,50 @@ where
     }
 
     Ok(whole.split_to(before - input.len()))
+}
+
+#[derive(Debug, Syntax)]
+#[parserc(next = '!')]
+struct ItemByNext<I>(pub I)
+where
+    I: CharsInput;
+
+#[derive(Debug, Syntax)]
+#[parserc(next_if = |c: char| c.is_ascii_digit())]
+struct ItemByNextIf<I>(pub I)
+where
+    I: CharsInput;
+
+#[derive(Debug, Syntax)]
+#[parserc(crate::read_two_chars)]
+struct ItemByQualified<I>(pub I)
+where
+    I: CharsInput;
+
+/// A reader named at the item level of a newtype, which is how every single
+/// field tuple of this kind is written: the attribute says what the *type* is
+/// read with, which is the question a field of one has no room left to ask.
+#[test]
+fn a_newtype_reads_at_the_item_level_however_its_reader_is_written() {
+    let mut input = Stream::from("!x");
+    assert_eq!(
+        input.parse::<ItemByNext<_>>().unwrap().to_span(),
+        Span::Range(0..1)
+    );
+
+    let mut input = Stream::from("7x");
+    assert_eq!(
+        input.parse::<ItemByNextIf<_>>().unwrap().to_span(),
+        Span::Range(0..1)
+    );
+
+    // A qualified path reaches the same reader the unqualified one does, so the
+    // item level asks nothing narrower than a field did.
+    let mut input = Stream::from("abcd");
+    assert_eq!(
+        input.parse::<ItemByQualified<_>>().unwrap().to_span(),
+        Span::Range(0..2)
+    );
 }
 
 #[test]

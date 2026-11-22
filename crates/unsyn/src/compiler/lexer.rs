@@ -119,7 +119,8 @@ where
 /// [`is_xid_start`]: unicode_ident::is_xid_start
 #[derive(Debug, PartialEq, Eq, PartialOrd, Ord, Clone, Syntax)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
-pub struct IdentOrKeyword<I>(#[parserc(read_ident_or_keyword)] pub I)
+#[parserc(read_ident_or_keyword)]
+pub struct IdentOrKeyword<I>(pub I)
 where
     I: UnsynInput;
 
@@ -194,7 +195,8 @@ impl<I: UnsynInput> RawIdent<I> {
 /// own in the tree.
 #[derive(Debug, PartialEq, Eq, PartialOrd, Ord, Clone, Syntax)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
-pub struct NonKeywordIdent<I>(#[parserc(read_non_keyword_ident)] pub I)
+#[parserc(read_non_keyword_ident)]
+pub struct NonKeywordIdent<I>(pub I)
 where
     I: UnsynInput;
 
@@ -367,21 +369,24 @@ impl<I: UnsynInput> FollowingKeywords<I> {
 /// An octal digit, the first of the pair that spells a seven-bit escape.
 #[derive(Debug, PartialEq, Eq, PartialOrd, Ord, Clone, Syntax)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
-pub struct OctDigit<I>(#[parserc(next_if = |c: char| matches!(c, '0'..='7'))] pub I)
+#[parserc(next_if = |c: char| matches!(c, '0'..='7'))]
+pub struct OctDigit<I>(pub I)
 where
     I: UnsynInput;
 
 /// A decimal digit.
 #[derive(Debug, PartialEq, Eq, PartialOrd, Ord, Clone, Syntax)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
-pub struct DecDigit<I>(#[parserc(next_if = |c: char| c.is_ascii_digit())] pub I)
+#[parserc(next_if = |c: char| c.is_ascii_digit())]
+pub struct DecDigit<I>(pub I)
 where
     I: UnsynInput;
 
 /// A hexadecimal digit.
 #[derive(Debug, PartialEq, Eq, PartialOrd, Ord, Clone, Syntax)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
-pub struct HexDigit<I>(#[parserc(next_if = |c: char| c.is_ascii_hexdigit())] pub I)
+#[parserc(next_if = |c: char| c.is_ascii_hexdigit())]
+pub struct HexDigit<I>(pub I)
 where
     I: UnsynInput;
 
@@ -1107,14 +1112,16 @@ where
 /// belongs to this opening.
 #[derive(Debug, PartialEq, Eq, PartialOrd, Ord, Clone, Syntax)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
-pub struct BlockComment<I>(#[parserc(read_block_comment)] pub I)
+#[parserc(read_block_comment)]
+pub struct BlockComment<I>(pub I)
 where
     I: UnsynInput;
 
 /// A block document that describes the file it is written in.
 #[derive(Debug, PartialEq, Eq, PartialOrd, Ord, Clone, Syntax)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
-pub struct InnerBlockDoc<I>(#[parserc(read_inner_block_doc)] pub I)
+#[parserc(read_inner_block_doc)]
+pub struct InnerBlockDoc<I>(pub I)
 where
     I: UnsynInput;
 
@@ -1125,7 +1132,8 @@ where
 /// is a comment that closes at once, and not an empty document.
 #[derive(Debug, PartialEq, Eq, PartialOrd, Ord, Clone, Syntax)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
-pub struct OuterBlockDoc<I>(#[parserc(read_outer_block_doc)] pub I)
+#[parserc(read_outer_block_doc)]
+pub struct OuterBlockDoc<I>(pub I)
 where
     I: UnsynInput;
 
@@ -1133,7 +1141,8 @@ where
 /// document, and a document may hold a comment.
 #[derive(Debug, PartialEq, Eq, PartialOrd, Ord, Clone, Syntax)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
-pub struct BlockCommentOrDoc<I>(#[parserc(read_block_comment_or_doc)] pub I)
+#[parserc(read_block_comment_or_doc)]
+pub struct BlockCommentOrDoc<I>(pub I)
 where
     I: UnsynInput;
 
