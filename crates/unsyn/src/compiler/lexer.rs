@@ -119,7 +119,7 @@ where
 /// [`is_xid_start`]: unicode_ident::is_xid_start
 #[derive(Debug, PartialEq, Eq, PartialOrd, Ord, Clone, Syntax)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
-pub struct IdentOrKeyword<I>(#[parserc(parser = read_ident_or_keyword)] pub I)
+pub struct IdentOrKeyword<I>(#[parserc(read_ident_or_keyword)] pub I)
 where
     I: UnsynInput;
 
@@ -194,7 +194,7 @@ impl<I: UnsynInput> RawIdent<I> {
 /// own in the tree.
 #[derive(Debug, PartialEq, Eq, PartialOrd, Ord, Clone, Syntax)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
-pub struct NonKeywordIdent<I>(#[parserc(parser = read_non_keyword_ident)] pub I)
+pub struct NonKeywordIdent<I>(#[parserc(read_non_keyword_ident)] pub I)
 where
     I: UnsynInput;
 
@@ -456,7 +456,7 @@ where
     #[parserc(keyword = "U+", map_err = SyntaxKind::Unicode.map())]
     pub prefix: I,
     /// The four digits that spell the code point.
-    #[parserc(parser = read_lit_unicode_digits)]
+    #[parserc(read_lit_unicode_digits)]
     pub digits: Vec<HexDigit<I>>,
 }
 
@@ -627,7 +627,7 @@ where
     #[parserc(keyword = "\\u{", map_err = SyntaxKind::UnicodeEscape.map())]
     pub marker: I,
     /// The one to six digits the braces hold.
-    #[parserc(parser = read_escape_digits)]
+    #[parserc(read_escape_digits)]
     pub digits: Vec<HexDigit<I>>,
     /// The `}` that closes the escape.
     #[parserc(keyword = "}", map_err = PunctKind::BraceEnd.map())]
@@ -723,7 +723,7 @@ where
     /// The repetition ends where no piece begins, which is the closing quote
     /// wherever one stands and whatever the text after the pieces otherwise
     /// is; the quote that has to come next says what was expected there.
-    #[parserc(parser = read_lit_str_body)]
+    #[parserc(read_lit_str_body)]
     pub body: I,
     /// The quote that closes the literal.
     #[parserc(keyword = "'", map_err = PunctKind::SingleQuote.map())]
@@ -850,7 +850,7 @@ where
     /// fourth `/` is refused by what the group asks first, which leaves the
     /// body unfilled, and what stands after the document is for the file to
     /// say.
-    #[parserc(parser = read_outer_line_doc_body)]
+    #[parserc(read_outer_line_doc_body)]
     pub body: I,
 }
 
@@ -1107,14 +1107,14 @@ where
 /// belongs to this opening.
 #[derive(Debug, PartialEq, Eq, PartialOrd, Ord, Clone, Syntax)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
-pub struct BlockComment<I>(#[parserc(parser = read_block_comment)] pub I)
+pub struct BlockComment<I>(#[parserc(read_block_comment)] pub I)
 where
     I: UnsynInput;
 
 /// A block document that describes the file it is written in.
 #[derive(Debug, PartialEq, Eq, PartialOrd, Ord, Clone, Syntax)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
-pub struct InnerBlockDoc<I>(#[parserc(parser = read_inner_block_doc)] pub I)
+pub struct InnerBlockDoc<I>(#[parserc(read_inner_block_doc)] pub I)
 where
     I: UnsynInput;
 
@@ -1125,7 +1125,7 @@ where
 /// is a comment that closes at once, and not an empty document.
 #[derive(Debug, PartialEq, Eq, PartialOrd, Ord, Clone, Syntax)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
-pub struct OuterBlockDoc<I>(#[parserc(parser = read_outer_block_doc)] pub I)
+pub struct OuterBlockDoc<I>(#[parserc(read_outer_block_doc)] pub I)
 where
     I: UnsynInput;
 
@@ -1133,7 +1133,7 @@ where
 /// document, and a document may hold a comment.
 #[derive(Debug, PartialEq, Eq, PartialOrd, Ord, Clone, Syntax)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
-pub struct BlockCommentOrDoc<I>(#[parserc(parser = read_block_comment_or_doc)] pub I)
+pub struct BlockCommentOrDoc<I>(#[parserc(read_block_comment_or_doc)] pub I)
 where
     I: UnsynInput;
 

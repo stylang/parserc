@@ -30,6 +30,10 @@ pub fn derive_tuple_syntax(args: proc_macro::TokenStream) -> proc_macro::TokenSt
 /// `parser` for a parser given whole. `take_while_with` is written as the pair
 /// it is called with — `take_while_with = (1.., |c: char| …)`.
 ///
+/// A reader that is nothing but a name drops the `parser = ` and is written as
+/// the name alone: `#[parserc(read_lit_str_body)]`. A path is as far as this
+/// form reaches, so a call or a fold still takes `parser = …`.
+///
 /// Three options are about a position rather than about a read: `input = Type`
 /// names the type an item is generic over and belongs to an item alone, and
 /// `crucial` and `left_recursion` say what one failure does to the reads beside

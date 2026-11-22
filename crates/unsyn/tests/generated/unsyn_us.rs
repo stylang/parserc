@@ -82,7 +82,7 @@ where
     Ok(whole.split_to(before - input.len()))
 }
 #[derive(Debug, PartialEq, Eq, PartialOrd, Ord, Clone, :: parserc :: syntax :: Syntax)]
-pub struct NonKeywordIdent<I>(# [parserc (parser = read_non_keyword_ident)] pub I)
+pub struct NonKeywordIdent<I>(#[parserc(read_non_keyword_ident)] pub I)
 where
     I: ::parserc::chars::CharsInput;
 #[derive(Debug, PartialEq, Eq, PartialOrd, Ord, Clone, :: parserc :: syntax :: Syntax)]
@@ -149,7 +149,7 @@ where
 #[derive(Debug, PartialEq, Eq, PartialOrd, Ord, Clone, :: parserc :: syntax :: Syntax)]
 pub struct LitStr<I>(
     #[parserc(next = '\'')] pub I,
-    # [parserc (parser = read_lit_str_1)] pub I,
+    #[parserc(read_lit_str_1)] pub I,
     #[parserc(next = '\'')] pub I,
 )
 where
@@ -214,7 +214,7 @@ where
 {
     #[parserc(keyword = "\\u{")]
     pub f1: I,
-    # [parserc (parser = read_unicode_escape_1)]
+    #[parserc(read_unicode_escape_1)]
     pub hex_digit: ::std::vec::Vec<HexDigit<I>>,
     #[parserc(next = '}')]
     pub f2: I,
@@ -281,7 +281,7 @@ where
 {
     #[parserc(keyword = "U+")]
     pub f1: I,
-    # [parserc (parser = read_lit_unicode_1)]
+    #[parserc(read_lit_unicode_1)]
     pub hex_digit: ::std::vec::Vec<HexDigit<I>>,
 }
 #[derive(Debug, PartialEq, Eq, PartialOrd, Ord, Clone, :: parserc :: syntax :: Syntax)]
@@ -375,7 +375,7 @@ pub struct BlockCommentBody<I>(
     #[parserc(keyword = "/*")] pub I,
     # [parserc (parser = read_block_comment_body_1 . or (:: parserc :: keyword ("**")) . or (| input : & mut I | { text_of (< BlockCommentOrDoc < I > as :: parserc :: syntax :: Syntax < I >> :: into_parser () , input) }))]
     pub I,
-    # [parserc (parser = read_block_comment_body_3)] pub I,
+    #[parserc(read_block_comment_body_3)] pub I,
     #[parserc(keyword = "*/")] pub I,
 )
 where
@@ -440,7 +440,7 @@ where
 #[derive(Debug, PartialEq, Eq, PartialOrd, Ord, Clone, :: parserc :: syntax :: Syntax)]
 pub struct InnerBlockDoc<I>(
     #[parserc(keyword = "/*!")] pub I,
-    # [parserc (parser = read_inner_block_doc_2)] pub I,
+    #[parserc(read_inner_block_doc_2)] pub I,
     #[parserc(keyword = "*/")] pub I,
 )
 where
@@ -474,7 +474,7 @@ where
 pub struct OuterLineDoc<I>(
     #[parserc(keyword = "///")]
     pub I,
-    # [parserc (parser = read_outer_line_doc_2)] pub I,
+    #[parserc(read_outer_line_doc_2)] pub I,
 )
 where
     I: ::parserc::chars::CharsInput;
@@ -559,7 +559,7 @@ pub struct OuterBlockDoc<I>(
     #[parserc(keyword = "/**")] pub I,
     # [parserc (parser = read_outer_block_doc_1 . or (| input : & mut I | { text_of (< BlockCommentOrDoc < I > as :: parserc :: syntax :: Syntax < I >> :: into_parser () , input) }))]
     pub I,
-    # [parserc (parser = read_outer_block_doc_3)] pub I,
+    #[parserc(read_outer_block_doc_3)] pub I,
     #[parserc(keyword = "*/")] pub I,
 )
 where

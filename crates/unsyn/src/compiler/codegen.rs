@@ -1280,13 +1280,17 @@ where
                         I: ::parserc::chars::CharsInput;
                 }
             }
-            Rule::Read(read) => quote! {
-                #[derive(Debug, PartialEq, Eq, PartialOrd, Ord, Clone, ::parserc::syntax::Syntax)]
-                #allow
-                pub struct #name<I>(#[parserc(parser = #read)] pub I)
-                where
-                    I: ::parserc::chars::CharsInput;
-            },
+            Rule::Read(read) => {
+                let read_attr = field_parser(&read.to_token_stream());
+
+                quote! {
+                    #[derive(Debug, PartialEq, Eq, PartialOrd, Ord, Clone, ::parserc::syntax::Syntax)]
+                    #allow
+                    pub struct #name<I>(#read_attr pub I)
+                    where
+                        I: ::parserc::chars::CharsInput;
+                }
+            }
             Rule::TakeWhile(pred) => quote! {
                 #[derive(Debug, PartialEq, Eq, PartialOrd, Ord, Clone, ::parserc::syntax::Syntax)]
                 #allow
@@ -3631,8 +3635,35 @@ fn bound_args(pred: &TokenStream, at_least: usize, at_most: Option<usize>) -> To
 }
 
 /// The attribute that writes a field's reader beside the field.
+///
+/// A reader that is nothing but a name is written as the name, since
+/// `#[parserc(read_lit_str_body)]` says the same as
+/// `#[parserc(parser = read_lit_str_body)]` in four fewer tokens and one less
+/// word to read past. Anything wider — a fold of `.or()`, a call of a
+/// combinator, a probe — has tokens of its own and keeps the explicit form,
+/// which is the only one an attribute can carry it in.
 fn field_parser(parser: &TokenStream) -> TokenStream {
-    quote! { #[parserc(parser = #parser)] }
+    match parser_path(parser) {
+        Some(path) => quote! { #[parserc(#path)] },
+        None => quote! { #[parserc(parser = #parser)] },
+    }
+}
+
+/// The path of a reader that is nothing but one, which is what the derive
+/// accepts as an attribute of its own.
+fn parser_path(parser: &TokenStream) -> Option<TokenStream> {
+    let mut trees = parser.clone().into_iter();
+    let first = trees.next()?;
+
+    if trees.next().is_some() {
+        return None;
+    }
+
+    let proc_macro2::TokenTree::Ident(_) = first else {
+        return None;
+    };
+
+    Some(parser.clone())
 }
 
 /// The attribute that says which combinator reads a field, under the name of

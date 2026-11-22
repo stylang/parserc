@@ -487,6 +487,19 @@ variants, and on a field — under the name of the function it calls:
 | `take_while_with = (r, f)` | `parserc::take_while_with(r, f)` | the same, bounded by `r` |
 | `take_till = f`          | `parserc::take_till(f)`  | the longest run `f` rejects |
 | `parser = p`             | `p` itself               | whatever `p` parses — the escape hatch |
+| a bare path, `read_name` | `read_name` itself       | the same as `parser = read_name` |
+
+A reader that is nothing but a name is written as the name:
+`#[parserc(read_lit_str_body)]`, not `#[parserc(parser = read_lit_str_body)]`.
+The two are one read to the derive; the short form is what the generated code
+and this crate's own terminals use. It stops at a path because that is as far as
+a nested attribute's path reaches — a call of a combinator, a fold of `.or()`, or
+any other reader with tokens of its own still needs `parser = …`.
+
+Nothing is swallowed by this. A name that resolves to nothing is a hard error
+from rustc (`cannot find value \`read_nope\``), pointing at the attribute; and a
+misspelled *option* — one carrying a value, like `keywor = "if"` — is still
+refused by the derive, because the value is what tells the two apart.
 
 Three consequences of that table being uniform, each of which is a limitation
 the derive used to have:

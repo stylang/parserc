@@ -90,6 +90,52 @@ struct WordByParser<I>(pub I)
 where
     I: CharsInput;
 
+#[derive(Debug, Syntax)]
+#[parserc(read_two_chars)]
+struct ByBareName<I>(pub I)
+where
+    I: CharsInput;
+
+/// A reader given as the bare name the derive now accepts, which is the same
+/// read `parser = read_two_chars` performs and one less word to read past.
+///
+/// Takes a fixed two items, which is enough to tell "the attribute was
+/// understood" apart from "the field quietly fell back to parsing its own
+/// type" — the failure a bare name could hide, since both read *something*.
+fn read_two_chars<I>(input: &mut I) -> Result<I, I::Error>
+where
+    I: parserc::Input<Item = char> + Clone,
+{
+    use parserc::Parser;
+
+    let mut whole = input.clone();
+    let before = input.len();
+
+    for _ in 0..2 {
+        parserc::next_if(|_: char| true).parse(input)?;
+    }
+
+    Ok(whole.split_to(before - input.len()))
+}
+
+#[test]
+fn a_reader_named_by_itself_is_the_same_read_as_parser() {
+    // The reader took exactly its two items and left the rest, which is what
+    // says the attribute reached the field at all: had the derive ignored it,
+    // the field's own type would have been asked to parse and either failed or
+    // taken the whole input.
+    let mut input = Stream::from("abcd");
+    let bare = input.parse::<ByBareName<_>>().unwrap();
+
+    assert_eq!(bare.to_span(), Span::Range(0..2));
+    assert_eq!(input.as_str(), "cd", "the reader took two and no more");
+
+    // Too short for the reader, which is the reader's own refusal and not the
+    // derive having lost the attribute.
+    let mut input = Stream::from("a");
+    assert!(input.parse::<ByBareName<_>>().is_err());
+}
+
 #[test]
 fn every_combinator_reads_a_struct() {
     assert_eq!(took::<OneChar<_>>("!"), "!");

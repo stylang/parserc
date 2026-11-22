@@ -197,19 +197,23 @@ impl Config {
         let mut ty_input: Option<Type> = None;
         // Which option last said how this is read, so a second one is refused
         // by both of its names rather than by an unexplained "not both".
-        let mut combinator: Option<&'static str> = None;
+        let mut combinator: Option<String> = None;
 
         for meta_list in parserc_lists(attrs)? {
             let parser = syn::meta::parser(|meta| {
-                let Some(ident) = meta.path.get_ident() else {
-                    return Err(meta.error(format!("unsupported {} option", position.describe())));
-                };
-                let key = ident.to_string();
+                // A bare path with nothing after it may be a flag (`crucial`),
+                // which the arms below claim, or the parser itself — the form
+                // `#[parserc(read_ident_or_keyword)]`, which says
+                // `parser = read_ident_or_keyword`. Whether the first is one is
+                // a question about the key, so the arms are asked first and only
+                // a key that names nothing is read as a path.
+                let bare = meta.input.is_empty();
+                let key = meta.path.get_ident().map(ToString::to_string);
 
-                match key.as_str() {
+                match key.as_deref() {
                     // Names the type an item is generic over, so nothing else
                     // can answer for it and no other position has one.
-                    "input" => {
+                    Some("input") => {
                         if position != Position::Item {
                             return Err(meta.error(format!(
                                 "`input` names the type an item is generic over, which only an item \
@@ -224,7 +228,7 @@ impl Config {
 
                         ty_input = Some(meta.value()?.parse()?);
                     }
-                    "map_err" => {
+                    Some("map_err") => {
                         if config.map_err.is_some() {
                             return Err(meta.error("`map_err` was already set here"));
                         }
@@ -233,44 +237,43 @@ impl Config {
                     }
                     // Both of these say what one failure does to the reads
                     // around it, which only a field of a sequence has.
-                    "crucial" | "left_recursion" => {
+                    Some(flag @ "crucial") | Some(flag @ "left_recursion") => {
                         if position != Position::Field {
                             return Err(meta.error(format!(
-                                "`{key}` says what a failure here does to the reads beside it, and \
+                                "`{flag}` says what a failure here does to the reads beside it, and \
                                  only a field has those: it cannot be set on {}",
                                 position.describe()
                             )));
                         }
 
-                        if key == "crucial" {
+                        if flag == "crucial" {
                             config.crucial = true;
                         } else {
                             config.left_recursion = true;
                         }
                     }
-                    "semantic" => {
+                    Some("semantic") => {
                         if config.semantic.is_some() {
                             return Err(meta.error("`semantic` was already set here"));
                         }
 
                         config.semantic = Some(meta.value()?.parse()?);
                     }
-                    "parser" | "next" | "next_if" | "keyword" | "take_until" | "take_while"
-                    | "take_while_with" | "take_till" => {
-                        if let Some(previous) = combinator {
+                    Some(name @ ("parser" | "next" | "next_if" | "keyword" | "take_until"))
+                    | Some(name @ ("take_while" | "take_while_with" | "take_till")) => {
+                        if let Some(previous) = &combinator {
                             return Err(meta.error(format!(
-                                "`{key}` and `{previous}` both say how this is read; keep one"
+                                "`{name}` and `{previous}` both say how this is read; keep one"
                             )));
                         }
 
                         let value = meta.value()?;
 
-                        config.combinator = match key.as_str() {
-                            // Read as the token the author wrote, not as an
-                            // `Expr` wrapped around it: a literal handed over by
-                            // a `macro_rules!` metavariable reaches here as an
-                            // opaque token subtree, which `Lit` parses and `Expr`
-                            // refuses.
+                        // Read as the token the author wrote, not as an `Expr`
+                        // wrapped around it: a literal handed over by a
+                        // `macro_rules!` metavariable reaches here as an opaque
+                        // token subtree, which `Lit` parses and `Expr` refuses.
+                        config.combinator = match name {
                             "next" => Combinator::Next(value.parse()?),
                             "keyword" => Combinator::Keyword(value.parse()?),
                             "parser" => Combinator::Parser(value.parse()?),
@@ -278,18 +281,45 @@ impl Config {
                             "take_until" => Combinator::TakeUntil(value.parse()?),
                             "take_while" => Combinator::TakeWhile(value.parse()?),
                             "take_till" => Combinator::TakeTill(value.parse()?),
-                            _ => {
-                                let (range, cond) = pair(value, "take_while_with")?;
+                            "take_while_with" => {
+                                let (range, cond) = pair(value, name)?;
 
                                 Combinator::TakeWhileWith { range, cond }
                             }
+                            other => unreachable!("`{other}` is not an option of a combinator"),
                         };
 
-                        combinator = Some(key.leak());
+                        combinator = Some(name.to_owned());
                     }
-                    other => {
+                    // No key named this, and there is nothing after it to be a
+                    // value of: it is a path standing for the parser. syn reads
+                    // a nested attribute's path and stops at it, so this form can
+                    // only reach a function by name — a call of one, a fold, or
+                    // anything else with tokens of its own, is `parser = …`.
+                    _ if bare => {
+                        if let Some(previous) = &combinator {
+                            return Err(meta.error(format!(
+                                "this path and `{previous}` both say how this is read; keep one"
+                            )));
+                        }
+
+                        let path = meta.path.clone();
+
+                        config.combinator = Combinator::Parser(
+                            syn::ExprPath {
+                                attrs: Vec::new(),
+                                qself: None,
+                                path,
+                            }
+                            .into(),
+                        );
+                        combinator = Some("this path".to_owned());
+                    }
+                    _ => {
+                        let named = key.as_deref().unwrap_or("a path");
+
                         return Err(meta.error(format!(
-                            "unsupported {} option `{other}`",
+                            "unsupported option on {} `{named}`",
                             position.describe()
                         )));
                     }
