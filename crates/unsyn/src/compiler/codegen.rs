@@ -1262,13 +1262,17 @@ where
 
         let mut items = std::mem::take(&mut self.helpers);
         items.push(match code {
-            Rule::Field(parser) => quote! {
-                #[derive(Debug, PartialEq, Eq, PartialOrd, Ord, Clone, ::parserc::syntax::Syntax)]
-                #allow
-                pub struct #name<I>(#[parserc(parser = #parser)] pub I)
-                where
-                    I: ::parserc::chars::CharsInput;
-            },
+            Rule::Field(parser) => {
+                let parser_attr = field_parser(&parser);
+
+                quote! {
+                    #[derive(Debug, PartialEq, Eq, PartialOrd, Ord, Clone, ::parserc::syntax::Syntax)]
+                    #allow
+                    pub struct #name<I>(#parser_attr pub I)
+                    where
+                        I: ::parserc::chars::CharsInput;
+                }
+            }
             Rule::Combinator { key, ref args } => {
                 let attr = field_combinator(key, args);
 
@@ -2306,7 +2310,7 @@ where
                 Ok(Field {
                     name: None,
                     ty: quote! { I },
-                    attr: Some(field_parser(&quote! { ::parserc::next_if(#pred) })),
+                    attr: Some(field_combinator("next_if", &quote! { (#pred) })),
                 })
             }
             syntax::ExprWithoutSuffix::Paren { .. } => {
@@ -2672,7 +2676,10 @@ where
                 // that a refusal of the set is a match of the operand.
                 if let Some(arms) = set_arms(set, self.denotations) {
                     let pred = refused_pred(&arms);
-                    return Ok(Code::Expr(quote! { ::parserc::next_if(#pred) }));
+                    return Ok(Code::Combinator {
+                        key: "next_if",
+                        args: quote! { (#pred) },
+                    });
                 }
 
                 let parser = self.code_of_set(set)?;
@@ -3652,18 +3659,22 @@ fn field_parser(parser: &TokenStream) -> TokenStream {
 /// The path of a reader that is nothing but one, which is what the derive
 /// accepts as an attribute of its own.
 fn parser_path(parser: &TokenStream) -> Option<TokenStream> {
-    let mut trees = parser.clone().into_iter();
-    let first = trees.next()?;
+    // A path is nothing but names and the colons between them. The moment a
+    // group shows up the thing is a call — `next_if(|c| …)` — and a group is
+    // also exactly what a nested attribute's path cannot carry, so this test is
+    // the same boundary the derive enforces, not a narrower one chosen here.
+    let mut trees = parser.clone().into_iter().peekable();
+    let mut saw_name = false;
 
-    if trees.next().is_some() {
-        return None;
+    for tree in trees.by_ref() {
+        match &tree {
+            proc_macro2::TokenTree::Ident(_) => saw_name = true,
+            proc_macro2::TokenTree::Punct(punct) if punct.as_char() == ':' => {}
+            _ => return None,
+        }
     }
 
-    let proc_macro2::TokenTree::Ident(_) = first else {
-        return None;
-    };
-
-    Some(parser.clone())
+    saw_name.then(|| parser.clone())
 }
 
 /// The attribute that says which combinator reads a field, under the name of
@@ -3962,7 +3973,12 @@ mod tests {
     fn a_refusal_of_a_class_is_the_other_half() {
         let soup = code("lexer C -> ~['a'-'z'];");
 
-        assert!(soup.contains("next_if (| c : char | ! (matches ! (c , 'a' ..= 'z')))"));
+        // The refusal is one test of a character, named as the combinator it
+        // calls rather than folded behind `parser =`.
+        assert!(
+            soup.contains("next_if = | c : char | ! (matches ! (c , 'a' ..= 'z'))"),
+            "{soup}"
+        );
     }
 
     #[test]

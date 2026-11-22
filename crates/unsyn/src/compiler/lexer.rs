@@ -367,21 +367,21 @@ impl<I: UnsynInput> FollowingKeywords<I> {
 /// An octal digit, the first of the pair that spells a seven-bit escape.
 #[derive(Debug, PartialEq, Eq, PartialOrd, Ord, Clone, Syntax)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
-pub struct OctDigit<I>(#[parserc(parser = next_if(|c: char| matches!(c, '0'..='7')))] pub I)
+pub struct OctDigit<I>(#[parserc(next_if = |c: char| matches!(c, '0'..='7'))] pub I)
 where
     I: UnsynInput;
 
 /// A decimal digit.
 #[derive(Debug, PartialEq, Eq, PartialOrd, Ord, Clone, Syntax)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
-pub struct DecDigit<I>(#[parserc(parser = next_if(|c: char| c.is_ascii_digit()))] pub I)
+pub struct DecDigit<I>(#[parserc(next_if = |c: char| c.is_ascii_digit())] pub I)
 where
     I: UnsynInput;
 
 /// A hexadecimal digit.
 #[derive(Debug, PartialEq, Eq, PartialOrd, Ord, Clone, Syntax)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
-pub struct HexDigit<I>(#[parserc(parser = next_if(|c: char| c.is_ascii_hexdigit()))] pub I)
+pub struct HexDigit<I>(#[parserc(next_if = |c: char| c.is_ascii_hexdigit())] pub I)
 where
     I: UnsynInput;
 
@@ -406,7 +406,7 @@ where
     /// The digit the number begins with.
     pub head: DecDigit<I>,
     /// Every digit and separator after it, as one run.
-    #[parserc(parser = take_while(|c: char| matches!(c, '0'..='9' | '_')))]
+    #[parserc(take_while = |c: char| matches!(c, '0'..='9' | '_'))]
     pub tail: I,
 }
 

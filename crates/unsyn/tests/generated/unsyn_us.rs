@@ -39,7 +39,7 @@ pub struct CR<I>(#[parserc(next = '\r')] pub I)
 where
     I: ::parserc::chars::CharsInput;
 #[derive(Debug, PartialEq, Eq, PartialOrd, Ord, Clone, :: parserc :: syntax :: Syntax)]
-pub struct IdentOrKeyword<I>(# [parserc (parser = crate :: scan_ident_or_keyword)] pub I)
+pub struct IdentOrKeyword<I>(#[parserc(crate::scan_ident_or_keyword)] pub I)
 where
     I: ::parserc::chars::CharsInput;
 #[derive(Debug, PartialEq, Eq, PartialOrd, Ord, Clone, :: parserc :: syntax :: Syntax)]
