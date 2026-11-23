@@ -605,11 +605,11 @@ pub struct Set<I>(
     pub ::parserc::syntax::Char<I, '['>,
     pub  ::std::vec::Vec<(
         ::core::option::Option<S<I>>,
-        Box<SetItem<I>>,
+        SetItem<I>,
         ::core::option::Option<S<I>>,
         ::parserc::syntax::Char<I, ','>,
     )>,
-    pub ::core::option::Option<(::core::option::Option<S<I>>, Box<SetItem<I>>)>,
+    pub ::core::option::Option<(::core::option::Option<S<I>>, SetItem<I>)>,
     pub ::core::option::Option<S<I>>,
     pub ::parserc::syntax::Char<I, ']'>,
 )
@@ -620,10 +620,10 @@ pub enum ExprWithoutSuffix<I>
 where
     I: ::parserc::chars::CharsInput,
 {
-    NegatedSet(Box<NegatedSet<I>>),
-    Call(Box<Call<I>>),
+    NegatedSet(NegatedSet<I>),
+    Call(Call<I>),
     Paren(Box<Paren<I>>),
-    Set(Box<Set<I>>),
+    Set(Set<I>),
     LitStr(LitStr<I>),
     LitUnicode(LitUnicode<I>),
     Ident(Ident<I>),
@@ -635,7 +635,7 @@ where
 {
     pub f1: ::parserc::syntax::Char<I, '~'>,
     pub f2: ::core::option::Option<S<I>>,
-    pub set: Box<Set<I>>,
+    pub set: Set<I>,
 }
 #[derive(Debug, PartialEq, Eq, PartialOrd, Ord, Clone, :: parserc :: syntax :: Syntax)]
 pub struct Call<I>
@@ -667,7 +667,7 @@ where
     F1(::parserc::syntax::Char<I, '*'>),
     F2(::parserc::syntax::Char<I, '?'>),
     F3(::parserc::syntax::Char<I, '+'>),
-    Repeat(Box<Repeat<I>>),
+    Repeat(Repeat<I>),
 }
 #[derive(Debug, PartialEq, Eq, PartialOrd, Ord, Clone, :: parserc :: syntax :: Syntax)]
 pub enum ExprWithSuffix<I>
@@ -707,15 +707,15 @@ where
 {
     pub expr_without_suffix: Box<ExprWithoutSuffix<I>>,
     pub f1: ::core::option::Option<S<I>>,
-    pub suffix: Box<Suffix<I>>,
+    pub suffix: Suffix<I>,
 }
 #[derive(Debug, PartialEq, Eq, PartialOrd, Ord, Clone, :: parserc :: syntax :: Syntax)]
 pub enum RepeatBound<I>
 where
     I: ::parserc::chars::CharsInput,
 {
-    RangeTo(Box<RangeTo<I>>),
-    RangeFrom(Box<RangeFrom<I>>),
+    RangeTo(RangeTo<I>),
+    RangeFrom(RangeFrom<I>),
     LitDec(LitDec<I>),
 }
 #[derive(Debug, PartialEq, Eq, PartialOrd, Ord, Clone, :: parserc :: syntax :: Syntax)]
@@ -744,7 +744,7 @@ where
 {
     pub f1: ::parserc::syntax::Char<I, '{'>,
     pub f2: ::core::option::Option<S<I>>,
-    pub repeat_bound: Box<RepeatBound<I>>,
+    pub repeat_bound: RepeatBound<I>,
     pub f3: ::core::option::Option<S<I>>,
     pub f4: ::parserc::syntax::Char<I, '}'>,
 }
@@ -753,8 +753,8 @@ pub enum Range<I>
 where
     I: ::parserc::chars::CharsInput,
 {
-    UnicodeRange(Box<UnicodeRange<I>>),
-    StrRange(Box<StrRange<I>>),
+    UnicodeRange(UnicodeRange<I>),
+    StrRange(StrRange<I>),
 }
 #[derive(Debug, PartialEq, Eq, PartialOrd, Ord, Clone, :: parserc :: syntax :: Syntax)]
 pub struct UnicodeRange<I>
@@ -779,7 +779,7 @@ pub enum SetItem<I>
 where
     I: ::parserc::chars::CharsInput,
 {
-    Range(Box<Range<I>>),
+    Range(Range<I>),
     LitStr(LitStr<I>),
     LitUnicode(LitUnicode<I>),
     Ident(Ident<I>),
@@ -796,7 +796,7 @@ where
     #[parserc(keyword = "->")]
     pub f3: I,
     pub f4: ::core::option::Option<S<I>>,
-    pub expr: Box<Expr<I>>,
+    pub expr: Expr<I>,
     pub f5: ::core::option::Option<S<I>>,
     pub f6: ::parserc::syntax::Char<I, ';'>,
 }
@@ -805,9 +805,9 @@ pub enum Item<I>
 where
     I: ::parserc::chars::CharsInput,
 {
-    OuterDoc(Box<OuterDoc<I>>),
+    OuterDoc(OuterDoc<I>),
     S(S<I>),
-    Stmt(Box<Stmt<I>>),
+    Stmt(Stmt<I>),
 }
 #[derive(Debug, PartialEq, Eq, PartialOrd, Ord, Clone, :: parserc :: syntax :: Syntax)]
 pub enum OuterDoc<I>
@@ -827,8 +827,8 @@ where
 }
 #[derive(Debug, PartialEq, Eq, PartialOrd, Ord, Clone, :: parserc :: syntax :: Syntax)]
 pub struct Crate<I>(
-    pub ::std::vec::Vec<(::core::option::Option<S<I>>, Box<InnerDoc<I>>)>,
-    pub ::std::vec::Vec<Box<Item<I>>>,
+    pub ::std::vec::Vec<(::core::option::Option<S<I>>, InnerDoc<I>)>,
+    pub ::std::vec::Vec<Item<I>>,
 )
 where
     I: ::parserc::chars::CharsInput;

@@ -20,7 +20,7 @@
 //! |-------------------------|--------------------------------------------------------|
 //! | `'a'`, `U+0009`         | `#[parserc(next = 'c')]` on a field of `I`                |
 //! | `'abc'`                 | `#[parserc(keyword = "abc")]` on a field of `I`           |
-//! | `Name` in a `syntax` sequence | the node `Name<I>`, boxed where `Name` is a `syntax` rule |
+//! | `Name` in a `syntax` sequence | the node `Name<I>`, boxed only where the pair of rules stands on a cycle of containment |
 //! | `Name` in a `lexer` sequence  | the one run of text `Name` read, folded in beside the rest |
 //! | `Name` as a whole rule, or as one name of a choice | the node `Name<I>` |
 //! | `( Name )`, `[ 'a', Name ]`, `Name except …` | the text `Name` read — and `Name` itself still keeps its own shape for whoever reads it whole |
@@ -91,7 +91,8 @@
 //! an item of the repetition rather than a boundary the code lays down.
 //!
 //! The shapes an operand can hold are the shapes [`parserc`] already has: a
-//! node of a rule the file names, [`Box`]ed where the node is of the tree —
+//! node of a rule the file names, [`Box`]ed where the naming rule and the
+//! name reached stand on a cycle of containment —
 //! a cycle can only be built through a node, and the box is what makes the
 //! type finite — a [`Char`](parserc::syntax::Char) of one character, a field
 //! of `I` with the `keyword` of a word beside it, a [`Vec`] or an [`Option`]
@@ -171,7 +172,7 @@
 //! what these refusals guard is what a clean file can still ask for that no code
 //! answers, and they are the last line rather than the first.
 
-use std::collections::{HashMap, HashSet};
+use std::collections::{HashMap, HashSet, VecDeque};
 
 use parserc::{Span, ToSpan, as_str};
 use proc_macro2::{Ident, Literal, TokenStream, TokenTree};
@@ -262,7 +263,7 @@ where
         let denotations = denotations(self.source, self.file);
         let nodes = node_rules(self.source, self.file);
         let trivia = trivia_rule(self.source, self.file);
-        let syntaxes = syntax_rules(self.source, self.file);
+        let cyclic = cyclic_syntax_refs(self.source, self.file);
 
         let mut generator = Generator {
             source: self.source,
@@ -271,7 +272,7 @@ where
             denotations: &denotations,
             nodes: &nodes,
             trivia,
-            syntaxes: &syntaxes,
+            cyclic: &cyclic,
             taken: HashSet::new(),
             helpers: Vec::new(),
             prelude: Vec::new(),
@@ -308,7 +309,7 @@ where
     })
 }
 
-/// The keys of the file's `syntax` rules, which a `Box` reaches.
+/// The keys of the file's `syntax` rules, which a `Box` may reach.
 fn syntax_rules<I>(source: &I, file: &syntax::Crate<I>) -> HashSet<String>
 where
     I: UnsynInput,
@@ -323,6 +324,167 @@ where
             matches!(stmt.decl(), Decl::Syntax).then(|| external_key(as_str(source, &stmt.ident)))
         })
         .collect()
+}
+
+/// The pairs of `syntax` rules whose nodes contain one another on a cycle —
+/// the only references that can only be built through a pointer.
+///
+/// Rust refuses a type that reaches itself through fields it holds directly;
+/// a `Vec` answers with a length and a pointer whatever it holds, so a
+/// repetition cuts the containment, and a rule reached only through one needs
+/// no box. What does need one is a pair the file walks both ways over direct
+/// occurrences — each edge of such a cycle is told, and every reference of
+/// the pair is boxed (the tail of a `+` shares the type its head is written
+/// with, and an over-boxed `Vec` element is still one element read). Naming
+/// the pairs over the whole file is also what keeps the answer the same
+/// wherever one rule reaches another: the shape of one production says what
+/// it holds, and only the whole file says what holds it back.
+fn cyclic_syntax_refs<I>(source: &I, file: &syntax::Crate<I>) -> HashSet<(String, String)>
+where
+    I: UnsynInput,
+{
+    let syntaxes = syntax_rules(source, file);
+    let mut edges: HashSet<(String, String)> = HashSet::new();
+
+    for item in &file.items {
+        if let syntax::Item::Stmt(stmt) = item
+            && matches!(stmt.decl(), Decl::Syntax)
+        {
+            let src = external_key(as_str(source, &stmt.ident));
+
+            expr_refs(source, &stmt.expr, true, &src, &syntaxes, &mut edges);
+        }
+    }
+
+    // An edge wants the box where its tail answers back to its head over the
+    // direct edges: the reference then stands on a cycle of containment.
+    edges
+        .iter()
+        .filter(|(from, to)| reaches(&edges, to, from))
+        .cloned()
+        .collect()
+}
+
+/// Whether `to` stands among the rules `from` reaches by walking the direct
+/// edges — the question one asked of the whole graph per edge, on a graph no
+/// file has ever made wide enough to mind walking twice.
+fn reaches(edges: &HashSet<(String, String)>, from: &str, to: &str) -> bool {
+    let mut seen: HashSet<String> = HashSet::new();
+    let mut queue: VecDeque<String> = VecDeque::from([from.to_owned()]);
+
+    while let Some(node) = queue.pop_front() {
+        if node == to {
+            return true;
+        }
+
+        if !seen.insert(node.clone()) {
+            continue;
+        }
+
+        for (from_edge, to_edge) in edges {
+            if from_edge == &node {
+                queue.push_back(to_edge.clone());
+            }
+        }
+    }
+
+    false
+}
+
+/// The rules one expression reaches its nodes through, beside the head of
+/// whether what it reaches stands in a field of them.
+fn expr_refs<I>(
+    source: &I,
+    expr: &syntax::Expr<I>,
+    direct: bool,
+    src: &str,
+    syntaxes: &HashSet<String>,
+    edges: &mut HashSet<(String, String)>,
+) where
+    I: UnsynInput,
+{
+    for branch in expr.branches() {
+        for element in branch.elements() {
+            operand_refs(source, element, direct, src, syntaxes, edges);
+        }
+    }
+}
+
+/// The rules one operand reaches, where the shape it is written as holds the
+/// answer directly: an option is as wide as what it holds, a `+` keeps its
+/// first answer in the field beside the list, and the word an operator reads
+/// leaves both of its operands standing in the fields of its arm. A `*` and a
+/// counted repetition answer with a `Vec` alone, which cuts the containment
+/// over everything it repeats.
+fn operand_refs<I>(
+    source: &I,
+    operand: &syntax::ExprNoTopAlt<I>,
+    direct: bool,
+    src: &str,
+    syntaxes: &HashSet<String>,
+    edges: &mut HashSet<(String, String)>,
+) where
+    I: UnsynInput,
+{
+    match operand {
+        syntax::ExprNoTopAlt::WithoutSuffix(atom) => {
+            atom_refs(source, atom, direct, src, syntaxes, edges)
+        }
+        syntax::ExprNoTopAlt::WithSuffix(suffix) => match suffix {
+            syntax::ExprWithSuffix::Grouped { target, suffix, .. } => {
+                let repeated = match suffix {
+                    syntax::Suffix::Question(_) | syntax::Suffix::Plus(_) => direct,
+                    syntax::Suffix::Star(_) | syntax::Suffix::Repeat(_) => false,
+                };
+
+                atom_refs(source, target, repeated, src, syntaxes, edges);
+            }
+            syntax::ExprWithSuffix::Concat {
+                target,
+                suffix: next,
+                ..
+            } => {
+                atom_refs(source, target, direct, src, syntaxes, edges);
+                operand_refs(source, next, direct, src, syntaxes, edges);
+            }
+            syntax::ExprWithSuffix::Followed { target, suffix, .. } => {
+                atom_refs(source, target, direct, src, syntaxes, edges);
+                operand_refs(source, suffix, direct, src, syntaxes, edges);
+            }
+            syntax::ExprWithSuffix::Except { target, tokens, .. } => {
+                atom_refs(source, target, direct, src, syntaxes, edges);
+                atom_refs(source, tokens, direct, src, syntaxes, edges);
+            }
+        },
+    }
+}
+
+/// The rule one atom names, where it names one and the field would hold it.
+fn atom_refs<I>(
+    source: &I,
+    atom: &syntax::ExprWithoutSuffix<I>,
+    direct: bool,
+    src: &str,
+    syntaxes: &HashSet<String>,
+    edges: &mut HashSet<(String, String)>,
+) where
+    I: UnsynInput,
+{
+    match atom {
+        syntax::ExprWithoutSuffix::Reference(ident) => {
+            if direct {
+                let dst = external_key(as_str(source, ident));
+
+                if syntaxes.contains(&dst) {
+                    edges.insert((src.to_owned(), dst));
+                }
+            }
+        }
+        syntax::ExprWithoutSuffix::Paren { expr: group, .. } => {
+            expr_refs(source, group, direct, src, syntaxes, edges);
+        }
+        _ => {}
+    }
 }
 
 /// How many times something is read, written as a number that is free to take the
@@ -1082,10 +1244,9 @@ where
     /// fields of `Option<S<I>>` of the code, and this says what `S` is; a file
     /// without the declaration has no trivia for a field to hold.
     trivia: Option<String>,
-    /// The names of the file's `syntax` rules, whose nodes a `syntax` rule
-    /// reaches as a `Box` of itself: a cycle of the tree can only be built
-    /// through a node of the tree, and the box is what makes the type finite.
-    syntaxes: &'a HashSet<String>,
+    /// The pairs of rules on a cycle of containment, read from the whole
+    /// file before any code is: the only references the code may box.
+    cyclic: &'a HashSet<(String, String)>,
     /// The names of the functions the module has been given already.
     taken: HashSet<String>,
     /// The functions the rule being written has asked for, in the order asked.
@@ -1494,13 +1655,12 @@ where
             // generator once.
             let field_name = self.named_field(name);
 
-            // What the reference reads is the node it names, boxed where that
-            // node is one the tree can only be built through a pointer: a
-            // `syntax` rule reached from another is the shape of the recursion,
-            // and `Paren` and `Suffixed` both write it. A `Vec` is finite
-            // whatever it holds, so a repetition wants no box inside it; an
-            // `Option` is as wide as what it holds, so the box a rule wanted
-            // alone is wanted there too.
+            // What the reference reads is the node it names, boxed where the
+            // pair of rules stands on a cycle of containment: fields alone
+            // cannot size such a type, and the pointer can. A `Vec` is finite
+            // whatever it holds, so a repetition wants no box inside it on its
+            // own; an `Option` is as wide as what it holds, so the box a pair
+            // owed alone is owed there too.
             let held = self.reference_type(ident)?;
 
             let (field_ty, attr) = match bounds {
@@ -2334,14 +2494,17 @@ where
         }
     }
 
-    /// The type a reference is read as: the node it names, boxed where the
-    /// node is of the tree — a cycle of the tree can only be built through a
-    /// node of the tree, and the box is what makes the type finite.
+    /// The type a reference is read as: the node it names, boxed only where
+    /// the pair of rules stands on a cycle of containment — a field of a
+    /// node reaching back to a node that holds it is the type Rust cannot
+    /// size, and the box is what makes it finite. Anywhere else the node is
+    /// read as itself: see [`cyclic_syntax_refs`] for the whole of the rule.
     fn reference_type(&self, ident: &lexer::Ident<I>) -> Result<TokenStream, UnsynError> {
         let text = as_str(self.source, ident);
         let ty = item_name(text, ident.to_span())?;
+        let dst = external_key(text);
 
-        if self.syntaxes.contains(&external_key(text)) {
+        if self.cyclic.contains(&(external_key(&self.rule), dst)) {
             Ok(quote! { Box<#ty<I>> })
         } else {
             Ok(quote! { #ty<I> })
@@ -4533,6 +4696,45 @@ mod tests {
             soup.contains("fn visit_gen"),
             "the visitor of a raw name is the name bare: {soup}"
         );
+    }
+
+    #[test]
+    fn a_rule_reached_by_no_cycle_is_held_without_a_box() {
+        // `B` answers with what it read and never asks `A` back: the chain of
+        // fields ends, its size is finite, and the code says so bare.
+        let soup = code("syntax A -> 'a' B; syntax B -> 'b';");
+
+        assert!(!soup.contains("Box"), "{soup}");
+    }
+
+    #[test]
+    fn a_cycle_of_nodes_is_built_through_the_pointer() {
+        let soup = code("syntax A -> 'a' B; syntax B -> 'b' A;");
+
+        assert!(has(&soup, quote! { Box < B < I > }), "{soup}");
+        assert!(has(&soup, quote! { Box < A < I > }), "{soup}");
+    }
+
+    #[test]
+    fn a_repetition_cuts_the_containment_it_holds() {
+        // `A` is read as a list of `B`s, which is finite whatever the list
+        // holds — and the `A` in `B`'s field reaches back only through that
+        // list. No type of this file contains itself through a field.
+        let soup = code("syntax A -> B*; syntax B -> 'b' A;");
+
+        assert!(has(&soup, quote! { Vec < B < I > }), "{soup}");
+        assert!(!soup.contains("Box"), "{soup}");
+    }
+
+    #[test]
+    fn a_repetition_of_at_least_one_holds_its_first_answer_in_the_field() {
+        // `+` answers with the head beside the list, and the head is held
+        // directly: the pair is on a cycle of containment whatever the list
+        // cuts, and both directions of this file's cycle want the pointer.
+        let soup = code("syntax A -> B+; syntax B -> 'b' A;");
+
+        assert!(has(&soup, quote! { Box < B < I > }), "{soup}");
+        assert!(has(&soup, quote! { Box < A < I > }), "{soup}");
     }
 
     #[test]

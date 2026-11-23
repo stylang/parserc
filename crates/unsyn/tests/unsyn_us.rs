@@ -409,7 +409,7 @@ fn the_generated_parser_reads_the_spec_it_was_generated_from() {
     let generated_names: Vec<_> = tree
         .1
         .iter()
-        .filter_map(|item| match item.as_ref() {
+        .filter_map(|item| match item {
             GeneratedItem::Stmt(stmt) => Some(stmt.ident.to_span()),
             _ => None,
         })

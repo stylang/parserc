@@ -40,7 +40,7 @@ node:
 |----------------------------------------------|-------------------------------|------------------------|
 | a choice (`A \| B \| …`)                       | `enum`, one variant per alternative | `enum`, same — until §1.2 overrules it |
 | one alternative, several operands (a sequence) | `struct`, one field per operand | `struct`, same — until §1.2 overrules it |
-| one alternative, **one operand that is a bare name** | a newtype of *that node*: `pub struct X<I>(pub Box<Y<I>>)` | **one run of text**: `pub struct A<I>(pub I)`, reading `B` and keeping its text |
+| one alternative, **one operand that is a bare name** | a newtype of *that node*: `pub struct X<I>(pub Y<I>)`, through a `Box` only on a cycle (§2) | **one run of text**: `pub struct A<I>(pub I)`, reading `B` and keeping its text |
 | one alternative, one operand that is characters or an external (`U+000A`, `['0'-'7']`, `<Ext>`) | the shape that operand holds | a newtype of `I` |
 
 The third row is the one worth memorising. A `lexer` rule that is nothing but
@@ -52,7 +52,7 @@ of the text that rule read, because a terminal is a token and a token that is
 lexer B -> 'b';
 lexer A -> B;          // A<I>(pub I)          — the text B read
 syntax Y -> 'y';
-syntax X -> Y;        // X<I>(pub Box<Y<I>>)   — the node Y
+syntax X -> Y;        // X<I>(pub Y<I>)        — the node Y, bare until a cycle
 ```
 
 A reference *inside* a longer right side is different again, and is never
@@ -132,13 +132,13 @@ source and the runs and the word are part of it.
 
 Within a sequence, each operand contributes the field its shape holds. Three
 rows are level-dependent — what a **name** contributes (a node, or its text in
-the three positions of §1.2), whether that node is **boxed**, and what a **single
+the three positions of §1.2), whether that node is **held through a pointer**, and what a **single
 character** is — and the trivia rows below are `syntax`-only. Those are the whole
 of what the two levels differ in once §1's shape question is settled:
 
 | operand                | the field holds                                   |
 |------------------------|---------------------------------------------------|
-| `Name` (a rule)        | `Name<I>`, boxed if `Name` is a `syntax` rule      |
+| `Name` (a rule)        | `Name<I>`, through a `Box` only where the pair of rules stands on a **cycle of containment** — a type that reaches itself through fields alone has no size, and a `Vec` cuts a cycle wherever it stands, so a DAG of nodes is held bare however wide it reaches |
 | `'a'` / `U+0009`       | **level-dependent**: in a `syntax` rule, `Char<I, 'a'>` — a node of one punctuator. In a `lexer` rule, a field of `I` with `#[parserc(next = 'a')]`, because a terminal holds text and not nodes |
 | `'abc'`, `'->'`        | a field of `I` with `#[parserc(keyword = "abc")]` — **at either level**. A word is never a `Char`, since `Char` is one character |
 | `['a'-'z', '_']`       | **a class**, if every member denotes characters: one field of `I` with `next_if(\|c\| matches!(c, …))` — one test, not a choice. **A fold**, if any member is wider: `.or()` over each member's own parser |
@@ -243,7 +243,7 @@ pub struct Stmt<I> {
     pub f2: Option<S<I>>,
     #[parserc(keyword = "->")] pub f3: I,
     pub f4: Option<S<I>>,
-    pub expr: Box<Expr<I>>,
+    pub expr: Expr<I>,
     pub f5: Option<S<I>>,
     …
 }
@@ -336,8 +336,8 @@ without ever being named or numbered:
 ```rust
 pub struct Set<I>(
     pub Char<I, '['>,
-    pub Vec<(Option<S<I>>, Box<SetItem<I>>, Option<S<I>>, Char<I, ','>)>,
-    pub Option<(Option<S<I>>, Box<SetItem<I>>)>,
+    pub Vec<(Option<S<I>>, SetItem<I>, Option<S<I>>, Char<I, ','>)>,
+    pub Option<(Option<S<I>>, SetItem<I>)>,
     pub Option<S<I>>,
     pub Char<I, ']'>,
 )
