@@ -344,29 +344,28 @@ where
         (start < end).then(|| end - start)
     }
 
-    /// The region recounted from `from`, which becomes its zero.
+    /// The closed region recounted from `from`, which becomes its zero.
     ///
     /// This is what turns an offset into the whole source into an offset into
     /// some piece of it: narrow a file to a token's start and every span below
-    /// it is measured from there instead.
+    /// it is measured from there instead. The answer is a plain `Range` and
+    /// not a `Span` — it names a place in `from`'s reckoning, not in the one
+    /// the region was written in, and no two spans here are the same kind of
+    /// thing twice.
     ///
-    /// `None` when the region begins before `from` — those bytes lie behind the
-    /// piece and are not the piece's to name — and for an open-ended region,
-    /// which has no start to recount from.
+    /// `None` when the region begins before `from` — those bytes lie behind
+    /// the piece and are not the piece's to name — and when it is open at
+    /// either end, which has no far bound to recount.
     #[inline]
-    pub fn shift(&self, from: Idx) -> Option<Self> {
+    pub fn shift(&self, from: Idx) -> Option<Range<Idx>> {
         let start = self.start()?;
+        let end = self.end()?;
 
         if start < from {
             return None;
         }
 
-        let start = start - from;
-
-        Some(match self.end() {
-            Some(end) => Span::Range(start..end - from),
-            None => Span::RangeFrom(start..),
-        })
+        Some(start - from..end - from)
     }
 
     /// The region moved `by` further along the source.
@@ -396,6 +395,22 @@ where
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn test_shift() {
+        // A closed region recounted from a new zero, told as the plain range
+        // of that reckoning rather than as a span of the old one.
+        assert_eq!(Span::Range(10..20).shift(10), Some(0..10));
+        assert_eq!(Span::Range(10..20).shift(4), Some(6..16));
+
+        // Behind the new zero the region is not this piece's to name, and
+        // open ends leave nothing to recount against.
+        assert_eq!(Span::Range(3..9).shift(10), None);
+        assert_eq!(Span::RangeFrom(10..).shift(5), None);
+        assert_eq!(Span::RangeTo(..10).shift(5), None);
+        assert_eq!(Span::<usize>::RangeFull.shift(5), None);
+        assert_eq!(Span::<usize>::None.shift(5), None);
+    }
 
     #[test]
     fn test_between() {

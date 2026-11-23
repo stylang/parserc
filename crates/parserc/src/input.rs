@@ -207,10 +207,7 @@ where
 fn region<I: Input, T: ToSpan>(input: &I, t: &T) -> Option<Range<usize>> {
     let held = input.to_span();
 
-    t.to_span()
-        .intersect(&held)
-        .shift(held.start()?)?
-        .as_range()
+    t.to_span().intersect(&held).shift(held.start()?)
 }
 
 /// Byte-oriented input implementations.
