@@ -1,20 +1,335 @@
-# `unsyn` — the DSL and the Rust it maps to
+# `unsyn` — the language, and the Rust it becomes
 
 `unsyn` is a DSL for describing a concrete syntax tree. A file of the DSL is a
 list of productions; a build turns one file into the types of that tree, the
 parsers that read it, and a visitor over it.
 
-This document is the **mapping contract**: what a production becomes, and how
-the result is named. It is written from the generator as it stands
-(`src/compiler/codegen.rs`) and from the file it writes for the spec itself
-(`tests/generated/unsyn_us.rs`), not from intention. Where the two disagree the
-code is wrong, not this file.
+This document has two parts. **Part I is the language**: what a file is, what
+every construct means, what a file must obey, and what it is warned about.
+**Part II is the build**: how a production becomes a Rust type, how the results
+are named, what the generator refuses, and what the derive reads. Both are
+written from the code as it stands (`src/compiler/`) and from the file it writes
+for the spec itself (`tests/generated/unsyn_us.rs`), not from intention. Where
+the two disagree the code is wrong, not this file.
 
-The language's own grammar, written in the language, is [`unsyn.us`](unsyn.us).
+The language's own grammar, written in the language, is
+[`unsyn.us`](unsyn.us) — and it is the authority for everything Part I claims.
 
 ---
 
-## 1. The two levels, and what each one's shape is decided by
+# Part I — The language
+
+## 1. Files, items and declarations
+
+A file is a sequence of **items**: outer documentation and definitions, with an
+optional run of inner documentation at the top.
+
+```text
+//! inner documentation for the file
+
+whitespace S -> [ U+0009-U+000D, U+0020 ];
+
+/// documentation for the rule
+lexer  Ident -> [ 'a'-'z' ]+;
+syntax Expr  -> Term ( '+' Term )*;
+```
+
+A definition — the language's one statement form — opens with a keyword, names
+one rule, and gives its right side:
+
+```text
+syntax Name -> <right side>;
+```
+
+The keyword says what kind of thing the rule is:
+
+| keyword      | the rule is                       | what it means in the language |
+|--------------|-----------------------------------|-------------------------------|
+| `whitespace` | the separator                     | the characters the language skips between tokens, and between the operands of any `syntax` right side; it is a natural separator and is never asked for inside a terminal |
+| `lexer`      | a **terminal** (token)            | one run of characters, matched without skipping anything |
+| `syntax`     | a **node**                        | a piece of structure, read operand by operand with the separator between them |
+
+A file may declare the separator at most once, and may not define one name
+twice:
+
+- a second `whitespace` is `DuplicateWhitespace`;
+- a name the file already defined is `NameCollision`, pointing at the first
+  definition.
+
+Declaring it is **optional**. A file without a `whitespace` rule has no
+separator: the operands of a `syntax` sequence abut, the structure is read
+from where it is written, and nothing is skipped between the parts of a node.
+
+`r#gen` and `gen` are **one name** — a raw spelling is a sigil on the same
+name, not a second one — so they collide with each other, answer each other's
+references, and bind the same external (§2, §10).
+
+## 2. Names, words and literals
+
+**Identifiers** are the usual: a letter of `XID_Start` or `_`, then as many
+`XID_Continue` as wanted. A keyword of the language can not name a rule
+(`Keyword`), and a name written after Rust's heart may wear the raw sigil:
+`lexer r#type -> …`. The keywords are exactly six:
+
+| where a name may open a definition | inside a right side |
+|---|---|
+| `lexer`, `syntax`, `whitespace` | `concat`, `followed`, `except` |
+
+**Character and string literals** are written between `'`:
+
+```text
+'a'  '\n'  '\''  '\x41'  '\u{1F600}'  'abc'  '->'
+```
+
+The escapes are:
+
+| escape | reads | value |
+|---|---|---|
+| `\'` | the quote itself | `'` |
+| `\n` `\r` `\t` `\\` `\0` | the named control | that character |
+| `\xNN` | exactly two hex digits, the first octal | the 7-bit code point — the spelling itself keeps it under `0x80` |
+| `\u{…}` | one to six hex digits, no separators | that Unicode code point, refused for a surrogate or anything past `U+10FFFF` |
+
+A literal of **one character** (`'a'`, `'\n'`, `\x41`, `\u{41}` — each is one
+character however many its spelling takes) is a *character*; a longer literal
+is a *word*. The distinction is semantic, not cosmetic: a word never matches
+less than its whole text, and §5, §6 and §9 tell apart what each may stand for.
+
+**Code points** are also spelled directly, with `U+` and exactly four hex
+digits: `U+000A`, `U+2000`. A `U+…` of the wrong width or of no code point is
+refused.
+
+## 3. Comments and documentation
+
+- Line comments `//…` run to the end of the line; block comments `/* … */`
+  **nest** — `/* /* */ */` is one comment — and the two empty forms are
+  spelled whole: `/**/` and `/***/`.
+- Documentation is comments with a second marker: `///` and `/** … */` document
+  what follows them; `//!` and `/*! … */` document the file a list of them
+  stands in. Block documents nest like the comments they are grown from.
+
+## 4. Patterns
+
+The right side of a definition is a **pattern**. Patterns are built from
+operands, composed three ways, and share their whole notation between the two
+levels.
+
+### Atoms
+
+| written | reads |
+|---|---|
+| `Name` | a reference: the whole of the named rule's match — a terminal reads one token, a node reads its structure |
+| `<Ext>` | an external: a run of characters the *caller of the build* binds `Ext` to; the name needs no definition in the file, and nothing here may say what it matches (§14) |
+| `'a'` | the character |
+| `'abc'` | the word, one item at a time and as a whole |
+| `U+000A` | the code point |
+| `[…]` | a set — see below |
+| `~X` | a refusal — see below |
+| `( … )` | a group: the pattern written inside, standing as one operand |
+
+### Sets
+
+`[ 'a', 'e'-'i', U+006F, 'u' ]` asks one question of one character: *which of
+these*. Members are:
+
+- a character literal, a code point, or a **range** of either —
+  `'a'-'z'`, `U+0041-U+005A`, `'a'-U+0062`; the two ends of a range are
+  compared by code point, and the lower end may not exceed the upper
+  (`InvalidRange`);
+- a name of a lexer rule, which answers with the characters its definition
+  denotes.
+
+**Every member denotes one character, and nothing else is a member.** A member
+that spells a word, a range reaching over a word, or a rule whose definition
+answers wider than a character is refused (`WideSetMember`, §6) — the choice
+the author meant is written as a choice, and the refusal they meant is `~`
+over an expression. An empty set denotes nothing and is refused
+(`EmptySet`).
+
+### Negation
+
+`~X` refuses the operand `X` at this position and takes **one character**: the
+probe of `X` must not match, and whatever character stands here after the
+refusal is the answer. `X` is any single operand — a set, a group, a literal, a
+name, even a call of an external — and it carries no quantity of its own:
+`~[LF,CR]*` refuses one character as often as it can, and `~(X*)` is the
+spelling that refuses the repetition itself. A refusal always matches exactly
+one character; every longer run comes from a repetition written around it.
+
+### Sequence, choice, and operators
+
+- A **sequence** is operands written side by side, read left to right. At the
+  `syntax` level the separator between two of them belongs to the match and is
+  skipped; at the `lexer` level the run is one token and nothing is skipped.
+- A **choice** joins alternatives with `|` and is read **first-to-fitted**:
+  the first alternative whose head matches is the one. Choices sit at the root
+  of a right side (`A | B | C`) or inside a group (`( A | B )`).
+- Three operators join two operands in a word of their own:
+
+| operator | reads |
+|---|---|
+| `X concat Y` | the two operands as **one token**: whatever they match, with nothing between them |
+| `X followed Y` | `X`, and nothing of `Y` — the position after `X` must begin `Y`, which is left for whatever reads next |
+| `X except Y` | `X`, refused where `Y` took **the whole of it**: a run that `Y` matches in full is not `X` |
+
+`concat` writes no separator and asks for none: `LitUnicode concat '-'` is
+one word spelling `U+0-`. `followed` and `except` take no field of their
+right operand — the right side is a probe, not a run (what that becomes when
+it is code is §9, and what may stand in each position is the table above).
+
+### Repetition
+
+A suffix written on one operand repeats it:
+
+| suffix | reads |
+|---|---|
+| `X*` | `X` as many times as it fits, including none — greedily |
+| `X?` | `X` at most once |
+| `X+` | `X` at least once — greedily |
+| `X{n}` | exactly `n` times |
+| `X{n,}` | at least `n` |
+| `X{,n}` | at most `n` |
+| `X{n,m}` | between `n` and `m`, and `n` may not exceed `m` (`InvalidRepeat`) |
+
+The count is written in decimal (`LitDec`): underscores and leading zeros are
+spelling, not different numbers.
+
+Repetition and refusal are greedy where they can be: a `*` or `+` stops only
+when its operand no longer fits, and at the lexer level a repeated class of
+characters reads the longest run of them, not one character at a time (§9).
+
+### What binds where
+
+Choice is the whole of a right side and binds loosest. Operators and suffixes
+bind to the operand written beside them, tighter than the sequence around
+them: `A B* C` is a sequence of `A`, `B*`, `C`; `A concat B C` is a sequence
+of `A concat B` and `C`; `~A*` is the refusal repeated, not the repetition
+refused. A group parenthesizes any of it.
+
+## 5. Kinds again, from the pattern side
+
+The two levels share the notation above, and the kind of the rule decides what
+the notation *is for*:
+
+- a **`syntax`** rule is a piece of structure: its operands are read with the
+  separator between them, and a reference reaches whatever it names as a piece
+  of structure or a token.
+- a **`lexer`** rule is one token: its whole match is one run of characters,
+  nothing inside it skips the separator, and a reference inside it reaches a
+  token too — a terminal may not name a `syntax` rule at all
+  (`UnexpectedSyntax`).
+- the **`whitespace`** rule is a pattern like any other — its right side is
+  read at the `lexer` level — and its purpose is to say what the separator
+  *is*. Naming it again inside a `syntax` pattern is the same run said twice
+  (§7).
+
+## 6. What a file must obey
+
+A file that breaks one of these denotes no grammar; the analyzer says so, and
+the build never runs.
+
+| refused | when |
+|---|---|
+| `Keyword` | a keyword of the language is used to name a rule |
+| `NameCollision` | a name is defined twice — raw and plain spellings are one name |
+| `DuplicateWhitespace` | more than one `whitespace` declaration |
+| `UndefinedSymbol` | a pattern names a rule the file never defines (a reference, a set member, or the target of a refusal) |
+| `UnexpectedSyntax` | a `lexer` rule names a `syntax` rule |
+| `EmptySet` | `[]`, or `~[]`, stands in a pattern |
+| `WideSetMember` | a set member that spells a word, ranges over a word, or names a rule answering wider than a character (§4) |
+| `NotAChar` | a literal asked to be one character is not — the ends of a range, or an empty literal anywhere a character is required |
+| `InvalidRange` | a range whose lower end is above its upper |
+| `InvalidCodePoint` | a `U+…` or `\u{…}` that is no Unicode code point — past `U+10FFFF`, or a surrogate |
+| `InvalidRepeat` | a bound whose lower number is above its upper |
+| `LeftRecursion` | a definition that can begin a match of itself, advancing nothing — a node whose first operand is (or reaches) its own name |
+| `SameOffsetRecursion` | a node whose match at a position can only be decided by deciding the same node at the same position — a cycle that neither advances nor terminates, through optionals and empties |
+
+The two code-point spellings are refused where they are read: a `U+…` of
+other than four hex digits, and a `\u{…}` whose digits do not close the
+escape. What is well formed but spells no code point is `InvalidCodePoint`
+(§6); `\x` needs no report — its grammar already admits only 7-bit values.
+
+## 7. What a file is told
+
+A lint is a note on a file that *does* denote a grammar and says something it
+need not have said, or said twice. The two channels of a report are kept apart
+by what they imply (`Diagnostics`): the refusals of §6 reject a file; a lint
+travels with a build. Every lint is a `LintKind` and the span of the construct
+that earned it, and there are six kinds.
+
+| `LintKind` | fires where |
+|---|---|
+| `DuplicateMember(m)` | a set member `m` denotes exactly what an earlier member of the same set already denotes: `[ 'a', 'a' ]`, `[ 'a', U+0061 ]`, `[ LF, LF ]` |
+| `CoveredMember(m, e)` | `m` denotes nothing that the earlier `e` does not — `m` is the redundant write: `[ 'a'-'d', 'b' ]` |
+| `CoversMember(m, e)` | `m` denotes everything `e` does and more — the *earlier* member is the redundant one: `[ 'b', 'a'-'d' ]` |
+| `OverlappingMember(m, e)` | `m` and `e` share some values and each keeps some of its own: `[ 'a'-'b', 'b'-'c' ]` |
+| `RedundantSeparator(name)` | a `syntax` rule mentions the file's `whitespace` rule anywhere short of the whole of an alternative, where its generated separator takes that trivia whether it is named or not: `syntax A -> S 'x';` over `whitespace S -> …` — and one report per mention |
+| `UnnamedAlternative` | an alternative of a root choice names no rule and reads no word, or a choice stands inside a group of a `syntax` rule — the table and every exemption are below |
+
+### Set members compared as values
+
+The four `…Member` kinds come from comparing one member's *value* against
+another's (`conflict`), where a value is what the member denotes:
+
+- a one-character literal is a character; a code-point literal and a range are
+  code-point intervals; a longer literal is a **string** — and a character and
+  a string of more than one character are never the same value, so `'a'` and
+  `'ab'` simply do not compare;
+- a member named by a rule is compared **by its name alone**: what the name
+  denotes is what that rule's definition denotes, which is not this pass's
+  business — two members naming one rule are a `DuplicateMember`, and a name
+  and a literal never conflict;
+- characters compare four ways — same (`Same`), inside an earlier one
+  (`Covered`), around an earlier one (`Covers`), sharing some code points
+  (`Overlap`) — and strings only compare for exact equality.
+
+A member is told **once**: of the earlier members it conflicts with, the first
+one earns the report and the rest are not repeated; the text each report
+names is the member as the file wrote it. What cannot be settled as a value —
+a range whose ends are not both single characters — is a refusal, not a lint
+(`WideSetMember` / `NotAChar`, §6), and never reaches the comparison.
+
+### Naming the separator twice
+
+`RedundantSeparator` is asked only of a `syntax` rule, and only of a mention
+that is *not* the whole of an alternative: a rule whose right side is just `S`
+names the trivia as the tree's own field, and no lint touches it — `syntax A ->
+'a' | S | 'b';` stays silent, and the group `(S)` is the mention itself, not a
+second ask. A suffix or a `concat` on the mention does not dissolve it: `S*`
+and `S concat 'x'` both ask for a run the separator takes anyway, and each
+mention in the rule is told once on its own. The name is
+matched through `external_key`, so a rule written `r#S` is the separator the
+file names just as plainly as one written `S`.
+
+### When an alternative is told
+
+`UnnamedAlternative` fires where a name was owed and not had, which is exactly
+where a *node* was made without one:
+
+| situation                                       | told? | because |
+|---|---|---|
+| a choice inside a group of a **`syntax`** rule | yes, at the choice | it becomes a nested `Or` with no type and no name |
+| a choice inside a group of a **`lexer`** rule  | **no** | it becomes one run of text; nothing in the tree is left unnamed |
+| an alternative of the root with **parts** and no word | yes, at the alternative | its variant is an enum case that will be matched by name |
+| an alternative of the root that is **one operand** reading no word | **no** | its place *is* all a name could say — there is nothing inside it to tell apart |
+| an alternative that offered a word and lost it to a collision | yes | the author meant a name, and only the whole choice can see it went unnamed |
+
+The middle exemption is deliberate and is the reason the lint is not simply
+"name everything": a `*`, a `'\n'` and a set can never yield a word, and forcing
+the author to write `lexer Star -> '*';` to name one variant would be making them
+declare a rule with no parts.
+
+The `lexer`-group exemption is the one that was learned the hard way. Hoisting
+`LitStr`'s body group out to `lexer LitStrChar -> …` was *not* a rename: it converted
+one token of text into `Vec<LitStrChar>` — a node per character of every string
+literal in the language. Naming a part of a terminal changes what the terminal
+*is*, which is why the check is gated on the kind of the enclosing rule.
+
+---
+
+# Part II — The build
+
+## 8. The two levels, and what each one's shape is decided by
 
 A production declares a **rule**, and the keyword says what kind of thing the
 rule is. The kind decides *who gets to say the rule's shape*, which is the one
@@ -23,14 +338,14 @@ difference that matters:
 | keyword      | means          | whose decision the shape is |
 |--------------|----------------|------------------------------|
 | `whitespace` | the separator  | always one newtype of `I`, read by `take_while` over the characters it lists |
-| `lexer`      | a **terminal** | its own right side, **then possibly overruled** by the rest of the file (§1.2) |
+| `lexer`      | a **terminal** | its own right side, **then possibly overruled** by the rest of the file (§8.2) |
 | `syntax`     | a **node**     | its own right side, always |
 
 A `syntax` rule is a node and nothing else can make it not one. A `lexer` rule
 *may* be one run of text instead, and which ones are is the interesting part of
 this document.
 
-### 1.1 Shape from the rule's own right side
+### 8.1 Shape from the rule's own right side
 
 The root of the right side is read the same way at both levels, with **one
 asymmetry**, and it is the whole of the difference between a terminal and a
@@ -38,9 +353,9 @@ node:
 
 | root of the right side                       | a `syntax` rule becomes       | a `lexer` rule becomes |
 |----------------------------------------------|-------------------------------|------------------------|
-| a choice (`A \| B \| …`)                       | `enum`, one variant per alternative | `enum`, same — until §1.2 overrules it |
-| one alternative, several operands (a sequence) | `struct`, one field per operand | `struct`, same — until §1.2 overrules it |
-| one alternative, **one operand** | a newtype of what that operand holds — of *that node* for a bare name (`pub struct X<I>(pub Y<I>)`, through a `Box` only on a cycle, §2), the character class or the external's answer for the rest | **one run of text**: `pub struct A<I>(pub I)`, for a bare name reading `B` and keeping its text, as for characters (`U+000A`, `['0'-'7']`) or an external (`<Ext>`) |
+| a choice (`A \| B \| …`)                       | `enum`, one variant per alternative | `enum`, same — until §8.2 overrules it |
+| one alternative, several operands (a sequence) | `struct`, one field per operand | `struct`, same — until §8.2 overrules it |
+| one alternative, **one operand** | a newtype of what that operand holds — of *that node* for a bare name (`pub struct X<I>(pub Y<I>)`, through a `Box` only on a cycle, §9), the character class or the external's answer for the rest | **one run of text**: `pub struct A<I>(pub I)`, for a bare name reading `B` and keeping its text, as for characters (`U+000A`, `['0'-'7']`) or an external (`<Ext>`) |
 
 The third row is the one worth memorising. A `lexer` rule that is nothing but
 another rule's name does **not** become that rule's node — it becomes one field
@@ -67,11 +382,11 @@ pub struct RawIdent<I> {
 ```
 
 — and whether `IdentOrKeyword<I>` is itself a node or a run of text is decided
-by *its* right side and by §1.2, not by this site.
+by *its* right side and by §8.2, not by this site.
 
-### 1.2 How the rest of the file can overrule a `lexer` rule
+### 8.2 How the rest of the file can overrule a `lexer` rule
 
-A `lexer` rule that §1.1 made an enum or a struct is **downgraded to one run of
+A `lexer` rule that §8.1 made an enum or a struct is **downgraded to one run of
 text** wherever the file reaches it in a position that can only answer with
 text. There are exactly three such positions, and the code that finds them is
 `node_rules`, which is computed over the whole file to a fixpoint *before any
@@ -100,16 +415,10 @@ Two things this does **not** do, both easy to assume and both wrong:
   ones, because a node's field may be a node; only a terminal is at risk of
   being asked to hold one inside its own text.
 
-Naming a part of a terminal is therefore **not a rename**. Hoisting `LitStr`'s
-body group out to `lexer LitStrChar -> …` takes it out of the first position
-above, so it is no longer forced to text, and the result is
-`Vec<LitStrChar>` — a node per character of every string literal in the
-language. That is what the lint in §5 lets the author do deliberately and tells
-them about when they do it in a `syntax` rule by accident.
+Naming a part of a terminal is therefore **not a rename** — see the lint of
+§7 for what the author is told when they do it where a node is meant.
 
----
-
-## 2. Right side → shape
+## 9. Right side → shape
 
 One production, one type, named for the **left side only**. The right side
 decides only the *shape* of that type. Nothing on the right side invents a type
@@ -121,7 +430,7 @@ Read the right side at its **root**:
 |--------------------------------------------|-------------|
 | a choice (`A \| B \| …`)                     | `enum`, one variant per alternative |
 | one alternative of several operands        | `struct`, **one field per operand** |
-| one alternative of one bare name           | a newtype of that operand's shape at the `syntax` level; **one field of text** at the `lexer` level (§1.1) |
+| one alternative of one bare name           | a newtype of that operand's shape at the `syntax` level; **one field of text** at the `lexer` level (§8.1) |
 
 The field count is a hard rule, and it is the one the author is held to: as many
 fields as the production has top-level sub-expressions, no matter how few the
@@ -131,17 +440,17 @@ source and the runs and the word are part of it.
 
 Within a sequence, each operand contributes the field its shape holds. Three
 rows are level-dependent — what a **name** contributes (a node, or its text in
-the three positions of §1.2), whether that node is **held through a pointer**, and what a **single
+the three positions of §8.2), whether that node is **held through a pointer**, and what a **single
 character** is — and the trivia rows below are `syntax`-only. Those are the whole
-of what the two levels differ in once §1's shape question is settled:
+of what the two levels differ in once §8's shape question is settled:
 
 | operand                | the field holds                                   |
 |------------------------|---------------------------------------------------|
 | `Name` (a rule)        | `Name<I>`, through a `Box` only where the pair of rules stands on a **cycle of containment** — a type that reaches itself through fields alone has no size, and a `Vec` cuts a cycle wherever it stands, so a DAG of nodes is held bare however wide it reaches |
 | `'a'` / `U+0009`       | **level-dependent**: in a `syntax` rule, `Char<I, 'a'>` — a node of one punctuator. In a `lexer` rule, a field of `I` with `#[parserc(next = 'a')]`, because a terminal holds text and not nodes |
 | `'abc'`, `'->'`        | a field of `I` with `#[parserc(keyword = "abc")]` — **at either level**. A word is never a `Char`, since `Char` is one character |
-| `['a'-'z', '_']`       | **always a class**: one field of `I` with `next_if(\|c\| matches!(c, …))` — one test, not a choice. The analyzer refuses every wider member (§7), because a set denotes characters and nothing else |
-| `~X`                   | **one character**: the operand `X` — any operand without a suffix, a set included — is refused at this position, and the character taken after. Where `X` is a class, one test answers it — `next_if(\|c\| !matches!(…))`; where it reaches wider, its own parser is probed that it must not match, then one character is taken whatever it is |
+| `['a'-'z', '_']`       | **always a class**: one field of `I` with `next_if(\|c\| matches!(c, …))` — one test, not a choice. Every member denotes characters, because the analyzer refused whatever did not (§4, §6) |
+| `~X`                   | **one character**, as the language says (§4): where `X` is a class, one test answers it — `next_if(\|c\| !matches!(…))`; where it reaches wider, its own parser is probed that it must not match, then one character is taken whatever it is |
 | `A?`                   | `Option<A<I>>`                                     |
 | `A*`                   | `Vec<A<I>>` — except that a repetition of a **class** is one greedy `take_while(\|c\| …)` over its predicate, holding characters and not a list of one-character matches |
 | `A+`, `{n}`, `{n,m}`   | `Vec<A<I>>` plus a `read_` function that counts    |
@@ -159,51 +468,11 @@ Two consequences worth stating because they are load-bearing:
   HexDigit{4};` is *two* fields, not three.
 - **an unnamed group is structure without a name.** A group of one alternative
   becomes a tuple; a group of several becomes a nested `Or`. Neither gets a
-  type, a visitor hook, or a lint — but see §5 for when the file is *asked* to
-  name one.
-- **what a set may hold is settled before any code: characters, one member
-  apiece.** A member that spells a word, a range reaching over a word, or a
-  name whose definition answers wider than characters is refused by the
-  analyzer (`WideSetMember`, §7) — the or the author meant is a choice, and
-  the refusal it meant is `~` over an expression. What settles is **how a
-  refusal is tested**, never **how much is taken**: a `~` matches exactly one
-  character either way, and every longer run comes from a repetition around
-  it, which is greedy at both levels alike. The mark binds the operand, not
-  its repetition: `~X*` refuses one character as often as it can, and
-  `~(X*)` refuses the repetition itself.
-
-  ```text
-  lexer LitStr -> '\'' ( ~['\\'', '\\\\', CR] | QuoteEscape | … )* '\'';
-  //                          three members, each one character → a class
-  lexer BlockCommentBody -> … ( BlockCommentOrDoc | ~( '/*' | '*/' ) )* '*/';
-  //                                          a refusal of two words → a probe
-  ```
-
-  A class is answered by one test of the character here, its arms collected
-  from the members — and `CR` contributes its character through the same
-  `denotations` table a name is asked for its text by:
-
-  ```rust
-  ::parserc::next_if(|c: char| !(matches!(c, '\'' | '\\\\' | '\r')))
-  ```
-
-  A wider operand has no class to test; its own parser stands as the probe,
-  and the character after the refusal is taken whatever it is — the one
-  character that a class's `matches!` also takes:
-
-  ```rust
-  if ::parserc::keyword("/*").or(::parserc::keyword("*/")).ok().parse(&mut rest)?.is_some()
-  {
-      return Err(::parserc::Kind::NextIf(…).into());   // refuses only what opens a delimiter
-  }
-  ::parserc::next_if(|_c: char| true).parse(input)?;   // one character, as the class took
-  ```
-
-  Both then sit as one arm of the `while` that their group's `*` writes, and
-  it is that loop — not the `~` — that captures the whole run. The two shapes
-  do part company under a repetition written **on the refusal itself**: a
-  refusal of a class is handed its predicate as one greedy combinator, with
-  no loop at all,
+  type, a visitor hook, or a lint — but see §7 and §12 for when the file is
+  *asked* to name one.
+- **the refusal is tested by its width, and the loop is not written by the
+  mark.** A class under `~` answers as one predicate, and a repetition of that
+  refusal is one greedy combinator with no loop at all:
 
   ```text
   lexer InnerLineDoc -> '//!' ~[LF,CR]*;
@@ -217,11 +486,26 @@ Two consequences worth stating because they are load-bearing:
   )
   ```
 
-  while a refusal of anything wider re-runs its probe once per character.
+  Anything wider under `~` has no predicate to hand over: its own parser
+  stands as the probe, the character after the refusal is taken whatever it
+  is, and a repetition written around it re-runs the probe once per character
+  —
+
+  ```rust
+  if ::parserc::keyword("/*").or(::parserc::keyword("*/")).ok().parse(&mut rest)?.is_some()
+  {
+      return Err(::parserc::Kind::NextIf(…).into());   // refuses only what opens a delimiter
+  }
+  ::parserc::next_if(|_c: char| true).parse(input)?;   // one character, as the class took
+  ```
+
+  which is how `BlockCommentBody`'s `( BlockCommentOrDoc | ~( '/*' | '*/' ) )*`
+  captures its whole run through the `while` its group's `*` writes — the
+  loop, not the `~`.
 
   A name written as a member is asked for the characters it denotes, and a
   name reached from a refused class is asked the same; neither keeps its
-  node, which is the second position of §1.2. The table that says which
+  node, which is the second position of §8.2. The table that says which
   names settle to characters is `denotations`, and the analyzer reads it
   before the generator is ever asked for code.
 
@@ -229,7 +513,7 @@ Two consequences worth stating because they are load-bearing:
 
 Between two operands of a `syntax` sequence the generator lays a field of
 `Option<S<I>>` — the run of the separator — which the author never writes. It is
-a field like any other, so it is counted in the field numbering (§4) and the
+a field like any other, so it is counted in the field numbering (§11) and the
 visitor reaches it with `visit_s` like any other, and it is why a `syntax`
 struct has more fields than the production appears to have:
 
@@ -258,7 +542,7 @@ items of the file.
 
 ---
 
-## 3. Type names
+## 10. Type names
 
 The type of a rule is the rule's own name, verbatim, in the file's spelling.
 
@@ -290,7 +574,7 @@ The type parameter is always `I`, and every path is always rooted at
 
 ---
 
-## 4. Field names
+## 11. Field names
 
 Field names come from **what the operand reads**, in one of two forms, and
 nothing else.
@@ -347,7 +631,7 @@ pub struct Set<I>(
 
 ---
 
-## 5. Variant names
+## 12. Variant names
 
 A `syntax` enum — and a `lexer` enum, by the same rule — names its variants, in
 order, by the **first** thing in the alternative that can supply a word:
@@ -379,33 +663,13 @@ promise a name the code declines to write nor stay silent about one it does.
 *meant* — which is what lets the lint tell "this reads no word" from "this
 offered a word and lost it".
 
-### When the file is told
-
-`UnnamedAlternative` fires where a name was owed and not had, which is exactly
-where a *node* was made without one:
-
-| situation                                       | told? | because |
-|---|---|---|
-| a choice inside a group of a **`syntax`** rule | yes, at the choice | it becomes a nested `Or` with no type and no name |
-| a choice inside a group of a **`lexer`** rule  | **no** | it becomes one run of text; nothing in the tree is left unnamed |
-| an alternative of the root with **parts** and no word | yes, at the alternative | its variant is an enum case that will be matched by name |
-| an alternative of the root that is **one operand** reading no word | **no** | its place *is* all a name could say — there is nothing inside it to tell apart |
-| an alternative that offered a word and lost it to a collision | yes | the author meant a name, and only the whole choice can see it went unnamed |
-
-The middle exemption is deliberate and is the reason the lint is not simply
-"name everything": a `*`, a `'\n'` and a set can never yield a word, and forcing
-the author to write `lexer Star -> '*';` to name one variant would be making them
-declare a rule with no parts.
-
-The `lexer`-group exemption is the one that was learned the hard way. Hoisting
-`LitStr`'s body group to `lexer LitStrChar -> …` was *not* a rename: it converted
-one token of text into `Vec<LitStrChar>` — a node per character of every string
-literal in the language. Naming a part of a terminal changes what the terminal
-*is*, which is why the check is gated on the kind of the enclosing rule.
+When the file is *told* that a variant will be called by its place — and which
+cases are exempt — is the `UnnamedAlternative` lint, and its whole table lives
+with the other lints in §7.
 
 ---
 
-## 6. Visitor
+## 13. Visitor
 
 The build emits a `Visit` trait and a `walk` module in the shape of
 [`syn`'s](https://docs.rs/syn/latest/syn/visit/index.html): one `visit_*` hook
@@ -422,9 +686,9 @@ and cannot claim a tree the nodes do not hold. Consequently:
   `visit_s` for the run before it is exactly what the source wrote;
 - a group, an anonymous choice and an anonymous character field get **no** hook
   of their own — they have no name to build one from, which is the whole subject
-  of §5 — and the walk reaches them by position instead.
+  of §12 — and the walk reaches them by position instead.
 
-That last point is what makes the numbering in §4 load-bearing rather than
+That last point is what makes the numbering in §11 load-bearing rather than
 cosmetic: `walk_set` descends into `(inner).0`, `(inner).2` and `(inner).3`
 because those are what the fields were written as, and a nameless field is only
 findable by its place.
@@ -444,12 +708,12 @@ are reasons everything above should be read as the **generated** rule:
   on the type that carries it.
 - **field and variant names.** The generator has only the file to go by, so it
   says `f1`, `f2` and the rule's own name; the hand file names what a part holds
-  — `open`, `head`, `tail`, `marker`, `body`. §4 is therefore the generator's
+  — `open`, `head`, `tail`, `marker`, `body`. §11 is therefore the generator's
   rule and not the hand file's.
 
 ---
 
-## 7. What is refused rather than written wrong
+## 14. What the generator refuses
 
 The generator declines instead of approximating. Each refusal is an
 `UnsynError::Build` carrying one of five `BuildKind`s, and names the rule that
@@ -460,8 +724,13 @@ asked for it:
 | `Name`                 | a name the file wrote is one no Rust item can wear (`is_item_name` fails) |
 | `External`             | the pattern calls `<Ext>` and the build was never given a binding for `Ext` |
 | `Whitespace`           | the `whitespace` rule's right side cannot be reduced to a test of one character |
-| `Literal`              | a set member written as a range whose ends are not both single characters, or a literal that spells no character at all |
+| `Literal`              | a literal that spells no character where the code asked one |
 | `Syntax`               | a right side no field can hold: a counted repetition of anything wider than a character, an operator inside a group, a name asked for its text where a tuple answers with types |
+
+The language-level refusals — the file denoting no grammar — are §6, and they
+run first: a build is only ever asked of an analyzed file, and a precondition
+this module states rather than re-checks is that a rule reaching a name the
+file never declares was refused there, not here.
 
 `Builder::external` is the **only** way anything outside the file enters a
 build. The generator holds no table of what `<XID_Start>` means and never will:
@@ -470,61 +739,7 @@ meaningless to the generator, the analyzer and the lint alike.
 
 ---
 
-## 8. What the file is noted for: the lints
-
-A lint is a note on a file that means what it wrote and need not have written
-it, or wrote it twice. The two channels of a report are kept apart by what they
-imply (`Diagnostics`): the refusals of §7 reject a build; a lint travels with a
-model that builds. Every lint is a `LintKind` and the span of the construct
-that earned it, and there are six kinds.
-
-| `LintKind` | fires where |
-|---|---|
-| `DuplicateMember(m)` | a set member `m` denotes exactly what an earlier member of the same set already denotes: `[ 'a', 'a' ]`, `[ 'a', U+0061 ]`, `[ LF, LF ]` |
-| `CoveredMember(m, e)` | `m` denotes nothing that the earlier `e` does not — `m` is the redundant write: `[ 'a'-'d', 'b' ]` |
-| `CoversMember(m, e)` | `m` denotes everything `e` does and more — the *earlier* member is the redundant one: `[ 'b', 'a'-'d' ]` |
-| `OverlappingMember(m, e)` | `m` and `e` share some values and each keeps some of its own: `[ 'a'-'b', 'b'-'c' ]` |
-| `RedundantSeparator(name)` | a `syntax` rule mentions the file's `whitespace` rule anywhere short of the whole of an alternative, where its generated separator takes that trivia whether it is named or not: `syntax A -> S 'x';` over `whitespace S -> …` — and one report per mention |
-| `UnnamedAlternative` | an alternative of a root choice names no rule and reads no word, or a choice stands inside a group of a `syntax` rule — the situations, the table, and every exemption are §5 |
-
-### Set members compared as values
-
-The four `…Member` kinds come from comparing one member's *value* against
-another's (`conflict`), where a value is what the member denotes:
-
-- a one-character literal is a character; a code-point literal and a range are
-  code-point intervals; a longer literal is a **string** — and a character and
-  a string of more than one character are never the same value, so `'a'` and
-  `'ab'` simply do not compare;
-- a member named by a rule is compared **by its name alone**: what the name
-  denotes is what that rule's definition denotes, which is not this pass's
-  business — two members naming one rule are a `DuplicateMember`, and a name
-  and a literal never conflict;
-- characters compare four ways — same (`Same`), inside an earlier one
-  (`Covered`), around an earlier one (`Covers`), sharing some code points
-  (`Overlap`) — and strings only compare for exact equality.
-
-A member is told **once**: of the earlier members it conflicts with, the first
-one earns the report and the rest are not repeated; the text each report
-names is the member as the file wrote it. What cannot be settled as a value —
-a range whose ends are not both single characters — is a refusal, not a lint
-(`BuildKind::Literal`, §7), and never reaches the comparison.
-
-### Naming the separator twice
-
-`RedundantSeparator` is asked only of a `syntax` rule, and only of a mention
-that is *not* the whole of an alternative: a rule whose right side is just `S`
-names the trivia as the tree's own field, and no lint touches it — `syntax A ->
-'a' | S | 'b';` stays silent, and the group `(S)` is the mention itself, not a
-second ask. A suffix or a `concat` on the mention does not dissolve it: `S*`
-and `S concat 'x'` both ask for a run the separator takes anyway, and each
-mention in the rule is told once on its own. The name is
-matched through `external_key`, so a rule written `r#S` is the separator the
-file names just as plainly as one written `S`.
-
----
-
-## 9. What the derive accepts
+## 15. What the derive accepts
 
 Everything above is what the generator *writes*; this is what the derive it
 writes against *reads*, and the two are deliberately the same vocabulary.
@@ -567,7 +782,7 @@ unnamed field whose type is the input — and **of the field** everywhere else:
 #[parserc(read_ident_or_keyword)]
 pub struct IdentOrKeyword<I>(pub I)
 where
-    I: UnsynInput;
+  I: UnsynInput;
 
 // several parts, each read its own way: an attribute per field
 pub struct LitStr<I>(
@@ -623,7 +838,7 @@ therefore restricted: `input = Type` on an item only, `crucial` and
 
 ---
 
-## 10. Reading this back
+## 16. Reading this back
 
 The fastest check of any claim above is to regenerate and diff:
 
@@ -638,6 +853,6 @@ reads the spec with it; `tests/two_trees.rs` compares the generated tree against
 the hand-written one in `src/compiler/{lexer,syntax}.rs`.
 
 The plan for where this is going — self-hosting, and the hand-written side still
-lagging the ten rules §5 made nodes — is in
+lagging the ten rules the spec made nodes — is in
 [`MODELING_PLAN.md`](MODELING_PLAN.md), whose open item M8.2b-10 records exactly
 which rules the two trees still settle differently.
