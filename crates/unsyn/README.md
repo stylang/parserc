@@ -40,8 +40,7 @@ node:
 |----------------------------------------------|-------------------------------|------------------------|
 | a choice (`A \| B \| …`)                       | `enum`, one variant per alternative | `enum`, same — until §1.2 overrules it |
 | one alternative, several operands (a sequence) | `struct`, one field per operand | `struct`, same — until §1.2 overrules it |
-| one alternative, **one operand that is a bare name** | a newtype of *that node*: `pub struct X<I>(pub Y<I>)`, through a `Box` only on a cycle (§2) | **one run of text**: `pub struct A<I>(pub I)`, reading `B` and keeping its text |
-| one alternative, one operand that is characters or an external (`U+000A`, `['0'-'7']`, `<Ext>`) | the shape that operand holds | a newtype of `I` |
+| one alternative, **one operand** | a newtype of what that operand holds — of *that node* for a bare name (`pub struct X<I>(pub Y<I>)`, through a `Box` only on a cycle, §2), the character class or the external's answer for the rest | **one run of text**: `pub struct A<I>(pub I)`, for a bare name reading `B` and keeping its text, as for characters (`U+000A`, `['0'-'7']`) or an external (`<Ext>`) |
 
 The third row is the one worth memorising. A `lexer` rule that is nothing but
 another rule's name does **not** become that rule's node — it becomes one field
@@ -82,7 +81,7 @@ code as about the rule itself:
 | a name written…                    | example              | why text is all it can answer |
 |------------------------------------|----------------------|-------------------------------|
 | as the **whole of a group**        | `( Name )`           | a group is one field, and one field of a terminal is one run of text |
-| as one **member of a set** of more than one | `[ 'a', Name ]` | a set answers one question — which characters, or which of its members — however wide a member is |
+| as one **member of a set**  | `[ 'a', CR ]`        | a set asks which character the position holds, and a member that names a rule answers with the characters it denotes |
 | as the **target of an `except`**   | `A except B`         | the removal is computed over the *text* `A` took |
 
 Downgrading is what keeps a terminal one token: `LitStr`'s body group, `Set`'s
@@ -141,8 +140,8 @@ of what the two levels differ in once §1's shape question is settled:
 | `Name` (a rule)        | `Name<I>`, through a `Box` only where the pair of rules stands on a **cycle of containment** — a type that reaches itself through fields alone has no size, and a `Vec` cuts a cycle wherever it stands, so a DAG of nodes is held bare however wide it reaches |
 | `'a'` / `U+0009`       | **level-dependent**: in a `syntax` rule, `Char<I, 'a'>` — a node of one punctuator. In a `lexer` rule, a field of `I` with `#[parserc(next = 'a')]`, because a terminal holds text and not nodes |
 | `'abc'`, `'->'`        | a field of `I` with `#[parserc(keyword = "abc")]` — **at either level**. A word is never a `Char`, since `Char` is one character |
-| `['a'-'z', '_']`       | **a class**, if every member denotes characters: one field of `I` with `next_if(\|c\| matches!(c, …))` — one test, not a choice. **A fold**, if any member is wider: `.or()` over each member's own parser |
-| `~[…]`                 | **one character**, whatever the set is: the class refused — `next_if(\|c\| !matches!(…))` — or, with no class to test, a probe of the members' fold that must not match, then one character taken |
+| `['a'-'z', '_']`       | **always a class**: one field of `I` with `next_if(\|c\| matches!(c, …))` — one test, not a choice. The analyzer refuses every wider member (§7), because a set denotes characters and nothing else |
+| `~X`                   | **one character**: the operand `X` — any operand without a suffix, a set included — is refused at this position, and the character taken after. Where `X` is a class, one test answers it — `next_if(\|c\| !matches!(…))`; where it reaches wider, its own parser is probed that it must not match, then one character is taken whatever it is |
 | `A?`                   | `Option<A<I>>`                                     |
 | `A*`                   | `Vec<A<I>>` — except that a repetition of a **class** is one greedy `take_while(\|c\| …)` over its predicate, holding characters and not a list of one-character matches |
 | `A+`, `{n}`, `{n,m}`   | `Vec<A<I>>` plus a `read_` function that counts    |
@@ -162,16 +161,22 @@ Two consequences worth stating because they are load-bearing:
   becomes a tuple; a group of several becomes a nested `Or`. Neither gets a
   type, a visitor hook, or a lint — but see §5 for when the file is *asked* to
   name one.
-- **a set is a class only when every member is one character wide.** What that
-  changes is **how the refusal is tested**, never **how much is taken**: a `~`
-  matches exactly one character either way, and every longer run comes from a
-  repetition around it, which is greedy at both levels alike.
+- **what a set may hold is settled before any code: characters, one member
+  apiece.** A member that spells a word, a range reaching over a word, or a
+  name whose definition answers wider than characters is refused by the
+  analyzer (`WideSetMember`, §7) — the or the author meant is a choice, and
+  the refusal it meant is `~` over an expression. What settles is **how a
+  refusal is tested**, never **how much is taken**: a `~` matches exactly one
+  character either way, and every longer run comes from a repetition around
+  it, which is greedy at both levels alike. The mark binds the operand, not
+  its repetition: `~X*` refuses one character as often as it can, and
+  `~(X*)` refuses the repetition itself.
 
   ```text
-  lexer LitStr -> '\'' ( ~['\'', '\\', CR] | QuoteEscape | … )* '\'';
+  lexer LitStr -> '\'' ( ~['\\'', '\\\\', CR] | QuoteEscape | … )* '\'';
   //                          three members, each one character → a class
-  lexer BlockCommentBody -> … ( BlockCommentOrDoc | ~['/*','*/'] )* '*/';
-  //                                          two members, each two characters → no class
+  lexer BlockCommentBody -> … ( BlockCommentOrDoc | ~( '/*' | '*/' ) )* '*/';
+  //                                          a refusal of two words → a probe
   ```
 
   A class is answered by one test of the character here, its arms collected
@@ -179,12 +184,12 @@ Two consequences worth stating because they are load-bearing:
   `denotations` table a name is asked for its text by:
 
   ```rust
-  ::parserc::next_if(|c: char| !(matches!(c, '\'' | '\\' | '\r')))
+  ::parserc::next_if(|c: char| !(matches!(c, '\'' | '\\\\' | '\r')))
   ```
 
-  With no class to test, the members are read as a choice instead, so the
-  refusal is a probe of that choice followed by the taking of one character
-  whatever it is — the one character that a class's `matches!` also takes:
+  A wider operand has no class to test; its own parser stands as the probe,
+  and the character after the refusal is taken whatever it is — the one
+  character that a class's `matches!` also takes:
 
   ```rust
   if ::parserc::keyword("/*").or(::parserc::keyword("*/")).ok().parse(&mut rest)?.is_some()
@@ -194,10 +199,11 @@ Two consequences worth stating because they are load-bearing:
   ::parserc::next_if(|_c: char| true).parse(input)?;   // one character, as the class took
   ```
 
-  Both then sit as one arm of the `while` that their group's `*` writes, and it
-  is that loop — not the `~` — that captures the whole run. The two shapes do
-  part company under a repetition written **on the refusal itself**. A class is
-  handed its refused predicate as one greedy combinator, with no loop at all:
+  Both then sit as one arm of the `while` that their group's `*` writes, and
+  it is that loop — not the `~` — that captures the whole run. The two shapes
+  do part company under a repetition written **on the refusal itself**: a
+  refusal of a class is handed its predicate as one greedy combinator, with
+  no loop at all,
 
   ```text
   lexer InnerLineDoc -> '//!' ~[LF,CR]*;
@@ -211,17 +217,13 @@ Two consequences worth stating because they are load-bearing:
   )
   ```
 
-  A fold has no predicate to hand over, so `code_of_repetition` falls back on
-  the loop any other repetition gets, and re-runs its probe once per character.
-  No refusal of a fold is written directly repeated in `unsyn.us` — each is
-  reached through a group that is — so that fallback is read off the generator
-  rather than shown from this crate's own file.
+  while a refusal of anything wider re-runs its probe once per character.
 
-  A name reached from a fold is asked which member it is, and a name reached
-  from a class is asked for the characters it denotes; neither keeps its node,
-  which is the second position of §1.2. A name that denotes anything wider than
-  characters is absent from `denotations`, and its absence is what leaves a set
-  with no class in the first place.
+  A name written as a member is asked for the characters it denotes, and a
+  name reached from a refused class is asked the same; neither keeps its
+  node, which is the second position of §1.2. The table that says which
+  names settle to characters is `denotations`, and the analyzer reads it
+  before the generator is ever asked for code.
 
 ### Trivia fields
 

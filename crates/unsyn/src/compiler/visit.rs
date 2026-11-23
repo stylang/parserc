@@ -563,14 +563,14 @@ pub mod walk {
         node: &'ast syntax::ExprWithoutSuffix<I>,
     ) {
         match node {
-            syntax::ExprWithoutSuffix::Tilde { tilde, s, set } => {
+            syntax::ExprWithoutSuffix::Tilde { tilde, s, operand } => {
                 v.visit_tilde(tilde);
 
                 if let Some(s) = s {
                     v.visit_s(s);
                 }
 
-                v.visit_set(set);
+                v.visit_expr_without_suffix(operand);
             }
             syntax::ExprWithoutSuffix::Call {
                 lt,

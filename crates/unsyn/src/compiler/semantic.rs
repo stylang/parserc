@@ -45,7 +45,7 @@
 //! reads of a node is a value the node holds in its parts — a literal decoded
 //! from its digits and escapes — which no walk carries to a visitor either.
 
-use std::collections::{BTreeMap, BTreeSet};
+use std::collections::{BTreeMap, BTreeSet, HashSet};
 
 use parserc::{Span, ToSpan, as_str};
 
@@ -63,7 +63,20 @@ pub fn analyze<'a, I>(source: &'a I, file: &syntax::Crate<I>) -> Diagnostics
 where
     I: UnsynInput + 'a,
 {
-    let mut checker = Checker::new(source);
+    // The rules whose answers are characters, one apiece: the names a set
+    // may reach without saying more than a character — and every name the
+    // file defined, which the mention check alone speaks for.
+    let char_rules = codegen::denotations(source, file).into_keys().collect();
+    let defined = file
+        .items
+        .iter()
+        .filter_map(|item| match item {
+            syntax::Item::Stmt(stmt) => Some(codegen::external_key(as_str(source, &stmt.ident))),
+            _ => None,
+        })
+        .collect();
+
+    let mut checker = Checker::new(source, char_rules, defined);
     checker.visit_crate(file);
 
     debug_assert!(
@@ -338,6 +351,14 @@ struct Checker<'ast, I> {
     rules: Vec<Rule>,
     /// The name the `whitespace` declaration gave the trivia, when there is one.
     trivia: Option<String>,
+    /// The rules whose definitions settle down to characters, one a piece.
+    ///
+    /// A set may name only these — a member that settles wider denotes no
+    /// character to test, and a set is one test of one character however
+    /// many members list.
+    char_rules: HashSet<String>,
+    /// The names of every definition the file wrote, sigil folded.
+    defined: HashSet<String>,
     /// The patterns of the operands read but not yet joined into a larger one.
     stack: Vec<Pattern>,
     /// The members of a set read but not yet taken as an operand.
@@ -369,11 +390,13 @@ struct Checker<'ast, I> {
 
 impl<'ast, I: UnsynInput> Checker<'ast, I> {
     /// A pass over a file that has found nothing yet.
-    fn new(source: &'ast I) -> Self {
+    fn new(source: &'ast I, char_rules: HashSet<String>, defined: HashSet<String>) -> Self {
         Self {
             diagnostics: Diagnostics::default(),
             rules: Vec::new(),
             trivia: None,
+            char_rules,
+            defined,
             stack: Vec::new(),
             members: Vec::new(),
             ranges: Vec::new(),
@@ -522,6 +545,36 @@ impl<'ast, I: UnsynInput> Checker<'ast, I> {
         }
 
         self.compare(&members);
+
+        // A set denotes the characters one position may hold. A member that
+        // spells more — a word, a range reaching over a word, a name whose
+        // definition answers with more than a character — says what no test
+        // of the character here can ask: the refusal the file meant is `~`
+        // over an expression, and the choice it meant is a choice.
+        for member in &members {
+            let wide = match &member.value {
+                Value::Chars(_) => false,
+                // A name the file never defined is the mention check's to
+                // say; a defined one that settles wider is the set's own.
+                Value::Name(name) => {
+                    let key = codegen::external_key(name);
+
+                    self.defined.contains(&key) && !self.char_rules.contains(&key)
+                }
+                // A range whose ends are not characters, or stand the wrong
+                // way, is what the range's own reports already say.
+                Value::Unknown => false,
+                // A word is no character to test, and nothing beside says so.
+                Value::Strings(_) => true,
+            };
+
+            if wide {
+                self.diagnostics.push(UnsynError::Semantics(
+                    SemanticsKind::WideSetMember(member.text.clone()),
+                    member.span.clone(),
+                ));
+            }
+        }
 
         Pattern {
             heads: BTreeSet::new(),
@@ -852,11 +905,23 @@ impl<'ast, I: UnsynInput> Visit<'ast, I> for Checker<'ast, I> {
         walk::walk_expr_without_suffix(self, node);
 
         let pattern = match node {
-            // `'~' […]` and `[…]` differ in what they ask of the character here,
-            // and not in what they can begin with or in what they mention.
-            syntax::ExprWithoutSuffix::Tilde { set, .. } | syntax::ExprWithoutSuffix::Set(set) => {
-                self.set(set)
+            // `'~' X` takes the one character that X must not begin. What the
+            // refusal answers with is a character whoever the operand reaches,
+            // and the only thing kept of the operand is what it mentions —
+            // those names still have to be defined somewhere.
+            syntax::ExprWithoutSuffix::Tilde { .. } => {
+                let refused = self.take_one();
+
+                Pattern {
+                    heads: BTreeSet::new(),
+                    nullable: false,
+                    bare: false,
+                    uses: refused.uses,
+                }
             }
+            // `[…]` asks which character the position holds, or which member
+            // of it the position begins — and mentions the names it lists.
+            syntax::ExprWithoutSuffix::Set(set) => self.set(set),
             // A call of an external is a link the caller of the parser binds, and
             // so mentions no name of this file: nothing here can ask that the file
             // have defined it, and nothing here can reach past it.
@@ -1258,6 +1323,46 @@ mod tests {
     fn a_set_of_nothing_denotes_nothing() {
         assert_eq!(errors("lexer A -> [];"), [SemanticsKind::EmptySet]);
         assert_eq!(errors("lexer A -> ~[];"), [SemanticsKind::EmptySet]);
+    }
+
+    #[test]
+    fn a_set_holds_only_characters() {
+        // A word is no character to test, and a member that spells more says
+        // what no test of the character here can ask: the or it meant stands
+        // where it is written, and the refusal it meant is `~`.
+        assert_eq!(
+            errors("lexer A -> ['ab', 'c'];"),
+            [SemanticsKind::WideSetMember("'ab'".into())]
+        );
+
+        // A name answers the set only where its definition settles down to
+        // characters; settling wider is the set member's wrong, not the
+        // definition's own — a rule is free to spell a word.
+        assert_eq!(
+            errors("lexer W -> 'ab'; lexer A -> [W];"),
+            [SemanticsKind::WideSetMember("W".into())]
+        );
+        assert_eq!(report("lexer W -> 'ab';"), Diagnostics::default());
+
+        // What settles to characters answers plainly: a code point, a class,
+        // a choice of one-character arms, and names reaching those.
+        assert_eq!(
+            report("lexer C -> U+000A; lexer A -> ['a', C];"),
+            Diagnostics::default()
+        );
+        assert_eq!(
+            report("lexer C -> ['a'-'z']; lexer A -> [C, 'A'];"),
+            Diagnostics::default()
+        );
+        assert_eq!(
+            report("lexer C -> 'a' | 'b'; lexer A -> [C];"),
+            Diagnostics::default()
+        );
+
+        // What `~` refuses is no set's business: it probes any operand, words
+        // and choices included, and takes the character after the refusal.
+        assert_eq!(report("lexer A -> ~('ab' | 'c');"), Diagnostics::default());
+        assert_eq!(report("lexer A -> ~'ab';"), Diagnostics::default());
     }
 
     #[test]

@@ -620,7 +620,7 @@ pub enum ExprWithoutSuffix<I>
 where
     I: ::parserc::chars::CharsInput,
 {
-    NegatedSet(NegatedSet<I>),
+    NegatedSet(Box<NegatedSet<I>>),
     Call(Call<I>),
     Paren(Box<Paren<I>>),
     Set(Set<I>),
@@ -635,7 +635,7 @@ where
 {
     pub f1: ::parserc::syntax::Char<I, '~'>,
     pub f2: ::core::option::Option<S<I>>,
-    pub set: Set<I>,
+    pub expr_without_suffix: Box<ExprWithoutSuffix<I>>,
 }
 #[derive(Debug, PartialEq, Eq, PartialOrd, Ord, Clone, :: parserc :: syntax :: Syntax)]
 pub struct Call<I>
@@ -1477,7 +1477,7 @@ pub mod walk {
         if let Some(inner) = &node.f2 {
             v.visit_s(inner);
         }
-        v.visit_set(&node.set);
+        v.visit_expr_without_suffix(&node.expr_without_suffix);
     }
     # [doc = concat ! ("Descend through the node of `" , stringify ! (Call) , "`.")]
     pub fn walk_call<'ast, I, V>(v: &mut V, node: &'ast Call<I>)

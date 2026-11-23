@@ -198,6 +198,10 @@ pub enum SemanticsKind {
     UnicodeEscape,
     #[error("empty set expression")]
     EmptySet,
+    #[error(
+        "set member `{0}` denotes more than one character; write the refusal or the choice it is instead"
+    )]
+    WideSetMember(String),
     #[error("undefined symbol `{0}`")]
     UndefinedSymbol(String),
     #[error("name collision with the previous definition at {0:?}")]

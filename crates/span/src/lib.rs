@@ -350,12 +350,9 @@ where
     /// some piece of it: narrow a file to a token's start and every span below
     /// it is measured from there instead. The answer is a plain `Range` and
     /// not a `Span` — it names a place in `from`'s reckoning, not in the one
-    /// the region was written in, and no two spans here are the same kind of
-    /// thing twice.
-    ///
-    /// `None` when the region begins before `from` — those bytes lie behind
-    /// the piece and are not the piece's to name — and when it is open at
-    /// either end, which has no far bound to recount.
+    /// the region was written in. `None` where the region begins before
+    /// `from`, behind the piece and not the piece's to name, or is open at
+    /// either end and has no far bound to recount.
     #[inline]
     pub fn shift(&self, from: Idx) -> Option<Range<Idx>> {
         let start = self.start()?;

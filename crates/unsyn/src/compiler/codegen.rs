@@ -483,6 +483,11 @@ fn atom_refs<I>(
         syntax::ExprWithoutSuffix::Paren { expr: group, .. } => {
             expr_refs(source, group, direct, src, syntaxes, edges);
         }
+        // A refusal holds its operand in a field, as directly as a group of
+        // one name hands its answer back.
+        syntax::ExprWithoutSuffix::Tilde { operand, .. } => {
+            atom_refs(source, operand, direct, src, syntaxes, edges);
+        }
         _ => {}
     }
 }
@@ -898,14 +903,19 @@ where
         }
         // A set of more than one member is a choice of its members, and a
         // choice answers with one thing however wide the members are.
-        syntax::ExprWithoutSuffix::Set(set) | syntax::ExprWithoutSuffix::Tilde { set, .. }
-            if set_items(set).len() > 1 =>
-        {
+        syntax::ExprWithoutSuffix::Set(set) if set_items(set).len() > 1 => {
             for item in set_items(set) {
                 if let syntax::SetItem::Reference(ident) = item {
                     forced.insert(external_key(as_str(source, ident)));
                 }
             }
+        }
+        // A refusal probes whatever it refuses: a name inside the refused
+        // operand answers with its shape to the probe, and with its text
+        // where the probe is a class of characters — which is what the arm
+        // below settles when the operand is just that class.
+        syntax::ExprWithoutSuffix::Tilde { operand, .. } => {
+            atom_forced(source, operand, forced);
         }
         _ => {}
     }
@@ -918,7 +928,7 @@ where
 /// One character or one run of characters between two of them, which is all a set
 /// of a rule can be written out of and still be one test of one character.
 #[derive(Debug, Clone, Copy)]
-enum Arm {
+pub(crate) enum Arm {
     /// One character, as `'a'` is.
     Char(char),
     /// The characters between two of them, as `'0'-'7'` is.
@@ -949,7 +959,15 @@ impl Arm {
 /// nests itself is absent until it is settled, which it never is. The round that
 /// adds nothing ends the count, so the answer does not depend on the order the
 /// file declares its rules in.
-fn denotations<I>(source: &I, file: &syntax::Crate<I>) -> HashMap<String, Vec<Arm>>
+/// The characters the lexer rules of the file denote, by their names.
+///
+/// A rule earns its entry only when its definition settles down to
+/// characters and nothing wider — a class of them, a choice of classes, a
+/// name already settled — and the entry says which characters those are.
+/// The [analyzer](super::semantic) reads the settled names to tell what a
+/// set may list, and the code reads both the names and the characters to
+/// write the tests.
+pub(crate) fn denotations<I>(source: &I, file: &syntax::Crate<I>) -> HashMap<String, Vec<Arm>>
 where
     I: UnsynInput,
 {
@@ -1722,14 +1740,26 @@ where
     /// count, counted here for the field it will be written into.
     fn class_of(&self, atom: &syntax::ExprWithoutSuffix<I>) -> Option<TokenStream> {
         match atom {
-            syntax::ExprWithoutSuffix::Tilde { set, .. } => {
-                set_arms(self.source, set, self.denotations)
-                    .as_deref()
-                    .map(refused_pred)
-            }
+            syntax::ExprWithoutSuffix::Tilde { operand, .. } => self.refused_class(operand),
             atom => atom_arms(self.source, atom, self.denotations)
                 .as_deref()
                 .map(class_pred),
+        }
+    }
+
+    /// The test of the characters a refusal does not hold, where what `~`
+    /// refuses is a set that settles as one class: the refusal is then the
+    /// other half of those characters, one test of the character here.
+    ///
+    /// Anything wider — a choice of runs, a name no class answers — is refused
+    /// as an expression, by a probe that the reader writes beside the one
+    /// character it takes.
+    fn refused_class(&self, operand: &syntax::ExprWithoutSuffix<I>) -> Option<TokenStream> {
+        match operand {
+            syntax::ExprWithoutSuffix::Set(set) => set_arms(self.source, set, self.denotations)
+                .as_deref()
+                .map(refused_pred),
+            _ => None,
         }
     }
 
@@ -2469,18 +2499,28 @@ where
                     attr: Some(field_parser(parser)),
                 })
             }
-            syntax::ExprWithoutSuffix::Set(set) | syntax::ExprWithoutSuffix::Tilde { set, .. } => {
+            syntax::ExprWithoutSuffix::Set(set) => {
                 // A set of the tree level reads one character of what its
-                // members denote, which is one test only while every member
-                // denotes characters; anything wider has no field to read
-                // into at this level.
+                // members denote, and the analyzer has already said every
+                // member denotes one; the refusal is the file that was never
+                // analyzed speaking.
                 let arms = set_arms(self.source, set, self.denotations)
                     .ok_or_else(|| self.unsupported(atom.to_span()))?;
 
-                let pred = match atom {
-                    syntax::ExprWithoutSuffix::Tilde { .. } => refused_pred(&arms),
-                    _ => class_pred(&arms),
-                };
+                let pred = class_pred(&arms);
+
+                Ok(Field {
+                    name: None,
+                    ty: quote! { I },
+                    attr: Some(field_combinator("next_if", &quote! { (#pred) })),
+                })
+            }
+            syntax::ExprWithoutSuffix::Tilde { operand, .. } => {
+                // A field reads a refusal only where the refusal is one test
+                // of a character; what refuses an expression is statements.
+                let pred = self
+                    .refused_class(operand)
+                    .ok_or_else(|| self.unsupported(atom.to_span()))?;
 
                 Ok(Field {
                     name: None,
@@ -2849,20 +2889,21 @@ where
             }
             syntax::ExprWithoutSuffix::Set(set) => self.code_of_set(set),
             syntax::ExprWithoutSuffix::Paren { expr: group, .. } => self.code_of_expr(group),
-            syntax::ExprWithoutSuffix::Tilde { set, .. } => {
-                // What `~` asks is answered by the character here, and takes it, so
-                // that a refusal of the set is a match of the operand.
-                if let Some(arms) = set_arms(self.source, set, self.denotations) {
-                    let pred = refused_pred(&arms);
+            syntax::ExprWithoutSuffix::Tilde { operand, .. } => {
+                // What `~` asks is answered by the character here, and takes
+                // it: the refused operand is probed and must not begin what
+                // it matches, and the character after the refusal is taken
+                // whatever it is.
+                if let Some(pred) = self.refused_class(operand) {
                     return Ok(Code::Combinator {
                         key: "next_if",
                         args: quote! { (#pred) },
                     });
                 }
 
-                // The probe is statements, so the set is asked for the
-                // expression it reads as whichever answer it gave.
-                let code = self.code_of_set(set)?;
+                // The probe is statements, so the operand is asked for the
+                // expression it reads as.
+                let code = self.code_of_atom(operand)?;
                 let parser = self.expr_of(code)?;
 
                 Ok(Code::Stmt(vec![quote! {
@@ -2883,70 +2924,23 @@ where
         }
     }
 
-    /// The code of a set: one test of a character where every member is one, and
-    /// a choice of its members where any of them is more.
+    /// The code of a set: one test of a character, however many members and
+    /// however wide a range.
     ///
-    /// The two answers are kept apart in the type rather than left to whoever
-    /// reads the tokens back: a class is one combinator and can be named as such
-    /// where it is written, while a fold of `.or()` is a wider expression that
-    /// has to be spelled out.
+    /// What a set holds is settled by the analyzer to be characters only — a
+    /// member of more is a refusal there, not a wider spelling here — so the one
+    /// answer left is the class of them. The `None` here is the file that was
+    /// never analyzed speaking.
     fn code_of_set(&mut self, set: &syntax::Set<I>) -> Result<Code, UnsynError> {
-        if let Some(arms) = set_arms(self.source, set, self.denotations) {
-            let pred = class_pred(&arms);
+        let arms = set_arms(self.source, set, self.denotations)
+            .ok_or_else(|| self.unsupported(set.to_span()))?;
 
-            return Ok(Code::Combinator {
-                key: "next_if",
-                args: quote! { (#pred) },
-            });
-        }
+        let pred = class_pred(&arms);
 
-        let mut members = Vec::new();
-
-        for item in set_items(set) {
-            members.push(self.code_of_set_item(item)?);
-        }
-
-        let mut members = members.into_iter();
-
-        let Some(first) = members.next() else {
-            return Ok(Code::Combinator {
-                key: "next_if",
-                args: quote! { (|_c: char| false) },
-            });
-        };
-
-        let mut parser = self.expr_of(first)?;
-
-        for member in members {
-            let other = self.expr_of(member)?;
-            parser = quote! { #parser.or(#other) };
-        }
-
-        Ok(Code::Expr(parser))
-    }
-
-    /// The code of one member of a set.
-    fn code_of_set_item(&mut self, item: &syntax::SetItem<I>) -> Result<Code, UnsynError> {
-        match item {
-            syntax::SetItem::Range(range) => {
-                let arm = range_arm(range).ok_or_else(|| {
-                    UnsynError::Build(BuildKind::Literal(self.rule.clone()), range.to_span())
-                })?;
-
-                match arm {
-                    Arm::Char(c) => Ok(Code::Expr(quote! { ::parserc::next(#c) })),
-                    Arm::Range(lo, hi) => Ok(Code::Expr(quote! {
-                        ::parserc::next_if(|c: char| matches!(c, #lo..=#hi))
-                    })),
-                }
-            }
-            syntax::SetItem::Str(lit) => self.code_of_str(lit),
-            syntax::SetItem::Unicode(lit) => {
-                let c = self.code_of(lit)?;
-                Ok(Code::Expr(quote! { ::parserc::next(#c) }))
-            }
-            syntax::SetItem::Reference(ident) => Ok(Code::Expr(self.reference(ident)?)),
-        }
+        Ok(Code::Combinator {
+            key: "next_if",
+            args: quote! { (#pred) },
+        })
     }
 
     /// The code that reads one operand that is a literal string.
@@ -3074,11 +3068,7 @@ where
         let class = match target {
             // A refusal is a class when what it refuses is one, and the class of
             // the refusal is the other half of the characters.
-            syntax::ExprWithoutSuffix::Tilde { set, .. } => {
-                set_arms(self.source, set, self.denotations)
-                    .as_deref()
-                    .map(refused_pred)
-            }
+            syntax::ExprWithoutSuffix::Tilde { operand, .. } => self.refused_class(operand),
             atom => atom_arms(self.source, atom, self.denotations)
                 .as_deref()
                 .map(class_pred),
@@ -4230,26 +4220,25 @@ mod tests {
     }
 
     #[test]
-    fn a_set_of_wider_members_is_a_fold_and_keeps_the_explicit_form() {
-        // The two halves of `code_of_set` answer differently, and only one of
-        // them is a single combinator: members that are each one character
-        // become a class named by `next_if`, while a member that is a word has
-        // no character to test and the set becomes a fold of the members' own
-        // parsers — an expression, which is what `parser =` exists to carry.
-        let soup = code("lexer S -> ['ab', 'c'];");
+    fn a_set_of_wider_members_is_refused_before_any_code() {
+        // A set denotes characters, one test of them; a member that is a word
+        // has no character to hold, and the analyzer is what says so — the
+        // spelling the file wanted is an or-expression, refused by `~` or
+        // matched as a choice, and never a set.
+        let report = analyzed("lexer S -> ['ab', 'c'];");
 
         assert!(
-            soup.contains(":: parserc :: keyword (\"ab\") . or (:: parserc :: next ('c'))")
-                || soup.contains("::parserc::keyword(\"ab\").or(::parserc::next('c'))"),
-            "the wider set should fold its members: {soup}"
-        );
-        assert!(
-            soup.contains("parser ="),
-            "a fold has to be written as `parser =`, the only form that carries it"
+            matches!(
+                report.errors[..],
+                [
+                    UnsynError::Semantics(SemanticsKind::WideSetMember(ref member), _)
+                ] if member == "'ab'"
+            ),
+            "{report:?}"
         );
 
-        // Beside it, the same shape of set with members that are each one
-        // character names one combinator instead.
+        // A class whose members are each one character still builds, and one
+        // combinator says it.
         let soup = code("lexer S -> ['a', 'c'];");
         assert!(
             has(
@@ -4261,6 +4250,34 @@ mod tests {
         assert!(
             !soup.contains("parser ="),
             "a class is one combinator and says so: {soup}"
+        );
+    }
+
+    #[test]
+    fn a_refusal_of_more_than_a_class_probes_the_expression_it_refuses() {
+        // `~` refuses any operand: where the refusal is a class it is one
+        // test of the character; where it reaches wider, the operand's own
+        // parser is probed — it must not begin — and the one character after
+        // the refusal is taken whatever it is.
+        let soup = code("lexer C -> ~( 'a' | 'bc' );");
+
+        assert!(
+            soup.contains("next ('a')") && soup.contains("keyword (\"bc\")"),
+            "the refusal probes both spellings its choice lists: {soup}"
+        );
+        assert!(
+            soup.contains("is_some ()") && soup.contains("next_if (| _c : char | true)"),
+            "the probe must not match, and one character is taken after it: {soup}"
+        );
+
+        // Beside it, the refusal of a class of characters stays one test.
+        let soup = code("lexer C -> ~['a'-'z'];");
+        assert!(
+            has(
+                &soup,
+                quote! { #[parserc(next_if = |c: char| !(matches!(c, 'a'..='z')))] }
+            ),
+            "{soup}"
         );
     }
 

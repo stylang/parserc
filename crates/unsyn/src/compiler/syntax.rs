@@ -367,23 +367,25 @@ pub enum ExprWithoutSuffix<I>
 where
     I: UnsynInput,
 {
-    /// `'~' Set`, the one character a set does not denote.
+    /// `'~' ExprWithoutSuffix`, an operand refused at this position.
     ///
-    /// What `~` asks is answered by the character here, and takes it, so the
-    /// complement fails where the set would have fitted and always consumes
-    /// input. That is what lets a line document read to the end of its line with
-    /// `~[LF,CR]*` rather than stopping short of it.
+    /// What `~` asks is answered by the character here, and takes it: the
+    /// operand is probed and must not begin what it matches, so the refusal
+    /// fails where the operand would have fitted and always consumes input.
+    /// That is what lets a line document read to the end of its line with
+    /// `~[LF,CR]*` rather than stopping short of it — the refusal repeats and
+    /// the operand carries no quantity of its own.
     ///
-    /// The punct and the set are two operands of one sequence, so the run
-    /// between them is the variant's own field: `'~' [' a ']'` is written with
-    /// the space, and the tree has to keep it.
+    /// The punct and the operand are two operands of one sequence, so the run
+    /// between them is the variant's own field: `'~' ( 'a' | 'b' )` is written
+    /// with the space, and the tree has to keep it.
     Tilde {
         /// The `~` punct.
         tilde: Tilde<I>,
-        /// The run between the punct and the set.
+        /// The run between the punct and the operand.
         s: Option<S<I>>,
-        /// The negated set, whose members are the values refused here.
-        set: Set<I>,
+        /// The refused operand: this position may begin none of what it matches.
+        operand: Box<ExprWithoutSuffix<I>>,
     },
     /// `'<' Ident '>'`, a call of an external the caller of the parser binds,
     /// read as the sequence of its parts.
@@ -1028,28 +1030,36 @@ mod tests {
             );
         }
 
-        // A `~` asks its question of a set and of nothing else, since what it
-        // matches is exactly one character.
+        // A `~` refuses any operand: a set, a single character, a group of
+        // alternatives — what it answers with is still the one character the
+        // operand must not begin.
         assert!(matches!(
             whole::<ExprWithoutSuffix<_>>("~['a', 'b']"),
             Ok(ExprWithoutSuffix::Tilde { .. })
         ));
-        assert!(whole::<ExprWithoutSuffix<_>>("~'a'").is_err());
+        assert!(matches!(
+            whole::<ExprWithoutSuffix<_>>("~'a'"),
+            Ok(ExprWithoutSuffix::Tilde { .. })
+        ));
+        assert!(matches!(
+            whole::<ExprWithoutSuffix<_>>("~( 'a' | 'b' )"),
+            Ok(ExprWithoutSuffix::Tilde { .. })
+        ));
     }
 
     #[test]
-    fn a_negation_keeps_the_run_between_its_punct_and_its_set() {
-        // `~` and the set are two operands of one sequence, so a space written
-        // between them is a field of the variant and not a character any
-        // terminal hides — the same shape the generated tree gives the rule.
+    fn a_negation_keeps_the_run_between_its_punct_and_its_operand() {
+        // `~` and the operand are two operands of one sequence, so a space
+        // written between them is a field of the variant and not a character
+        // any terminal hides — the same shape the generated tree gives the rule.
         let negated = whole::<ExprWithoutSuffix<_>>("~  ['a']").unwrap();
-        let ExprWithoutSuffix::Tilde { tilde, s, set } = negated else {
+        let ExprWithoutSuffix::Tilde { tilde, s, operand } = negated else {
             panic!("not a negation");
         };
 
         assert_eq!(tilde.to_span(), Span::Range(0..1));
         assert_eq!(s.unwrap().0.as_str(), "  ");
-        assert_eq!(set.to_span(), Span::Range(3..8));
+        assert_eq!(operand.to_span(), Span::Range(3..8));
 
         // Nothing between them leaves the field empty rather than misplaced.
         let tight = whole::<ExprWithoutSuffix<_>>("~['a']").unwrap();

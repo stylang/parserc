@@ -93,15 +93,15 @@ lexer BlockComment ->
 /// the two words they are.
 lexer BlockCommentBody ->
     '/*'
-      ( ~['*','!','/*'] | '**' | BlockCommentOrDoc )
-      ( BlockCommentOrDoc | ~['/*','*/'] )*
+      ( ~( '*' | '!' | '/*' ) | '**' | BlockCommentOrDoc )
+      ( BlockCommentOrDoc | ~( '/*' | '*/' ) )*
     '*/'
     ;
 
 lexer InnerLineDoc -> '//!' ~[LF,CR]*;
 
 lexer InnerBlockDoc ->
-    '/*!' ( BlockCommentOrDoc | ~['/*','*/'] )* '*/'
+    '/*!' ( BlockCommentOrDoc | ~( '/*' | '*/' ) )* '*/'
     ;
 
 lexer OuterLineDoc ->
@@ -110,8 +110,8 @@ lexer OuterLineDoc ->
 
 lexer OuterBlockDoc ->
     '/**'
-      ( ~['*','/*'] | BlockCommentOrDoc )
-      ( BlockCommentOrDoc | ~['/*','*/'] )*
+      ( ~( '*' | '/*' ) | BlockCommentOrDoc )
+      ( BlockCommentOrDoc | ~( '/*' | '*/' ) )*
     '*/'
     ;
 
@@ -126,10 +126,12 @@ syntax Expr -> ExprNoTopAlt+ ( '|' ExprNoTopAlt+ )*;
 
 syntax ExprNoTopAlt -> ExprWithSuffix | ExprWithoutSuffix;
 
-/// A list of the values one character can be drawn from.
+/// A list of the characters one position may hold.
 ///
-/// The set is a rule of its own because a pattern asks about it in two ways:
-/// as the values it denotes, and as the one character `~` refuses.
+/// Every member denotes a single character — a one-character literal, a code
+/// point, a range of them, or a name settling down to one — which is what
+/// makes a set one test of one character and nothing wider. What denotes more
+/// than a character is a choice of its own, and `~` refuses any operand.
 syntax Set -> '[' ( SetItem ',' )* SetItem? ']';
 
 syntax ExprWithoutSuffix ->
@@ -142,14 +144,19 @@ syntax ExprWithoutSuffix ->
     | Ident
     ;
 
-/// The characters a set does not denote, which is how a pattern asks for one
-/// character by refusing every other.
-/// 
+/// An operand refused: the character read here is the one the operand must
+/// not begin.
+///
 /// A rule of its own because the refusal is a node of the tree: the operand
-/// the reader picks out of it is the set, and the `~` that says so stands
-/// beside it. Called a negated set rather than a complement because what it
-/// denotes is a set of characters by another spelling and nothing more.
-syntax NegatedSet -> '~' Set;
+/// the reader probes and the character it then takes. Refusing a set of
+/// single characters settles as one test of the character beside them; what
+/// the operand reaches wider is probed as whatever it is, and refused
+/// entirely before the one character after it is taken.
+///
+/// The refused operand carries no quantity of its own, which is what lets a
+/// refusal repeat: `~[LF,CR]*` refuses one character as often as it can, and
+/// `~(X*)` is the spelling that refuses the repetition itself.
+syntax NegatedSet -> '~' ExprWithoutSuffix;
 
 /// An external the caller of the parser binds, named between `<` and `>`.
 /// 
