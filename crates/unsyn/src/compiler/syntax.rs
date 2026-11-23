@@ -11,8 +11,16 @@
 //! nothing names it: `X+` is [`OneOrMore`], `X*` is a [`Vec`], `('a' 'b')` is a
 //! tuple, and `('a' ',')*` is [`SetMember`]. What earns a type is a name on the
 //! *left* side, and the code that reads a tree reads the names. The two
-//! exceptions are [`Set`] and [`RepeatBound`], which name a group only because
-//! reading one means matching on it or asking it questions either way.
+//! exceptions are [`Set`] and [`RepeatBound`], which name a group only because a
+//! reader has to tell their alternatives apart at all — what it then asks of one
+//! is asked from [`read`](super::read), which is where every reading of this tree
+//! lives.
+//!
+//! This module therefore holds types and their parsers and **no `impl` block**:
+//! the tree is what a build writes, and a build of some other file could not know
+//! what its own nodes would want to be asked. [`read`](super::read) is the
+//! hand-written answer to that, and it is the shape a generated tree is read
+//! through as well.
 //!
 //! # Where the trivia goes
 //!
@@ -208,18 +216,6 @@ where
     pub rest: Vec<Led<I, X>>,
 }
 
-impl<I, X> OneOrMore<I, X>
-where
-    I: UnsynInput,
-    X: Syntax<I>,
-{
-    /// The operands of the sequence, in the order they were written.
-    #[inline]
-    pub fn elements(&self) -> impl Iterator<Item = &X> {
-        std::iter::once(&self.first).chain(self.rest.iter().map(|(_, element)| element))
-    }
-}
-
 // ---------------------------------------------------------------------------
 // `syntax Expr -> ExprNoTopAlt+ ( '|' ExprNoTopAlt+ )*;`
 // ---------------------------------------------------------------------------
@@ -240,23 +236,6 @@ where
     pub first: OneOrMore<I, ExprNoTopAlt<I>>,
     /// Every alternative after the first, with the `|` that introduced it.
     pub rest: Vec<Alternative<I>>,
-}
-
-impl<I: UnsynInput> Expr<I> {
-    /// The alternatives of the expression, in the order they were written.
-    ///
-    /// The `|` that introduced an alternative is trivia of the tree rather than
-    /// part of the alternative, so it is dropped here.
-    #[inline]
-    pub fn branches(&self) -> impl Iterator<Item = &OneOrMore<I, ExprNoTopAlt<I>>> {
-        std::iter::once(&self.first).chain(self.rest.iter().map(|(_, _, _, branch)| branch))
-    }
-
-    /// Whether the expression offers exactly one way of being read.
-    #[inline]
-    pub fn is_single(&self) -> bool {
-        self.rest.is_empty()
-    }
 }
 
 /// The group `('|' ExprNoTopAlt+)` of the [`Expr`] rule, in the shape the
@@ -334,26 +313,6 @@ where
     pub s: Option<S<I>>,
     /// The `]` that closes the set.
     pub close: BracketEnd<I>,
-}
-
-impl<I: UnsynInput> Set<I> {
-    /// The members of the set, in the order they were written.
-    pub fn members(&self) -> impl Iterator<Item = &SetItem<I>> {
-        self.items
-            .iter()
-            .map(|(_, item, _, _)| item)
-            .chain(self.tail.iter().map(|(_, item)| item))
-    }
-
-    /// How many members the set lists.
-    pub fn len(&self) -> usize {
-        self.items.len() + usize::from(self.tail.is_some())
-    }
-
-    /// Whether the set lists no member at all.
-    pub fn is_empty(&self) -> bool {
-        self.len() == 0
-    }
 }
 
 /// An operand that stands alone, with no suffix on it.
@@ -681,38 +640,6 @@ where
     pub semi: Semi<I>,
 }
 
-impl<I: UnsynInput> Stmt<I> {
-    /// The kind of node this definition declares.
-    ///
-    /// The word the definition opens with is the only thing that says so, and it
-    /// is the variant of [`LeadingKeywords`] that was read — the three words of
-    /// the spec are the three alternatives of that rule.
-    #[inline]
-    pub fn decl(&self) -> Decl {
-        match self.keyword {
-            LeadingKeywords::Lexer(_) => Decl::Lexer,
-            LeadingKeywords::Syntax(_) => Decl::Syntax,
-            LeadingKeywords::Whitespace(_) => Decl::Whitespace,
-        }
-    }
-}
-
-/// The kind of node a definition declares, which is the word it opens with.
-///
-/// Which of the three words means which is a fact about the DSL rather than
-/// about the language a file of it describes, in the same way that the shapes of
-/// [`Expr`] and [`Stmt`] are: the nodes of the tree name the constructs, and the
-/// variant of [`LeadingKeywords`] the definition opens with picks this one.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum Decl {
-    /// `whitespace`: the trivia the language separates its nodes with.
-    Whitespace,
-    /// `lexer`: a terminal, a pattern over characters.
-    Lexer,
-    /// `syntax`: a node of the tree, a pattern over other nodes.
-    Syntax,
-}
-
 // ---------------------------------------------------------------------------
 // `syntax OuterDoc -> OuterBlockDoc | OuterLineDoc;`
 // `syntax InnerDoc -> InnerBlockDoc | InnerLineDoc;`
@@ -805,6 +732,7 @@ mod tests {
     use crate::compiler::{
         errors::{SemanticsKind, UnsynError},
         input::TokenStream,
+        read::{self, Decl},
     };
 
     /// Parses `source` as the node `T`, refusing whatever is left of it.
@@ -881,7 +809,7 @@ mod tests {
     fn a_sequence_carries_the_run_between_two_operands() {
         let expr = whole::<Expr<_>>("'a' 'b'").unwrap();
 
-        assert_eq!(expr.branches().count(), 1);
+        assert_eq!(read::branches(&expr).count(), 1);
         let (gap, operand) = &expr.first.rest.first().unwrap();
         // No operand owns a run, so the space between the two is the
         // sequence's own field.
@@ -898,9 +826,9 @@ mod tests {
     fn an_alternative_is_joined_by_a_bar() {
         let expr = whole::<Expr<_>>("'a' | 'b' | 'c'").unwrap();
 
-        assert_eq!(expr.branches().count(), 3);
-        assert_eq!(expr.rest[0].3.elements().count(), 1);
-        assert!(!expr.is_single());
+        assert_eq!(read::branches(&expr).count(), 3);
+        assert_eq!(read::elements(&expr.rest[0].3).count(), 1);
+        assert!(!read::is_single(&expr));
 
         // A bar with nothing after it is not an alternative.
         assert!(whole::<Expr<_>>("'a' |").is_err());
@@ -958,7 +886,7 @@ mod tests {
         // A suffix takes a single operand, so `A except B | C` is the alternative
         // `A except B` against the alternative `C`.
         let expr = whole::<Expr<_>>("A except B | C").unwrap();
-        assert_eq!(expr.branches().count(), 2);
+        assert_eq!(read::branches(&expr).count(), 2);
     }
 
     #[test]
@@ -1208,7 +1136,7 @@ mod tests {
                 // Which word a definition opened with is the variant it landed
                 // on, told as a `Decl`; the tree keeps no word of its own, since
                 // a build writes types and no method beside them.
-                Item::Stmt(stmt) => Some(stmt.decl()),
+                Item::Stmt(stmt) => Some(read::decl(stmt)),
                 _ => None,
             })
             .collect::<Vec<_>>();

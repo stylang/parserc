@@ -184,9 +184,10 @@ use super::input::UnsynInput;
 use super::{
     decode,
     errors::{BuildKind, UnsynError},
-    lexer, syntax,
-    syntax::Decl,
+    lexer, read, syntax,
 };
+
+use super::read::Decl;
 
 // ---------------------------------------------------------------------------
 // The builder
@@ -307,7 +308,7 @@ where
             return None;
         };
 
-        matches!(stmt.decl(), Decl::Whitespace).then(|| as_str(source, &stmt.ident).to_owned())
+        matches!(read::decl(stmt), Decl::Whitespace).then(|| as_str(source, &stmt.ident).to_owned())
     })
 }
 
@@ -323,7 +324,8 @@ where
                 return None;
             };
 
-            matches!(stmt.decl(), Decl::Syntax).then(|| external_key(as_str(source, &stmt.ident)))
+            matches!(read::decl(stmt), Decl::Syntax)
+                .then(|| external_key(as_str(source, &stmt.ident)))
         })
         .collect()
 }
@@ -350,7 +352,7 @@ where
 
     for item in &file.items {
         if let syntax::Item::Stmt(stmt) = item
-            && matches!(stmt.decl(), Decl::Syntax)
+            && matches!(read::decl(stmt), Decl::Syntax)
         {
             let src = external_key(as_str(source, &stmt.ident));
 
@@ -405,8 +407,8 @@ fn expr_refs<I>(
 ) where
     I: UnsynInput,
 {
-    for branch in expr.branches() {
-        for element in branch.elements() {
+    for branch in read::branches(expr) {
+        for element in read::elements(branch) {
             operand_refs(source, element, direct, src, syntaxes, edges);
         }
     }
@@ -523,7 +525,7 @@ pub(crate) fn variant_word<I>(
 where
     I: UnsynInput,
 {
-    branch.elements().find_map(|element| match element {
+    read::elements(branch).find_map(|element| match element {
         syntax::ExprNoTopAlt::WithSuffix(suffix) => match suffix {
             syntax::ExprWithSuffix::Concat { keyword, .. } => Some(keyword.0.as_str().to_owned()),
             syntax::ExprWithSuffix::Except { keyword, .. } => Some(keyword.0.as_str().to_owned()),
@@ -560,8 +562,7 @@ pub(crate) fn branch_head<I>(branch: &syntax::OneOrMore<I, syntax::ExprNoTopAlt<
 where
     I: UnsynInput,
 {
-    branch
-        .elements()
+    read::elements(branch)
         .next()
         .map_or(Span::None, |element| element.to_span())
 }
@@ -592,7 +593,7 @@ pub(crate) fn variant_offers<I>(source: &I, expr: &syntax::Expr<I>) -> Vec<Optio
 where
     I: UnsynInput,
 {
-    expr.branches()
+    read::branches(expr)
         .map(|branch| {
             // A single rule names its variant by the rule; anything else offers
             // the word it reads, if it reads one at all.
@@ -693,13 +694,13 @@ where
             continue;
         };
 
-        if !matches!(stmt.decl(), Decl::Lexer) {
+        if !matches!(read::decl(stmt), Decl::Lexer) {
             continue;
         }
 
         let body = &stmt.expr;
 
-        let shape = if !body.is_single() {
+        let shape = if !read::is_single(body) {
             // A choice is an enum of one variant per alternative, whether the
             // alternatives are names, words, or whole sequences of either.
             Shape::Enum
@@ -774,9 +775,8 @@ fn is_sequence<I>(body: &syntax::Expr<I>) -> bool
 where
     I: UnsynInput,
 {
-    body.is_single()
-        && body
-            .branches()
+    read::is_single(body)
+        && read::branches(body)
             .next()
             .is_some_and(|branch| operand_count(branch) > 1)
 }
@@ -790,7 +790,7 @@ fn operand_count<I>(branch: &syntax::OneOrMore<I, syntax::ExprNoTopAlt<I>>) -> u
 where
     I: UnsynInput,
 {
-    branch.elements().map(operands_of).sum()
+    read::elements(branch).map(operands_of).sum()
 }
 
 /// How many operands one element of an alternative writes.
@@ -818,8 +818,8 @@ fn expr_forced<I>(source: &I, expr: &syntax::Expr<I>, forced: &mut HashSet<Strin
 where
     I: UnsynInput,
 {
-    for branch in expr.branches() {
-        for element in branch.elements() {
+    for branch in read::branches(expr) {
+        for element in read::elements(branch) {
             operand_forced(source, element, forced);
         }
     }
@@ -875,19 +875,13 @@ where
         // besides — a sequence, a choice of its own — it answers with its
         // reading, and the names inside answer only to that.
         syntax::ExprWithoutSuffix::Paren { expr: group, .. } => {
-            if group
-                .branches()
+            if read::branches(group)
                 .next()
-                .is_some_and(|branch| branch.elements().count() == 1)
-                && group.is_single()
+                .is_some_and(|branch| read::elements(branch).count() == 1)
+                && read::is_single(group)
                 && let Some(syntax::ExprNoTopAlt::WithoutSuffix(
                     syntax::ExprWithoutSuffix::Reference(ident),
-                )) = group
-                    .branches()
-                    .next()
-                    .expect("one element")
-                    .elements()
-                    .next()
+                )) = read::elements(read::branches(group).next().expect("one element")).next()
             {
                 forced.insert(external_key(as_str(source, ident)));
             } else {
@@ -970,7 +964,7 @@ where
         if let syntax::Item::Stmt(stmt) = item {
             // A `syntax` rule is no character to be a member of a set of one, and
             // is only ever asked of a file that is refused before it is read.
-            if matches!(stmt.decl(), Decl::Whitespace | Decl::Lexer) {
+            if matches!(read::decl(stmt), Decl::Whitespace | Decl::Lexer) {
                 bodies.push((as_str(source, &stmt.ident).to_owned(), &stmt.expr));
             }
         }
@@ -1009,8 +1003,8 @@ where
 {
     let mut arms = Vec::new();
 
-    for branch in expr.branches() {
-        let mut elements = branch.elements();
+    for branch in read::branches(expr) {
+        let mut elements = read::elements(branch);
         let operand = elements.next()?;
         if elements.next().is_some() {
             return None;
@@ -1328,7 +1322,7 @@ where
         // the shape its operand holds — a node, a box of a node, a list or an
         // option of one, the trivia between two operands, or the text of what
         // a punct or a call read.
-        if matches!(stmt.decl(), Decl::Syntax) {
+        if matches!(read::decl(stmt), Decl::Syntax) {
             return self.syntax_item(text, stmt);
         }
 
@@ -1338,7 +1332,7 @@ where
         // however plain or compound the alternatives are. Which rules are
         // nodes at all was settled over the whole file first, since a rule
         // asked for among the parts of another is not written as one.
-        if self.nodes.contains(&external_key(text)) && !stmt.expr.is_single() {
+        if self.nodes.contains(&external_key(text)) && !read::is_single(&stmt.expr) {
             let mut variants = Vec::new();
             let mut variant_descs = Vec::new();
             // The names are settled for the whole choice before any of them is
@@ -1346,7 +1340,7 @@ where
             // is a question about the choice and not about either alternative.
             let names = variant_names(self.source, &stmt.expr);
 
-            for (i, branch) in stmt.expr.branches().enumerate() {
+            for (i, branch) in read::branches(&stmt.expr).enumerate() {
                 self.field_no = 0;
                 self.field_names.clear();
 
@@ -1438,7 +1432,7 @@ where
 
         let allow = allow.then(|| quote! { #[allow(non_camel_case_types)] });
 
-        let code = match stmt.decl() {
+        let code = match read::decl(stmt) {
             Decl::Syntax => unreachable!("a `syntax` rule is written by `syntax_item`"),
             Decl::Whitespace => self.whitespace(text, stmt)?,
             Decl::Lexer => self.lexer_rule(text, stmt)?,
@@ -1535,7 +1529,7 @@ where
         let body = &stmt.expr;
 
         if is_sequence(body) && self.nodes.contains(&external_key(text)) {
-            let branch = body.branches().next().expect("a pattern has a branch");
+            let branch = read::branches(body).next().expect("a pattern has a branch");
 
             return self.fields_of(branch);
         }
@@ -1588,7 +1582,7 @@ where
     ) -> Result<Vec<Field>, UnsynError> {
         let mut fields = Vec::new();
 
-        for element in branch.elements() {
+        for element in read::elements(branch) {
             fields.extend(self.field_of(element)?);
         }
 
@@ -1888,8 +1882,8 @@ where
         let body = &stmt.expr;
         let mut allow = wants_allow(text);
 
-        let item = if body.is_single() {
-            let branch = body.branches().next().expect("a pattern has a branch");
+        let item = if read::is_single(body) {
+            let branch = read::branches(body).next().expect("a pattern has a branch");
             // A rule that is one alternative of one operand that is a name is
             // not a struct of one field but that operand's own shape: the
             // node reads as the node it reads, and the tree says nothing the
@@ -1947,7 +1941,7 @@ where
             // is a question about the choice and not about either alternative.
             let names = variant_names(self.source, body);
 
-            for (i, branch) in body.branches().enumerate() {
+            for (i, branch) in read::branches(body).enumerate() {
                 self.field_no = 0;
                 self.field_names.clear();
 
@@ -2057,7 +2051,7 @@ where
         let mut fields = Vec::new();
         let mut first = true;
 
-        for element in branch.elements() {
+        for element in read::elements(branch) {
             if !first && self.trivia.is_some() && !swallows_junction(element) {
                 fields.push(self.trivia_field());
             }
@@ -2097,8 +2091,8 @@ where
 
         // A choice reads the trivia where one of its alternatives is nothing
         // but the trivia, or a rule that reads it.
-        body.branches().any(|branch| {
-            let mut elements = branch.elements();
+        read::branches(body).any(|branch| {
+            let mut elements = read::elements(branch);
 
             match (elements.next(), elements.next()) {
                 (
@@ -2381,8 +2375,10 @@ where
         atom: &syntax::ExprWithoutSuffix<I>,
     ) -> Result<Vec<Field>, UnsynError> {
         if let syntax::ExprWithoutSuffix::Paren { expr: group, .. } = atom {
-            if group.is_single() {
-                let branch = group.branches().next().expect("a pattern has a branch");
+            if read::is_single(group) {
+                let branch = read::branches(group)
+                    .next()
+                    .expect("a pattern has a branch");
 
                 return self.branch_fields(branch);
             }
@@ -2521,7 +2517,7 @@ where
     fn choice_type(&mut self, body: &syntax::Expr<I>) -> Result<TokenStream, UnsynError> {
         let mut types = Vec::new();
 
-        for branch in body.branches() {
+        for branch in read::branches(body) {
             types.push(self.branch_type(branch)?);
         }
 
@@ -2543,7 +2539,7 @@ where
         let mut types = Vec::new();
         let mut first = true;
 
-        for element in branch.elements() {
+        for element in read::elements(branch) {
             if !first && self.trivia.is_some() && !swallows_junction(element) {
                 types.push(self.trivia_type());
             }
@@ -2616,8 +2612,10 @@ where
                 Ok(vec![quote! { ::parserc::syntax::Char<I, #c> }])
             }
             syntax::ExprWithoutSuffix::Paren { expr: group, .. } => {
-                if group.is_single() {
-                    let branch = group.branches().next().expect("a pattern has a branch");
+                if read::is_single(group) {
+                    let branch = read::branches(group)
+                        .next()
+                        .expect("a pattern has a branch");
 
                     return self.branch_type(branch).map(|ty| vec![ty]);
                 }
@@ -2641,12 +2639,11 @@ where
         // Which of them answer with the node of a rule rather than with text,
         // settled before any code is written since writing it borrows the
         // generator.
-        let answer_kinds: Vec<bool> = expr
-            .branches()
+        let answer_kinds: Vec<bool> = read::branches(expr)
             .map(|branch| self.branch_yields_node(branch))
             .collect();
 
-        for branch in expr.branches() {
+        for branch in read::branches(expr) {
             branches.push(self.code_of_branch(branch)?);
         }
 
@@ -2752,7 +2749,7 @@ where
     /// joined one; the only answer that is a node is a name read on its own,
     /// bare or behind a group that holds nothing else.
     fn branch_yields_node(&self, branch: &syntax::OneOrMore<I, syntax::ExprNoTopAlt<I>>) -> bool {
-        let mut elements = branch.elements();
+        let mut elements = read::elements(branch);
         let Some(first) = elements.next() else {
             return false;
         };
@@ -2776,9 +2773,8 @@ where
             // A group around one operand adds nothing to what that operand
             // answers with.
             syntax::ExprWithoutSuffix::Paren { expr: group, .. } => {
-                group.is_single()
-                    && group
-                        .branches()
+                read::is_single(group)
+                    && read::branches(group)
                         .next()
                         .is_some_and(|branch| self.branch_yields_node(branch))
             }
@@ -2791,7 +2787,7 @@ where
         &mut self,
         branch: &syntax::OneOrMore<I, syntax::ExprNoTopAlt<I>>,
     ) -> Result<Code, UnsynError> {
-        let mut elements = branch.elements();
+        let mut elements = read::elements(branch);
         let Some(first) = elements.next() else {
             return Ok(Code::Stmt(Vec::new()));
         };
@@ -2804,7 +2800,7 @@ where
 
         let mut stmts = Vec::new();
 
-        for element in branch.elements() {
+        for element in read::elements(branch) {
             stmts.extend(self.code_of_operand(element)?.into_stmts());
         }
 
@@ -3649,7 +3645,7 @@ fn one_reference<I>(
 where
     I: UnsynInput,
 {
-    let mut elements = branch.elements();
+    let mut elements = read::elements(branch);
 
     let (
         Some(syntax::ExprNoTopAlt::WithoutSuffix(syntax::ExprWithoutSuffix::Reference(ident))),
@@ -3986,7 +3982,7 @@ fn set_items<I>(set: &syntax::Set<I>) -> Vec<&syntax::SetItem<I>>
 where
     I: UnsynInput,
 {
-    set.members().collect()
+    read::members(set).collect()
 }
 
 #[cfg(test)]
@@ -4143,7 +4139,7 @@ mod tests {
             items: file
                 .items
                 .iter()
-                .filter(|item| matches!(item, syntax::Item::Stmt(stmt) if !matches!(stmt.decl(), Decl::Syntax)))
+                .filter(|item| matches!(item, syntax::Item::Stmt(stmt) if !matches!(read::decl(stmt), Decl::Syntax)))
                 .cloned()
                 .collect(),
         };

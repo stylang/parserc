@@ -741,8 +741,13 @@ findable by its place.
 ### Where the hand-written tree differs
 
 `src/compiler/{lexer,syntax}.rs` is written by hand and tuned where a generated
-file is merely correct. Two of its differences bear on this document, and both
-are reasons everything above should be read as the **generated** rule:
+file is merely correct. Both hold **types and parsers and no `impl` block**: every
+reading of the tree — `elements`, `branches`, `is_single`, `members`, `decl`, and
+with it the `Decl` that says which of the three words declares what — is a free
+function in `src/compiler/read.rs`. A build of some *other* language cannot know
+what its nodes will be asked, so it says nothing; the analysis above it reads them
+instead. Three differences bear on this document, and the first two are reasons
+everything above should be read as the **generated** rule:
 
 - **a single character is a different type at each level of implementation.**
   The generated code holds `Char<I, '~'>`, wearing the character in its type.
@@ -895,7 +900,8 @@ git --no-pager diff crates/unsyn/tests/generated/unsyn_us.rs
 
 `tests/unsyn_us.rs` pins that the kept file *is* the code of the spec and then
 reads the spec with it; `tests/two_trees.rs` compares the generated tree against
-the hand-written one in `src/compiler/{lexer,syntax}.rs`.
+the hand-written one in `src/compiler/{lexer,syntax}.rs`, which both ship without a
+single `impl` block because `src/compiler/read.rs` is what reads a tree.
 
 The plan for where this is going — self-hosting, and the hand-written side still
 lagging the ten rules the spec made nodes — is in

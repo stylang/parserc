@@ -52,8 +52,12 @@ use parserc::{Span, ToSpan, as_str};
 use super::errors::{Diagnostics, LintKind, SemanticsKind, UnsynError};
 use super::input::UnsynInput;
 use super::visit::{Visit, walk};
-use super::{codegen, lexer, syntax, syntax::Decl};
+use super::{codegen, lexer, read, syntax};
 use crate::compiler::decode;
+
+/// The kind of definition a statement opens with, which is a reading of the tree
+/// and not a part of it (see [`read`]).
+use super::read::Decl;
 
 /// Reports what `file` gets wrong beyond the shape of its text.
 ///
@@ -168,10 +172,8 @@ fn definitions_matched_by_nothing(skeletons: &[Skeleton]) -> BTreeSet<String> {
 /// A plain function and not a method of the node, which is what a build writes
 /// with no opinion of its own about what its types mean.
 fn writes_nothing<I: UnsynInput>(expr: &syntax::Expr<I>) -> bool {
-    expr.is_single()
-        && expr
-            .branches()
-            .any(|branch| branch.elements().any(alt_writes_nothing))
+    read::is_single(expr)
+        && read::branches(expr).any(|branch| read::elements(branch).any(alt_writes_nothing))
 }
 
 /// Whether one part of a sequence can be matched by nothing.
@@ -220,7 +222,7 @@ fn bound_may_be_zero<I: UnsynInput>(bound: &syntax::RepeatBound<I>) -> bool {
 /// it names is, which is what lets the nothing a file writes travel from a
 /// definition to the names that stand for it.
 fn bare_name<'s, I: UnsynInput>(expr: &'s syntax::Expr<I>, source: &'s I) -> Option<&'s str> {
-    if !expr.is_single() || !expr.first.rest.is_empty() {
+    if !read::is_single(expr) || read::elements(&expr.first).nth(1).is_some() {
         return None;
     }
 
@@ -703,7 +705,7 @@ impl<'ast, I: UnsynInput> Checker<'ast, I> {
     /// no members at all denotes nothing, which is not a set but a mistake about
     /// where the brackets end.
     fn set(&mut self, set: &'ast syntax::Set<I>) -> Pattern {
-        let members = self.take_members(set.len());
+        let members = self.take_members(read::members(set).count());
         let span = set.to_span();
 
         if members.is_empty() {
@@ -1006,7 +1008,7 @@ impl<'ast, I: UnsynInput> Visit<'ast, I> for Checker<'ast, I> {
         // settled before the pattern is walked, because the pattern is where
         // the question is asked.
         let held = self.holds_node;
-        self.holds_node = matches!(node.decl(), Decl::Syntax);
+        self.holds_node = matches!(read::decl(node), Decl::Syntax);
 
         walk::walk_stmt(self, node);
 
@@ -1016,7 +1018,7 @@ impl<'ast, I: UnsynInput> Visit<'ast, I> for Checker<'ast, I> {
 
         self.rules.push(Rule {
             name: as_str(self.source, &node.ident).to_owned(),
-            kind: node.decl(),
+            kind: read::decl(node),
             span: node.ident.to_span(),
             body,
         });
@@ -1035,7 +1037,7 @@ impl<'ast, I: UnsynInput> Visit<'ast, I> for Checker<'ast, I> {
         // for the group to have been named for. A `lexer` rule is still asked
         // about the alternatives of its whole right side, which do become the
         // variants of an enum — see below.
-        if self.holds_node && self.expr_depth > 0 && !node.is_single() {
+        if self.holds_node && self.expr_depth > 0 && !read::is_single(node) {
             self.diagnostics
                 .lint(LintKind::UnnamedAlternative, node.to_span());
         }
@@ -1061,12 +1063,12 @@ impl<'ast, I: UnsynInput> Visit<'ast, I> for Checker<'ast, I> {
         // case, whatever its size: the author wrote a word here, two
         // alternatives wrote the same one, and only the whole choice can see
         // that one of them goes unnamed.
-        if self.expr_depth == 0 && !node.is_single() {
+        if self.expr_depth == 0 && !read::is_single(node) {
             let names = codegen::variant_names(self.source, node);
             let offers = codegen::variant_offers(self.source, node);
 
-            for ((branch, name), offer) in node.branches().zip(names).zip(offers) {
-                let part = branch.elements().count() > 1;
+            for ((branch, name), offer) in read::branches(node).zip(names).zip(offers) {
+                let part = read::elements(branch).count() > 1;
 
                 if name.is_none() && (part || offer.is_some()) {
                     self.diagnostics
@@ -1083,9 +1085,8 @@ impl<'ast, I: UnsynInput> Visit<'ast, I> for Checker<'ast, I> {
         // alternative was written with, and so the number of patterns it left, is
         // only to be had from the expression. This is the one place the pass
         // reaches past the node it was handed for a number.
-        let counts = node
-            .branches()
-            .map(|branch| branch.elements().count())
+        let counts = read::branches(node)
+            .map(|branch| read::elements(branch).count())
             .collect::<Vec<_>>();
 
         // The alternatives left their operands on one stack, in the order the
