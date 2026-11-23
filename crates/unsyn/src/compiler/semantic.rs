@@ -67,16 +67,25 @@ where
     // may reach without saying more than a character — and every name the
     // file defined, which the mention check alone speaks for.
     let char_rules = codegen::denotations(source, file).into_keys().collect();
-    let defined = file
+    let skeletons: Vec<Skeleton> = file
         .items
         .iter()
         .filter_map(|item| match item {
-            syntax::Item::Stmt(stmt) => Some(codegen::external_key(as_str(source, &stmt.ident))),
+            syntax::Item::Stmt(stmt) => Some(Skeleton {
+                key: codegen::external_key(as_str(source, &stmt.ident)),
+                nullable: stmt.expr.writes_nothing(),
+                bare: stmt.expr.bare_name(source).map(codegen::external_key),
+            }),
             _ => None,
         })
         .collect();
+    let empty = definitions_matched_by_nothing(&skeletons);
+    let defined = skeletons
+        .iter()
+        .map(|skeleton| skeleton.key.clone())
+        .collect();
 
-    let mut checker = Checker::new(source, char_rules, defined);
+    let mut checker = Checker::new(source, char_rules, defined, empty);
     checker.visit_crate(file);
 
     debug_assert!(
@@ -88,6 +97,60 @@ where
     );
 
     checker.diagnostics
+}
+
+/// The two facts about a definition that say whether it can be matched by
+/// nothing, read off the file before any pattern has been assembled.
+struct Skeleton {
+    /// The name, sigil folded.
+    key: String,
+    /// Whether the definition writes a quantity of its own — a `?`, a `*`, a
+    /// bound that may be zero — which is settled by the pattern's shape and by
+    /// nothing the rest of the file has to say.
+    nullable: bool,
+    /// The one name the definition is written as, when it is nothing but one.
+    bare: Option<String>,
+}
+
+/// The names of the definitions that can be matched by nothing.
+///
+/// A definition is one when it writes a nothing of its own, or when it is
+/// written as nothing but a name that is one — which is why this is told by
+/// repeating until nothing new answers, the order the file wrote its rules in
+/// meaning nothing here.
+///
+/// This is asked of the file before it is walked, because a set is judged as it
+/// is read and has to be told which of its members answer with nothing. What is
+/// left out of the answer is a definition reached through a sequence that only
+/// begins with a nothing — `B -> 'b'? C;` — since the shape of a whole pattern
+/// is not known until the file has been walked. A rule left out that way is no
+/// character either, and `WideSetMember` is the one that says of it.
+fn definitions_matched_by_nothing(skeletons: &[Skeleton]) -> BTreeSet<String> {
+    let mut empty: BTreeSet<String> = skeletons
+        .iter()
+        .filter(|skeleton| skeleton.nullable)
+        .map(|skeleton| skeleton.key.clone())
+        .collect();
+
+    loop {
+        let mut grew = false;
+
+        for skeleton in skeletons {
+            let reached = skeleton
+                .bare
+                .as_deref()
+                .is_some_and(|bare| empty.contains(bare));
+
+            if reached && !empty.contains(&skeleton.key) {
+                empty.insert(skeleton.key.clone());
+                grew = true;
+            }
+        }
+
+        if !grew {
+            return empty;
+        }
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -132,6 +195,7 @@ impl Pattern {
                 name,
                 span,
                 alone: false,
+                mention: Mention::Plain,
             }],
         }
     }
@@ -255,7 +319,22 @@ impl Pattern {
     }
 }
 
-/// One mention of a name in a pattern.
+/// Where a mention stands, which is what decides what its definition has to
+/// answer with.
+#[derive(Debug)]
+enum Mention {
+    /// Anywhere else: the file is only asked to have defined the name.
+    Plain,
+    /// A member of a set, which is one question of one character and so can
+    /// hold nothing and nothing wider.
+    SetMember,
+    /// The operand of a refusal, probed at the position it would be matched at
+    /// — which a definition matched by nothing always answers to.
+    Operand,
+}
+
+/// A rule named in a pattern, and where it was named.
+#[derive(Debug)]
 struct Use {
     /// The name as it was written, assembled from the characters the name read.
     name: String,
@@ -264,6 +343,8 @@ struct Use {
     /// Whether the name is the whole of the alternative that offers it, which for
     /// the trivia of the language is the only thing a mention of it can mean.
     alone: bool,
+    /// Where the name stands, which says what its definition owes it.
+    mention: Mention,
 }
 
 // ---------------------------------------------------------------------------
@@ -359,6 +440,13 @@ struct Checker<'ast, I> {
     char_rules: HashSet<String>,
     /// The names of every definition the file wrote, sigil folded.
     defined: HashSet<String>,
+    /// The names of the definitions that can be matched by nothing.
+    ///
+    /// Computed before the file is walked, and told through the names a
+    /// definition reaches as well as through what it writes: both a set member
+    /// and the operand of a refusal are asked for a character, and a definition
+    /// matched by nothing has none to offer whoever names it however far away.
+    empty: BTreeSet<String>,
     /// The patterns of the operands read but not yet joined into a larger one.
     stack: Vec<Pattern>,
     /// The members of a set read but not yet taken as an operand.
@@ -390,13 +478,19 @@ struct Checker<'ast, I> {
 
 impl<'ast, I: UnsynInput> Checker<'ast, I> {
     /// A pass over a file that has found nothing yet.
-    fn new(source: &'ast I, char_rules: HashSet<String>, defined: HashSet<String>) -> Self {
+    fn new(
+        source: &'ast I,
+        char_rules: HashSet<String>,
+        defined: HashSet<String>,
+        empty: BTreeSet<String>,
+    ) -> Self {
         Self {
             diagnostics: Diagnostics::default(),
             rules: Vec::new(),
             trivia: None,
             char_rules,
             defined,
+            empty,
             stack: Vec::new(),
             members: Vec::new(),
             ranges: Vec::new(),
@@ -559,7 +653,13 @@ impl<'ast, I: UnsynInput> Checker<'ast, I> {
                 Value::Name(name) => {
                     let key = codegen::external_key(name);
 
-                    self.defined.contains(&key) && !self.char_rules.contains(&key)
+                    // A name answering wider than a character is the member's
+                    // wrong to say — unless it answers with *nothing*, which is
+                    // the narrower report and is told of once the definitions
+                    // have been settled (`EmptySetMember`, from `resolve`).
+                    self.defined.contains(&key)
+                        && !self.char_rules.contains(&key)
+                        && !self.empty.contains(&key)
                 }
                 // A range whose ends are not characters, or stand the wrong
                 // way, is what the range's own reports already say.
@@ -589,6 +689,7 @@ impl<'ast, I: UnsynInput> Checker<'ast, I> {
                         name,
                         span: member.span,
                         alone: false,
+                        mention: Mention::SetMember,
                     }),
                     _ => None,
                 })
@@ -695,6 +796,31 @@ impl<'ast, I: UnsynInput> Checker<'ast, I> {
                         SemanticsKind::UnexpectedSyntax(mention.name.clone()),
                         mention.span.clone(),
                     ));
+                }
+
+                // Both of these ask a definition for the one thing a pattern
+                // cannot ask a name for and still mean anything, and both are
+                // told through the names as far as they reach: a set is one
+                // question of one character, so a member matched by nothing is
+                // no character to ask about; a refusal takes the character at a
+                // position where its operand does not begin, and a definition
+                // matched by nothing begins everywhere, so there is no
+                // character left for it to take.
+                if self.empty.contains(&codegen::external_key(&mention.name)) {
+                    let kind = match mention.mention {
+                        Mention::SetMember => {
+                            Some(SemanticsKind::EmptySetMember(mention.name.clone()))
+                        }
+                        Mention::Operand => {
+                            Some(SemanticsKind::UnsatisfiableRefusal(mention.name.clone()))
+                        }
+                        Mention::Plain => None,
+                    };
+
+                    if let Some(kind) = kind {
+                        self.diagnostics
+                            .push(UnsynError::Semantics(kind, mention.span.clone()));
+                    }
                 }
 
                 // The trivia between the operands of a rule of nodes is taken
@@ -919,15 +1045,35 @@ impl<'ast, I: UnsynInput> Visit<'ast, I> for Checker<'ast, I> {
             // `'~' X` takes the one character that X must not begin. What the
             // refusal answers with is a character whoever the operand reaches,
             // and the only thing kept of the operand is what it mentions —
-            // those names still have to be defined somewhere.
+            // those names still have to be defined somewhere, and a name whose
+            // definition can be matched by nothing is a probe that always
+            // answers, which is what `resolve` is told of.
+            //
+            // The refusal of a repetition has no spelling of its own: a suffix
+            // written beside `~` stands on the refusal and not under it, so
+            // `~X*` repeats the refusal and no operand of a `~` is ever one to
+            // carry a quantity — which is what keeps this part plain.
             syntax::ExprWithoutSuffix::Tilde { .. } => {
                 let refused = self.take_one();
+
+                debug_assert!(
+                    !refused.nullable,
+                    "an operand of a refusal carries no quantity, so none can match nothing"
+                );
 
                 Pattern {
                     heads: BTreeSet::new(),
                     nullable: false,
                     bare: false,
-                    uses: refused.uses,
+                    uses: refused
+                        .uses
+                        .into_iter()
+                        .map(|mut mention| {
+                            mention.mention = Mention::Operand;
+
+                            mention
+                        })
+                        .collect(),
                 }
             }
             // `[…]` asks which character the position holds, or which member
@@ -1423,6 +1569,114 @@ mod tests {
         // and choices included, and takes the character after the refusal.
         assert_eq!(report("lexer A -> ~('ab' | 'c');"), Diagnostics::default());
         assert_eq!(report("lexer A -> ~'ab';"), Diagnostics::default());
+    }
+
+    #[test]
+    fn a_set_member_denotes_at_least_one_character() {
+        // The other half of §4: a member denotes one character, which is as
+        // much to say that it denotes something. A definition matched by
+        // nothing answers a set with no character to test, and the set that
+        // names one has written a choice of characters it never named.
+        assert_eq!(
+            errors("lexer B -> 'b'*; lexer A -> [B];"),
+            [SemanticsKind::EmptySetMember("B".into())]
+        );
+        assert_eq!(
+            errors("lexer B -> 'b'?; lexer A -> ['a', B, 'c'];"),
+            [SemanticsKind::EmptySetMember("B".into())]
+        );
+        // The nothing is told through the names as far as it reaches, and the
+        // member is told of rather than the rule that wrote the nothing: a
+        // definition matched by nothing is no fault of its own, only of the
+        // set that asked it for a character.
+        assert_eq!(
+            errors("lexer B -> C; lexer C -> 'c'?; lexer A -> [B];"),
+            [SemanticsKind::EmptySetMember("B".into())]
+        );
+        assert_eq!(
+            errors("lexer B -> 'b'{,3}; lexer A -> [B];"),
+            [SemanticsKind::EmptySetMember("B".into())]
+        );
+
+        // A rule matched by nothing is still a rule to write, and a choice of
+        // characters is still a set to name: only the set that asks one for a
+        // character is told of.
+        assert_eq!(report("lexer B -> 'b'*;"), Diagnostics::default());
+        assert_eq!(
+            report("lexer B -> 'b'*; syntax A -> B | 'a';"),
+            Diagnostics::default()
+        );
+
+        // What `~` refuses is no set's business: it probes any operand, words
+        // and choices included, and answers with a character whoever it
+        // reaches. A refusal of a definition matched by nothing is the other
+        // report below, and not this one.
+        assert_eq!(
+            errors("lexer B -> 'b'*; lexer A -> ~B;"),
+            [SemanticsKind::UnsatisfiableRefusal("B".into())]
+        );
+    }
+
+    #[test]
+    fn a_refusal_of_a_rule_that_can_match_nothing_is_satisfied_by_nothing() {
+        // `~X` takes the character where `X` does not begin, and a definition
+        // that can be matched by nothing begins everywhere: the probe always
+        // answers, so the refusal never reaches the character it would have
+        // taken. Only a name can be asked so of, because a suffix written
+        // beside `~` stands on the refusal and not under it (§4, "what binds
+        // where") — `~X*` repeats a refusal, and no operand of a `~` carries a
+        // quantity of its own.
+        assert_eq!(
+            errors("lexer A -> ~B; lexer B -> 'b'*;"),
+            [SemanticsKind::UnsatisfiableRefusal("B".into())]
+        );
+        assert_eq!(
+            errors("lexer A -> ~B; lexer B -> 'b'?;"),
+            [SemanticsKind::UnsatisfiableRefusal("B".into())]
+        );
+        assert_eq!(
+            errors("lexer A -> ~B; lexer B -> 'b'{0,3};"),
+            [SemanticsKind::UnsatisfiableRefusal("B".into())]
+        );
+        // `{,n}` is `{0,n}`, and `{0}` asks for nothing at all.
+        assert_eq!(
+            errors("lexer A -> ~B; lexer B -> 'b'{,3};"),
+            [SemanticsKind::UnsatisfiableRefusal("B".into())]
+        );
+
+        // The nothing a refusal reaches is told through the names as well: B
+        // writes no suffix itself, and is only an answer to the one it names.
+        assert_eq!(
+            errors("lexer A -> ~B; lexer B -> C; lexer C -> 'c'?;"),
+            [SemanticsKind::UnsatisfiableRefusal("B".into())]
+        );
+
+        // A refusal of a rule that has to answer is the refusal of a
+        // delimiter, which is what a comment body is made of.
+        assert_eq!(
+            report("lexer B -> 'b'; lexer A -> ~B;"),
+            Diagnostics::default()
+        );
+
+        // A group is no quantity either, and what stands beside the `~` is the
+        // refusal being repeated: `~X?` may match nothing and is no trap.
+        assert_eq!(report("lexer A -> ~( 'x' );"), Diagnostics::default());
+        assert_eq!(report("lexer A -> ~'x'?;"), Diagnostics::default());
+        assert_eq!(report("lexer A -> ~'x'*;"), Diagnostics::default());
+        assert_eq!(
+            report("lexer A -> ~[ 'a'-'z' ]{0,3};"),
+            Diagnostics::default()
+        );
+
+        // What a refusal can answer with is a character whoever the operand
+        // reaches — words and choices included — and a set always takes its one
+        // character, even the empty one, which `EmptySet` is the one to say of.
+        assert_eq!(report("lexer A -> ~('ab' | 'c');"), Diagnostics::default());
+        assert_eq!(
+            errors("lexer A -> ~[];"),
+            [SemanticsKind::EmptySet],
+            "an empty set is no nullable operand"
+        );
     }
 
     #[test]

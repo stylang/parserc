@@ -202,6 +202,25 @@ pub enum SemanticsKind {
         "set member `{0}` denotes more than one character; write the refusal or the choice it is instead"
     )]
     WideSetMember(String),
+    /// A set member whose definition can be matched by nothing.
+    ///
+    /// A set asks one question of one character, which is only a question when
+    /// every member has a character to answer with; a member matched by nothing
+    /// adds no character to the set, and the file that names one has written a
+    /// choice of the characters it means, not a set of them.
+    #[error("set member `{0}` can be matched by nothing; a set is one question of one character")]
+    EmptySetMember(String),
+    /// A refusal whose operand can be matched by nothing, which nothing can
+    /// satisfy.
+    ///
+    /// `~X` takes the character at a position where `X` does not begin, and a
+    /// definition that can be matched by nothing begins everywhere — so the
+    /// refusal fails before it can take anything, wherever it stands. Only a
+    /// name can be asked so of: a suffix written beside a `~` stands on the
+    /// refusal and not under it, so `~X*` repeats a refusal that always takes
+    /// one character, and `~B` is the refusal of whatever `B` reaches to.
+    #[error("a refusal of `{0}`, which can be matched by nothing, is satisfied by nothing")]
+    UnsatisfiableRefusal(String),
     #[error("undefined symbol `{0}`")]
     UndefinedSymbol(String),
     #[error("name collision with the previous definition at {0:?}")]

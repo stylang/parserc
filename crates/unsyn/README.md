@@ -141,13 +141,16 @@ these*. Members are:
   compared by code point, and the lower end may not exceed the upper
   (`InvalidRange`);
 - a name of a lexer rule, which answers with the characters its definition
-  denotes.
+  denotes — at least one of them, and no more.
 
-**Every member denotes one character, and nothing else is a member.** A member
-that spells a word, a range reaching over a word, or a rule whose definition
-answers wider than a character is refused (`WideSetMember`, §6) — the choice
-the author meant is written as a choice, and the refusal they meant is `~`
-over an expression. An empty set denotes nothing and is refused
+**Every member denotes exactly one character, and nothing else is a member.** A
+member that spells a word, a range reaching over a word, or a rule whose
+definition answers wider than a character is refused (`WideSetMember`, §6) — the
+choice the author meant is written as a choice, and the refusal they meant is `~`
+over an expression. A rule whose definition can be matched by **nothing** is
+refused the same way under a different name (`EmptySetMember`, §6): it offers no
+character for the set to ask about, and the author meant a choice of what that
+rule reads, not a set of characters. An empty set denotes nothing and is refused
 (`EmptySet`).
 
 ### Negation
@@ -155,10 +158,32 @@ over an expression. An empty set denotes nothing and is refused
 `~X` refuses the operand `X` at this position and takes **one character**: the
 probe of `X` must not match, and whatever character stands here after the
 refusal is the answer. `X` is any single operand — a set, a group, a literal, a
-name, even a call of an external — and it carries no quantity of its own:
-`~[LF,CR]*` refuses one character as often as it can, and `~(X*)` is the
-spelling that refuses the repetition itself. A refusal always matches exactly
-one character; every longer run comes from a repetition written around it.
+name, even a call of an external — and a refusal always matches exactly one
+character; every longer run comes from a repetition written around it.
+
+Three things follow from that one shape, and they are the whole of what `~` is
+not:
+
+- **a suffix beside `~` stands on the refusal, never under it** (§4). `~[LF,CR]*`
+  refuses one character as often as it can. There is therefore no `~(X*)` to
+  write: the `*` binds to the refusal, not to the operand inside the group, and
+  no operand of a `~` ever carries a quantity of its own.
+- **what a refusal can still get wrong is a name.** `~B` asks that `B` not begin
+  here, and a definition that can be matched by nothing begins everywhere, so
+  the refusal has no character left to take: that is `UnsatisfiableRefusal` (§6),
+  told through the names a file reaches as well as through the ones it writes.
+- **`~` is no lookahead.** It takes the character whatever it is, so it is a
+  refusal and not an assertion. The language's one construct that consumes
+  nothing is `followed` (§4), and there is deliberately no zero-width `!X`
+  beside it: every operator has to advance, which is what keeps a repetition
+  from being written around something that matches nothing at all (§6).
+  What a lookahead would be asked for elsewhere is asked of `except` here,
+  which refuses a whole token rather than a position (§4), or of the repeated
+  refusal `~X*`, which stops at the first character `X` would begin.
+
+An empty input is no position to refuse at: a bare `~X` where the input has run
+out is `Incomplete`, not a refusal that fits. Under `*` and `+` that never
+reaches an author, since the repetition stops where the characters do.
 
 ### Sequence, choice, and operators
 
@@ -242,6 +267,8 @@ the build never runs.
 | `UnexpectedSyntax` | a `lexer` rule names a `syntax` rule |
 | `EmptySet` | `[]`, or `~[]`, stands in a pattern |
 | `WideSetMember` | a set member that spells a word, ranges over a word, or names a rule answering wider than a character (§4) |
+| `EmptySetMember` | a set member naming a rule that can be matched by nothing, which answers the set with no character to test (§4) |
+| `UnsatisfiableRefusal` | a `~` whose operand can be matched by nothing — a name reaching a definition that is optional, repeated `{0,}` or `{,n}` — which begins everywhere and so leaves the refusal no character to take (§4) |
 | `NotAChar` | a literal asked to be one character is not — the ends of a range, or an empty literal anywhere a character is required |
 | `InvalidRange` | a range whose lower end is above its upper |
 | `InvalidCodePoint` | a `U+…` or `\u{…}` that is no Unicode code point — past `U+10FFFF`, or a surrogate |

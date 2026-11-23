@@ -128,10 +128,11 @@ syntax ExprNoTopAlt -> ExprWithSuffix | ExprWithoutSuffix;
 
 /// A list of the characters one position may hold.
 ///
-/// Every member denotes a single character — a one-character literal, a code
-/// point, a range of them, or a name settling down to one — which is what
-/// makes a set one test of one character and nothing wider. What denotes more
-/// than a character is a choice of its own, and `~` refuses any operand.
+/// Every member denotes a single character and at least one — a one-character
+/// literal, a code point, a range of them, or a name settling down to one —
+/// which is what makes a set one test of one character, neither wider nor
+/// empty. What denotes more than a character is a choice of its own, and `~`
+/// refuses any operand; what denotes nothing is no answer to a set at all.
 syntax Set -> '[' ( SetItem ',' )* SetItem? ']';
 
 syntax ExprWithoutSuffix ->
@@ -153,9 +154,12 @@ syntax ExprWithoutSuffix ->
 /// the operand reaches wider is probed as whatever it is, and refused
 /// entirely before the one character after it is taken.
 ///
-/// The refused operand carries no quantity of its own, which is what lets a
-/// refusal repeat: `~[LF,CR]*` refuses one character as often as it can, and
-/// `~(X*)` is the spelling that refuses the repetition itself.
+/// A suffix written beside the `~` stands on the refusal and not under it,
+/// which is what lets a refusal repeat — `~[LF,CR]*` refuses one character as
+/// often as it can — and what leaves the operand of a refusal with no
+/// quantity of its own to refuse. The one operand that can still be refused
+/// wrongly is a name: a rule matched by nothing begins everywhere, and the
+/// refusal of it is satisfied by nothing.
 syntax NegatedSet -> '~' ExprWithoutSuffix;
 
 /// An external the caller of the parser binds, named between `<` and `>`.

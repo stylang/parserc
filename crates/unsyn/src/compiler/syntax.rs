@@ -26,7 +26,7 @@
 //! [`Ident`] or [`LitStr`]: it keeps no trivia either, since its text is read
 //! into the text of the rule that reaches it.
 
-use parserc::syntax::Syntax;
+use parserc::{as_str, syntax::Syntax};
 
 use crate::compiler::lexer::{Ident, LeadingKeywords, LitDec, LitStr, LitUnicode, S};
 use crate::compiler::{
@@ -261,6 +261,37 @@ impl<I: UnsynInput> Expr<I> {
     pub fn is_single(&self) -> bool {
         self.rest.is_empty()
     }
+
+    /// Whether the expression can be matched by nothing at all.
+    ///
+    /// This is read off the shape of what the file wrote, without reaching past
+    /// any name: only a quantity the expression itself carries answers here,
+    /// since every other operand takes at least one character and a sequence
+    /// of several is matched by nothing never.
+    pub fn writes_nothing(&self) -> bool {
+        self.is_single()
+            && self
+                .branches()
+                .any(|branch| branch.elements().any(ExprNoTopAlt::writes_nothing))
+    }
+
+    /// The one name the expression is written as, when it is nothing but one.
+    ///
+    /// A definition written as one name is matched by nothing exactly when the
+    /// rule it names is, which is what lets the nothing a file writes travel
+    /// from a definition to the names that stand for it.
+    pub fn bare_name<'s>(&self, source: &'s I) -> Option<&'s str> {
+        if !self.is_single() || !self.first.rest.is_empty() {
+            return None;
+        }
+
+        let ExprNoTopAlt::WithoutSuffix(ExprWithoutSuffix::Reference(ident)) = &self.first.first
+        else {
+            return None;
+        };
+
+        Some(as_str(source, ident))
+    }
 }
 
 /// The group `('|' ExprNoTopAlt+)` of the [`Expr`] rule, in the shape the
@@ -296,6 +327,27 @@ where
     WithSuffix(ExprWithSuffix<I>),
     /// An operand that stands alone.
     WithoutSuffix(ExprWithoutSuffix<I>),
+}
+
+impl<I: UnsynInput> ExprNoTopAlt<I> {
+    /// Whether this part of a sequence can be matched by nothing.
+    ///
+    /// An operand standing alone always consumes — that is what every operator
+    /// of the language holds to — so only a suffix that bounds nothing says so
+    /// here. `~X` is no exception written the other way: a suffix beside a `~`
+    /// stands on the refusal and not under it, so `~X*` is the refusal
+    /// repeated, which is the whole of a sequence once more.
+    pub fn writes_nothing(&self) -> bool {
+        match self {
+            ExprNoTopAlt::WithoutSuffix(_) => false,
+            ExprNoTopAlt::WithSuffix(with_suffix) => match with_suffix {
+                ExprWithSuffix::Grouped { suffix, .. } => suffix.may_be_zero(),
+                ExprWithSuffix::Concat { .. }
+                | ExprWithSuffix::Followed { .. }
+                | ExprWithSuffix::Except { .. } => false,
+            },
+        }
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -457,6 +509,17 @@ where
     Repeat(Repeat<I>),
 }
 
+impl<I: UnsynInput> Suffix<I> {
+    /// Whether the suffix is satisfied by matching the operand no times at all.
+    pub fn may_be_zero(&self) -> bool {
+        match self {
+            Suffix::Star(_) | Suffix::Question(_) => true,
+            Suffix::Plus(_) => false,
+            Suffix::Repeat(repeat) => repeat.bound.may_be_zero(),
+        }
+    }
+}
+
 /// An operand carrying one suffix.
 ///
 /// The quantity operators are the [`Suffix`] rule the spec names, so they are
@@ -598,6 +661,20 @@ where
         /// The count.
         LitDec<I>,
     ),
+}
+
+impl<I: UnsynInput> RepeatBound<I> {
+    /// Whether the bound asks for the operand no fewer than no times.
+    ///
+    /// `{,n}` asks it and `{0,n}` asks it; `{n}` asks it only when `n` is `0`,
+    /// which is a bound the analyzer refuses for another reason.
+    pub fn may_be_zero(&self) -> bool {
+        match self {
+            RepeatBound::RangeTo(..) => true,
+            RepeatBound::RangeFrom(from, ..) => matches!(from.count(), Some(0)),
+            RepeatBound::Count(count) => matches!(count.count(), Some(0)),
+        }
+    }
 }
 
 // ---------------------------------------------------------------------------
