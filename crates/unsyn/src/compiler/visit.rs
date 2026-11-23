@@ -282,11 +282,6 @@ where
         walk::walk_concat(self, node);
     }
 
-    /// `'followed'`, which asks that an operand come next.
-    fn visit_followed(&mut self, node: &'ast syntax::Followed<I>) {
-        walk::walk_followed(self, node);
-    }
-
     /// `'except'`, which removes what one operand matches from another.
     fn visit_except(&mut self, node: &'ast syntax::Except<I>) {
         walk::walk_except(self, node);
@@ -339,7 +334,7 @@ where
         walk::walk_ident(self, node);
     }
 
-    /// `lexer Keywords -> LeadingKeywords | FollowingKeywords;`
+    /// `lexer Keywords -> LeadingKeywords | OperatorKeywords;`
     fn visit_keywords(&mut self, node: &'ast lexer::Keywords<I>) {
         walk::walk_keywords(self, node);
     }
@@ -349,9 +344,9 @@ where
         walk::walk_leading_keywords(self, node);
     }
 
-    /// `lexer FollowingKeywords -> 'concat' | 'except' | 'followed';`
-    fn visit_following_keywords(&mut self, node: &'ast lexer::FollowingKeywords<I>) {
-        walk::walk_following_keywords(self, node);
+    /// `lexer OperatorKeywords -> 'concat' | 'except';`
+    fn visit_operator_keywords(&mut self, node: &'ast lexer::OperatorKeywords<I>) {
+        walk::walk_operator_keywords(self, node);
     }
 
     /// `lexer LitStr -> '\'' … '\'';`
@@ -656,27 +651,6 @@ pub mod walk {
 
                 v.visit_expr_no_top_alt(suffix);
             }
-            syntax::ExprWithSuffix::Followed {
-                target,
-                s,
-                keyword,
-                s2,
-                suffix,
-            } => {
-                v.visit_expr_without_suffix(target);
-
-                if let Some(s) = s {
-                    v.visit_s(s);
-                }
-
-                v.visit_followed(keyword);
-
-                if let Some(s) = s2 {
-                    v.visit_s(s);
-                }
-
-                v.visit_expr_no_top_alt(suffix);
-            }
             syntax::ExprWithSuffix::Except {
                 target,
                 s,
@@ -909,7 +883,6 @@ pub mod walk {
         walk_arrow_right, ArrowRight;
         walk_minus, Minus;
         walk_concat, Concat;
-        walk_followed, Followed;
         walk_except, Except;
     }
 
@@ -1015,14 +988,14 @@ pub mod walk {
         }
     }
 
-    pub fn walk_following_keywords<'ast, I: UnsynInput, V: ?Sized + Visit<'ast, I>>(
+    pub fn walk_operator_keywords<'ast, I: UnsynInput, V: ?Sized + Visit<'ast, I>>(
         v: &mut V,
-        node: &'ast lexer::FollowingKeywords<I>,
+        node: &'ast lexer::OperatorKeywords<I>,
     ) {
         match node {
-            lexer::FollowingKeywords::Concat(word)
-            | lexer::FollowingKeywords::Except(word)
-            | lexer::FollowingKeywords::Followed(word) => v.visit_text(word),
+            lexer::OperatorKeywords::Concat(word) | lexer::OperatorKeywords::Except(word) => {
+                v.visit_text(word)
+            }
         }
     }
 
@@ -1109,7 +1082,7 @@ pub mod walk {
     ) {
         match node {
             lexer::Keywords::Leading(keywords) => v.visit_leading_keywords(keywords),
-            lexer::Keywords::Following(keywords) => v.visit_following_keywords(keywords),
+            lexer::Keywords::OperatorKeywords(keywords) => v.visit_operator_keywords(keywords),
         }
     }
 

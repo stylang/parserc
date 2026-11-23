@@ -277,19 +277,14 @@ impl Pattern {
         }
     }
 
-    /// `left concat right` and `left followed right`, which differ in whether the
-    /// right operand is part of what matched: a `followed` tests its operand and
-    /// then leaves it where it was.
+    /// `left concat right`: the two operands matched as one, the second from
+    /// where the first ended.
     ///
-    /// Either way the right operand is only reached where the left one may match
-    /// nothing, which is what says whether a definition guarded by the left one is
-    /// still guarded.
-    fn joined(left: Self, right: Self, consumed: bool) -> Self {
-        let nullable = if consumed {
-            left.nullable && right.nullable
-        } else {
-            left.nullable
-        };
+    /// The right operand is only reached where the left one may match nothing,
+    /// which is what says whether a definition guarded by the left one is still
+    /// guarded.
+    fn joined(left: Self, right: Self) -> Self {
+        let nullable = left.nullable && right.nullable;
 
         // The left side is in the answer either way, so the right is merged into
         // the set it already holds rather than a third set built from both.
@@ -1132,13 +1127,12 @@ impl<'ast, I: UnsynInput> Visit<'ast, I> for Checker<'ast, I> {
 
                 target
             }
-            syntax::ExprWithSuffix::Concat { .. } | syntax::ExprWithSuffix::Followed { .. } => {
-                let consumed = matches!(node, syntax::ExprWithSuffix::Concat { .. });
+            syntax::ExprWithSuffix::Concat { .. } => {
                 let mut parts = self.take(2);
                 let suffix = parts.pop().expect("the operand after the keyword");
                 let target = parts.pop().expect("the operand before it");
 
-                Pattern::joined(target, suffix, consumed)
+                Pattern::joined(target, suffix)
             }
             syntax::ExprWithSuffix::Except { .. } => {
                 let mut parts = self.take(2);
@@ -2036,14 +2030,10 @@ lexer B -> A | '/*' A;
 
     #[test]
     fn what_is_only_tested_is_still_mentioned() {
-        // The target of an `except` never begins a match, and neither does the
-        // operand of a `followed`, but both are names the file has to mean.
+        // The target of an `except` never begins a match, but it is a name the
+        // file has to mean all the same.
         assert_eq!(
             errors("lexer A -> B except MISSING; lexer B -> 'b';"),
-            [SemanticsKind::UndefinedSymbol]
-        );
-        assert_eq!(
-            errors("syntax A -> 'x' followed MISSING;"),
             [SemanticsKind::UndefinedSymbol]
         );
     }
@@ -2103,13 +2093,6 @@ lexer B -> A | '/*' A;
         // which is what the run of leading nullable operands counts.
         assert_eq!(
             errors("syntax A -> 'x'? A;"),
-            [SemanticsKind::LeftRecursion]
-        );
-
-        // A `followed` that comes first in its sequence is tested at the offset
-        // the definition begins at, and consumes nothing to get past it.
-        assert_eq!(
-            errors("syntax A -> A followed 'x';"),
             [SemanticsKind::LeftRecursion]
         );
     }

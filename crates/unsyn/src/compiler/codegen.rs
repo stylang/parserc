@@ -33,7 +33,7 @@
 //! | `A B`                   | a field for `A`, a field for `B`, in that order          |
 //! | `A?`, `A*`              | `Option<A<I>>`, `Vec<A<I>>` — the derive's own shapes. A repetition of a class is the exception: one `#[parserc(take_while…)]` over its predicate |
 //! | `A+`, `{n}`, `{n, m}`   | a `read_` function that counts the nodes it took         |
-//! | `except`, `followed`    | a probe the field's reader runs beside the text it took  |
+//! | `except`                | a probe the field's reader runs beside the text it took    |
 //! | `whitespace W -> […]`   | `#[parserc(take_while_with = (1.., is_w))]` and the predicate |
 //!
 //! Each of those attributes names the combinator it writes — `keyword = "if"`,
@@ -100,8 +100,8 @@
 //! [`Or`](parserc::syntax::Or) of a choice the file left unnamed: the shape
 //! says what the group holds, and no name of the generator is in it. An
 //! operator of the grammar is never a field of its word: `concat` lays its
-//! operands down with no run between them, and `followed` and `except` are
-//! what the reader of the field they stand on runs beside the text it took.
+//! operands down with no run between them, and `except` is what the reader of
+//! the field it stands on runs beside the text it took.
 //!
 //! What no field can hold is refused rather than written wrong: a counted
 //! repetition of nodes, an operator inside a group, and a name asked for its
@@ -154,10 +154,10 @@
 //! [`CharsInput`](parserc::chars::CharsInput), which is what a stream of
 //! characters has to be to run the code above: it is consumed one character at a
 //! time, split, cloned and compared. The cloning is the one a caller is likely
-//! to meet, since a `followed` and the refusal of an `except` are both decided
-//! by taking the text once on a copy of the stream and once on the stream
-//! itself. What the error type of that stream is, the generated code neither
-//! knows nor asks: a refusal it cannot place is the combinator's own.
+//! to meet, since the refusal of an `except` is decided by taking the text once
+//! on a copy of the stream and once on the stream itself. What the error type of
+//! that stream is, the generated code neither knows nor asks: a refusal it
+//! cannot place is the combinator's own.
 //!
 //! # When a build refuses
 //!
@@ -448,10 +448,6 @@ fn operand_refs<I>(
                 atom_refs(source, target, direct, src, syntaxes, edges);
                 operand_refs(source, next, direct, src, syntaxes, edges);
             }
-            syntax::ExprWithSuffix::Followed { target, suffix, .. } => {
-                atom_refs(source, target, direct, src, syntaxes, edges);
-                operand_refs(source, suffix, direct, src, syntaxes, edges);
-            }
             syntax::ExprWithSuffix::Except { target, tokens, .. } => {
                 atom_refs(source, target, direct, src, syntaxes, edges);
                 atom_refs(source, tokens, direct, src, syntaxes, edges);
@@ -529,11 +525,10 @@ where
     branch.elements().find_map(|element| match element {
         syntax::ExprNoTopAlt::WithSuffix(suffix) => match suffix {
             syntax::ExprWithSuffix::Concat { keyword, .. } => Some(keyword.0.as_str().to_owned()),
-            syntax::ExprWithSuffix::Followed { keyword, .. } => Some(keyword.0.as_str().to_owned()),
             syntax::ExprWithSuffix::Except { keyword, .. } => Some(keyword.0.as_str().to_owned()),
             syntax::ExprWithSuffix::Grouped { suffix, .. } => match suffix {
                 // A brace opens a bound and is punctuation, not a word: like
-                // the three operators beside it, it offers no name, and
+                // the two operators beside it, it offers no name, and
                 // offering one would be offering a name no item can wear.
                 syntax::Suffix::Star(_)
                 | syntax::Suffix::Question(_)
@@ -845,10 +840,6 @@ where
                 atom_forced(source, target, forced);
                 operand_forced(source, next, forced);
             }
-            // What follows is only probed, and its answer thrown away: the
-            // probe asks the shape of the answer of nothing. What a removal is
-            // written over is the one operand whose text is read back.
-            syntax::ExprWithSuffix::Followed { target, .. } => atom_forced(source, target, forced),
             syntax::ExprWithSuffix::Except { target, tokens, .. } => {
                 if let syntax::ExprWithoutSuffix::Reference(ident) = target {
                     forced.insert(external_key(as_str(source, ident)));
@@ -1641,10 +1632,9 @@ where
 
                     Ok(fields)
                 }
-                // A `followed` asks of the text what came before it, and an
-                // `except` refuses what all of it amounts to: neither is a
-                // field of its own, and both are what one field's reader does.
-                syntax::ExprWithSuffix::Followed { .. } | syntax::ExprWithSuffix::Except { .. } => {
+                // An `except` refuses what all of the text amounts to: it is no
+                // field of its own, and it is what one field's reader does.
+                syntax::ExprWithSuffix::Except { .. } => {
                     let code = self.code_of_suffix(suffix)?;
                     let parser = self.expr_of(code)?;
 
@@ -2236,7 +2226,7 @@ where
     }
 
     /// The fields one operand writes. An operator of the pattern level —
-    /// `concat`, `followed`, `except` — is data like any other operand at
+    /// `concat`, `except` — is data like any other operand at
     /// this level: the word it reads stands between the operands on each
     /// side of it, with a run of the trivia between them, which is exactly
     /// what the sequence of three writes.
@@ -2283,32 +2273,6 @@ where
 
                 Ok(fields)
             }
-            // A `followed` reads the operand it follows and probes what comes
-            // after it without taking any of it: the field is the operand's,
-            // and the probe is what the field's reader runs beside.
-            syntax::ExprWithSuffix::Followed { target, suffix, .. } => {
-                let mut fields = self.atom_fields(target)?;
-
-                let Some(field) = (fields.len() == 1).then(|| fields.pop().expect("one field"))
-                else {
-                    return Err(self.unsupported(target.to_span()));
-                };
-
-                if field.attr.is_some() {
-                    return Err(self.unsupported(target.to_span()));
-                }
-
-                let ty = field.ty.clone();
-                let code = self.code_of_operand(suffix)?;
-                let probe = self.expr_of(code)?;
-                let read = self.probe_reader(&ty, probe, false);
-
-                Ok(vec![Field {
-                    name: field.name,
-                    ty,
-                    attr: Some(field_parser(&read.to_token_stream())),
-                }])
-            }
             // An `except` reads the operand and refuses it where the tokens
             // take the whole of what it read: the field is the operand's, and
             // the refusal is what the field's reader runs over the text it
@@ -2338,7 +2302,7 @@ where
                 }
 
                 let ty = field.ty.clone();
-                let read = self.probe_reader(&ty, token_field.ty, true);
+                let read = self.refusal_reader(&ty, token_field.ty);
 
                 Ok(vec![Field {
                     name: field.name,
@@ -2349,11 +2313,10 @@ where
         }
     }
 
-    /// The function that reads one field and asks of the text beside it what
-    /// a `followed` or an `except` asks: the probe is run over a copy, and
-    /// what it reads is taken from nothing. An `except` refuses the field
-    /// where the tokens take the whole of what it read.
-    fn probe_reader(&mut self, ty: &TokenStream, probe: TokenStream, removal: bool) -> Ident {
+    /// The function that reads one field and refuses it where the text beside it
+    /// is all of what the field took: the probe is run over a copy, and what it
+    /// reads is taken from nothing.
+    fn refusal_reader(&mut self, ty: &TokenStream, probe: TokenStream) -> Ident {
         let seq = self.seq;
         self.seq += 1;
 
@@ -2365,40 +2328,28 @@ where
 
         let rule = self.rule.clone();
 
-        let body = if removal {
-            quote! {
-                let mut whole = input.clone();
+        let body = quote! {
+            let mut whole = input.clone();
 
-                let value = <#ty as ::parserc::syntax::Syntax<I>>::into_parser().parse(input)?;
+            let value = <#ty as ::parserc::syntax::Syntax<I>>::into_parser().parse(input)?;
 
-                let mut rest = whole.split_to(whole.len() - input.len());
+            let mut rest = whole.split_to(whole.len() - input.len());
 
-                if <#probe as ::parserc::syntax::Syntax<I>>::into_parser()
-                    .ok()
-                    .parse(&mut rest)?
-                    .is_some()
-                    && rest.is_empty()
-                {
-                    return Err(::parserc::Kind::Syntax(
-                        #rule,
-                        ::parserc::ControlFlow::Fatal,
-                        value.to_span(),
-                    )
-                    .into());
-                }
-
-                Ok(value)
+            if <#probe as ::parserc::syntax::Syntax<I>>::into_parser()
+                .ok()
+                .parse(&mut rest)?
+                .is_some()
+                && rest.is_empty()
+            {
+                return Err(::parserc::Kind::Syntax(
+                    #rule,
+                    ::parserc::ControlFlow::Fatal,
+                    value.to_span(),
+                )
+                .into());
             }
-        } else {
-            quote! {
-                let value = <#ty as ::parserc::syntax::Syntax<I>>::into_parser().parse(input)?;
 
-                let mut rest = input.clone();
-
-                #probe.parse(&mut rest)?;
-
-                Ok(value)
-            }
+            Ok(value)
         };
 
         self.helpers.push(quote! {
@@ -2641,9 +2592,7 @@ where
 
                 Ok(types)
             }
-            syntax::ExprWithSuffix::Followed { .. } | syntax::ExprWithSuffix::Except { .. } => {
-                Err(self.unsupported(atom.to_span()))
-            }
+            syntax::ExprWithSuffix::Except { .. } => Err(self.unsupported(atom.to_span())),
         }
     }
 
@@ -3007,23 +2956,6 @@ where
             syntax::ExprWithSuffix::Concat { target, suffix, .. } => {
                 let mut stmts = self.code_of_atom(target)?.into_stmts();
                 stmts.extend(self.code_of_operand(suffix)?.into_stmts());
-                Ok(Code::Stmt(stmts))
-            }
-            syntax::ExprWithSuffix::Followed { target, suffix, .. } => {
-                let mut stmts = self.code_of_atom(target)?.into_stmts();
-                let operand = self.code_of_operand(suffix)?;
-                let parser = self.expr_of(operand)?;
-
-                // The probe runs from where the operand it follows left the text,
-                // and gives nothing back: the extent of the rule is the extent of
-                // what came before the keyword.
-                stmts.push(quote! {
-                    {
-                        let mut rest = input.clone();
-                        #parser.parse(&mut rest)?;
-                    }
-                });
-
                 Ok(Code::Stmt(stmts))
             }
             syntax::ExprWithSuffix::Except { target, tokens, .. } => {
@@ -4425,9 +4357,9 @@ mod tests {
         assert!(soup.contains("pub enum C < I > where I : :: parserc :: chars :: CharsInput , { A (A < I >) , B (B < I >) , }"));
 
         // A word of the alternative names the variant that reads it.
-        let soup = code("lexer A -> 'a'; syntax B -> A followed A | A except A;");
+        let soup = code("lexer A -> 'a'; syntax B -> A concat A | A except A;");
 
-        assert!(soup.contains("Followed"), "{soup}");
+        assert!(soup.contains("Concat"), "{soup}");
         assert!(soup.contains("Except"), "{soup}");
     }
 
@@ -4474,14 +4406,6 @@ mod tests {
         assert!(soup.contains(
             "Err (:: parserc :: Kind :: Syntax (\"C\" , :: parserc :: ControlFlow :: Fatal , taken . to_span () ,) . into ())"
         ));
-    }
-
-    #[test]
-    fn a_following_is_probed_without_being_taken() {
-        let soup = code("lexer A -> 'a'; lexer B -> 'b'; lexer C -> A followed B;");
-
-        assert!(soup.contains("let mut rest = input . clone ()"));
-        assert!(soup.contains("< B < I > as :: parserc :: syntax :: Syntax < I >> :: into_parser () . map (| node | node . 0) . parse (& mut rest) ?"));
     }
 
     #[test]

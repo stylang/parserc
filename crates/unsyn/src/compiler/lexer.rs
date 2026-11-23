@@ -228,9 +228,9 @@ where
 }
 
 // ---------------------------------------------------------------------------
-// `lexer Keywords -> LeadingKeywords | FollowingKeywords;`
+// `lexer Keywords -> LeadingKeywords | OperatorKeywords;`
 // `lexer LeadingKeywords -> 'lexer' | 'syntax' | 'whitespace';`
-// `lexer FollowingKeywords -> 'concat' | 'except' | 'followed';`
+// `lexer OperatorKeywords -> 'concat' | 'except';`
 // ---------------------------------------------------------------------------
 
 /// A word of the language, of either of the two places one may stand.
@@ -243,7 +243,7 @@ where
     /// A word that opens a definition.
     Leading(LeadingKeywords<I>),
     /// A word that joins two operands of a pattern.
-    Following(FollowingKeywords<I>),
+    OperatorKeywords(OperatorKeywords<I>),
 }
 
 /// The word a definition opens with.
@@ -282,8 +282,8 @@ impl<I: UnsynInput> LeadingKeywords<I> {
 /// The word that joins two operands of a pattern into one construct.
 #[derive(Debug, PartialEq, Eq, PartialOrd, Ord, Clone, Syntax)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
-#[parserc(map_err = SyntaxKind::FollowingKeywords.map())]
-pub enum FollowingKeywords<I>
+#[parserc(map_err = SyntaxKind::OperatorKeywords.map())]
+pub enum OperatorKeywords<I>
 where
     I: UnsynInput,
 {
@@ -291,18 +291,15 @@ where
     Concat(#[parserc(keyword = "concat", map_err = KeywordKind::Concat.map())] I),
     /// `except`, which removes what one operand matches from another.
     Except(#[parserc(keyword = "except", map_err = KeywordKind::Except.map())] I),
-    /// `followed`, which asks that an operand come next without being taken.
-    Followed(#[parserc(keyword = "followed", map_err = KeywordKind::Followed.map())] I),
 }
 
-impl<I: UnsynInput> FollowingKeywords<I> {
+impl<I: UnsynInput> OperatorKeywords<I> {
     /// The word that was read.
     #[inline]
     pub fn word(&self) -> &'static str {
         match self {
-            FollowingKeywords::Concat(_) => "concat",
-            FollowingKeywords::Except(_) => "except",
-            FollowingKeywords::Followed(_) => "followed",
+            OperatorKeywords::Concat(_) => "concat",
+            OperatorKeywords::Except(_) => "except",
         }
     }
 }
@@ -1098,8 +1095,8 @@ mod tests {
         for word in ["lexer", "syntax", "whitespace"] {
             assert_eq!(text::<LeadingKeywords<_>>(word), word);
         }
-        for word in ["concat", "except", "followed"] {
-            assert_eq!(text::<FollowingKeywords<_>>(word), word);
+        for word in ["concat", "except"] {
+            assert_eq!(text::<OperatorKeywords<_>>(word), word);
         }
 
         // The rule writes a word and nothing else, so the word is read wherever
@@ -1108,7 +1105,7 @@ mod tests {
         // name that has to follow the word — that decide what the rest of the
         // text is.
         assert_eq!(text::<LeadingKeywords<_>>("lexerX"), "lexer");
-        assert_eq!(text::<FollowingKeywords<_>>("excepting"), "except");
+        assert_eq!(text::<OperatorKeywords<_>>("excepting"), "except");
 
         // Where no word of the set begins at all, it is the set that the
         // position is missing. Both sets are asked, since each names itself
@@ -1123,9 +1120,9 @@ mod tests {
         );
 
         assert_eq!(
-            parse::<FollowingKeywords<_>>("| 'a';"),
+            parse::<OperatorKeywords<_>>("| 'a';"),
             Err(UnsynError::Syntax(
-                SyntaxKind::FollowingKeywords,
+                SyntaxKind::OperatorKeywords,
                 ControlFlow::Recovable,
                 Span::Range(0..1)
             ))
@@ -1137,14 +1134,7 @@ mod tests {
         // The `except` of the spec runs over the text the name read and over
         // nothing else, so a word that is only the head of a name leaves it a
         // name.
-        for keyword in [
-            "whitespace",
-            "lexer",
-            "syntax",
-            "followed",
-            "except",
-            "concat",
-        ] {
+        for keyword in ["whitespace", "lexer", "syntax", "except", "concat"] {
             assert_eq!(
                 parse::<NonKeywordIdent<_>>(keyword),
                 Err(UnsynError::Semantics(

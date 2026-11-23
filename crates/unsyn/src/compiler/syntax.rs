@@ -171,10 +171,6 @@ syntax_word!(
     Concat, "concat", KeywordKind::Concat
 );
 syntax_word!(
-    /// `followed`, which asks that an operand come next without being taken.
-    Followed, "followed", KeywordKind::Followed
-);
-syntax_word!(
     /// `except`, which removes what one operand matches from another.
     Except, "except", KeywordKind::Except
 );
@@ -342,9 +338,7 @@ impl<I: UnsynInput> ExprNoTopAlt<I> {
             ExprNoTopAlt::WithoutSuffix(_) => false,
             ExprNoTopAlt::WithSuffix(with_suffix) => match with_suffix {
                 ExprWithSuffix::Grouped { suffix, .. } => suffix.may_be_zero(),
-                ExprWithSuffix::Concat { .. }
-                | ExprWithSuffix::Followed { .. }
-                | ExprWithSuffix::Except { .. } => false,
+                ExprWithSuffix::Concat { .. } | ExprWithSuffix::Except { .. } => false,
             },
         }
     }
@@ -484,7 +478,6 @@ where
 // `syntax ExprWithSuffix ->`
 // `      ExprWithoutSuffix ( '*' | '?' | '+' | Repeat )`
 // `    | ExprWithoutSuffix 'concat' ExprNoTopAlt`
-// `    | ExprWithoutSuffix 'followed' ExprNoTopAlt`
 // `    | ExprWithoutSuffix 'except' ExprWithoutSuffix ;`
 // ---------------------------------------------------------------------------
 
@@ -551,23 +544,6 @@ where
         /// The keyword, which keeps no run of its own.
         #[parserc(crucial)]
         keyword: Concat<I>,
-        /// The run between the keyword and the operand after it.
-        s2: Option<S<I>>,
-        /// The operand after the keyword.
-        suffix: Box<ExprNoTopAlt<I>>,
-    },
-    /// `followed`, which asks that the operand after the keyword come next in the
-    /// source without being part of what matched here. It is therefore tested
-    /// after whatever the target consumed, never at the position the target
-    /// starts at.
-    Followed {
-        /// What the operand after the keyword must follow.
-        target: ExprWithoutSuffix<I>,
-        /// The run between the operand and the keyword.
-        s: Option<S<I>>,
-        /// The keyword, which keeps no run of its own.
-        #[parserc(crucial)]
-        keyword: Followed<I>,
         /// The run between the keyword and the operand after it.
         s2: Option<S<I>>,
         /// The operand after the keyword.
@@ -1030,14 +1006,10 @@ mod tests {
     }
 
     #[test]
-    fn the_three_suffix_keywords_tell_their_forms_apart() {
+    fn the_two_operator_keywords_tell_their_forms_apart() {
         assert!(matches!(
             whole::<ExprNoTopAlt<_>>("'a' concat 'b'").unwrap(),
             ExprNoTopAlt::WithSuffix(ExprWithSuffix::Concat { .. })
-        ));
-        assert!(matches!(
-            whole::<ExprNoTopAlt<_>>("'a' followed 'b'").unwrap(),
-            ExprNoTopAlt::WithSuffix(ExprWithSuffix::Followed { .. })
         ));
         assert!(matches!(
             whole::<ExprNoTopAlt<_>>("A except Keywords").unwrap(),

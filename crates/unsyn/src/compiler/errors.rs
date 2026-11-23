@@ -89,8 +89,6 @@ pub enum KeywordKind {
     Lexer,
     #[error("keyword 'syntax'")]
     Syntax,
-    #[error("keyword 'followed'")]
-    Followed,
     #[error("keyword 'except'")]
     Except,
     #[error("keyword 'whitespace'")]
@@ -147,7 +145,7 @@ pub enum SyntaxKind {
     LeadingKeywords,
     /// One of the words that join two operands, where none of them begins.
     #[error("pattern operator keyword")]
-    FollowingKeywords,
+    OperatorKeywords,
     /// The end of a file: whatever an item cannot read is left over, and the
     /// construct that contains it reports this instead of handing the rest to
     /// its caller.
@@ -242,9 +240,11 @@ pub enum SemanticsKind {
     /// The generated reader of a `syntax` rule drops a run of the trivia between
     /// every two operands, and it is that dropping which tells `lexer` from
     /// `lexerX`: without a separator the two are one uninterrupted run of
-    /// characters, and an `except` on a keyword refuses only a whole token, never
-    /// the boundary between one token and the next. No build can be written for
-    /// such a file, so this is said once for the file rather than at each rule.
+    /// characters, and nothing in the language can put a boundary back. An
+    /// `except` refuses only a whole token, never a boundary inside one, and the
+    /// language has no lookahead of any kind — not even an assertion that could
+    /// stop a name where a word ends. No build can be written for such a file,
+    /// so this is said once for the file rather than at each rule.
     #[error("the file declares no `whitespace` rule: without a separator no token has an end")]
     MissingWhitespace,
     #[error("terminal pattern can not use a `syntax` node, defined at {0:?}")]

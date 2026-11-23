@@ -15,10 +15,10 @@
 //! Every operand that matches consumes at least one character: `~` asks its
 //! question of the character here and then takes it, and the repetitions, the
 //! options and the bounds that may match nothing at all never match twice at
-//! one position. What an `except` or a `followed` asserts about the text is the
-//! exception the DSL makes, being tested and then left where it was. The
-//! recursion checks count on this, since whatever consumes is what stands
-//! between a definition and itself.
+//! one position. What an `except` asserts about the text is the exception the
+//! DSL makes, being tested over the run the operand took and then left where it
+//! was. The recursion checks count on this, since whatever consumes is what
+//! stands between a definition and itself.
 //!
 //! # Where the trivia goes
 //!

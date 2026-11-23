@@ -103,7 +103,7 @@ where
     I: ::parserc::chars::CharsInput,
 {
     LeadingKeywords(LeadingKeywords<I>),
-    FollowingKeywords(FollowingKeywords<I>),
+    OperatorKeywords(OperatorKeywords<I>),
 }
 #[derive(Debug, PartialEq, Eq, PartialOrd, Ord, Clone, :: parserc :: syntax :: Syntax)]
 pub enum LeadingKeywords<I>
@@ -115,13 +115,12 @@ where
     Whitespace(#[parserc(keyword = "whitespace")] I),
 }
 #[derive(Debug, PartialEq, Eq, PartialOrd, Ord, Clone, :: parserc :: syntax :: Syntax)]
-pub enum FollowingKeywords<I>
+pub enum OperatorKeywords<I>
 where
     I: ::parserc::chars::CharsInput,
 {
     Concat(#[parserc(keyword = "concat")] I),
     Except(#[parserc(keyword = "except")] I),
-    Followed(#[parserc(keyword = "followed")] I),
 }
 fn read_lit_str_1<I>(input: &mut I) -> ::core::result::Result<I, <I as ::parserc::Input>::Error>
 where
@@ -683,14 +682,6 @@ where
         f3: ::core::option::Option<S<I>>,
         expr_no_top_alt: Box<ExprNoTopAlt<I>>,
     },
-    Followed {
-        expr_without_suffix: Box<ExprWithoutSuffix<I>>,
-        f1: ::core::option::Option<S<I>>,
-        #[parserc(keyword = "followed")]
-        f2: I,
-        f3: ::core::option::Option<S<I>>,
-        expr_no_top_alt: Box<ExprNoTopAlt<I>>,
-    },
     Except {
         expr_without_suffix: Box<ExprWithoutSuffix<I>>,
         f1: ::core::option::Option<S<I>>,
@@ -881,9 +872,9 @@ where
     fn visit_leading_keywords(&mut self, node: &'ast LeadingKeywords<I>) {
         walk::walk_leading_keywords(self, node)
     }
-    # [doc = concat ! ("The node of the rule `" , stringify ! (FollowingKeywords) , "`.")]
-    fn visit_following_keywords(&mut self, node: &'ast FollowingKeywords<I>) {
-        walk::walk_following_keywords(self, node)
+    # [doc = concat ! ("The node of the rule `" , stringify ! (OperatorKeywords) , "`.")]
+    fn visit_operator_keywords(&mut self, node: &'ast OperatorKeywords<I>) {
+        walk::walk_operator_keywords(self, node)
     }
     # [doc = concat ! ("The node of the rule `" , stringify ! (LitStr) , "`.")]
     fn visit_lit_str(&mut self, node: &'ast LitStr<I>) {
@@ -1051,7 +1042,7 @@ where
 #[doc = r" the visitor below it."]
 #[allow(clippy::needless_borrow, clippy::possible_missing_else)]
 pub mod walk {
-    # [rustfmt :: skip] use super :: { Visit , S , LF , CR , IdentOrKeyword , RawIdent , NonKeywordIdent , Ident , Keywords , LeadingKeywords , FollowingKeywords , LitStr , QuoteEscape , AsciiEscape , AsciiHexEscape , UnicodeEscape , OctDigit , DecDigit , HexDigit , LitDec , LitUnicode , BlockComment , BlockCommentBody , InnerLineDoc , InnerBlockDoc , OuterLineDoc , OuterBlockDoc , BlockCommentOrDoc , Expr , ExprNoTopAlt , Set , ExprWithoutSuffix , NegatedSet , Call , Paren , Suffix , ExprWithSuffix , Suffixed , RepeatBound , RangeTo , RangeFrom , Repeat , Range , UnicodeRange , StrRange , SetItem , Stmt , Item , OuterDoc , InnerDoc , Crate } ;
+    # [rustfmt :: skip] use super :: { Visit , S , LF , CR , IdentOrKeyword , RawIdent , NonKeywordIdent , Ident , Keywords , LeadingKeywords , OperatorKeywords , LitStr , QuoteEscape , AsciiEscape , AsciiHexEscape , UnicodeEscape , OctDigit , DecDigit , HexDigit , LitDec , LitUnicode , BlockComment , BlockCommentBody , InnerLineDoc , InnerBlockDoc , OuterLineDoc , OuterBlockDoc , BlockCommentOrDoc , Expr , ExprNoTopAlt , Set , ExprWithoutSuffix , NegatedSet , Call , Paren , Suffix , ExprWithSuffix , Suffixed , RepeatBound , RangeTo , RangeFrom , Repeat , Range , UnicodeRange , StrRange , SetItem , Stmt , Item , OuterDoc , InnerDoc , Crate } ;
     # [doc = concat ! ("Descend through the node of `" , stringify ! (S) , "`.")]
     pub fn walk_s<'ast, I, V>(v: &mut V, node: &'ast S<I>)
     where
@@ -1126,8 +1117,8 @@ pub mod walk {
             Keywords::LeadingKeywords(part) => {
                 v.visit_leading_keywords(part);
             }
-            Keywords::FollowingKeywords(part) => {
-                v.visit_following_keywords(part);
+            Keywords::OperatorKeywords(part) => {
+                v.visit_operator_keywords(part);
             }
         }
     }
@@ -1149,20 +1140,17 @@ pub mod walk {
             }
         }
     }
-    # [doc = concat ! ("Descend through the node of `" , stringify ! (FollowingKeywords) , "`.")]
-    pub fn walk_following_keywords<'ast, I, V>(v: &mut V, node: &'ast FollowingKeywords<I>)
+    # [doc = concat ! ("Descend through the node of `" , stringify ! (OperatorKeywords) , "`.")]
+    pub fn walk_operator_keywords<'ast, I, V>(v: &mut V, node: &'ast OperatorKeywords<I>)
     where
         I: ::parserc::chars::CharsInput,
         V: ?Sized + Visit<'ast, I>,
     {
         match node {
-            FollowingKeywords::Concat(part) => {
+            OperatorKeywords::Concat(part) => {
                 v.visit_text(part);
             }
-            FollowingKeywords::Except(part) => {
-                v.visit_text(part);
-            }
-            FollowingKeywords::Followed(part) => {
+            OperatorKeywords::Except(part) => {
                 v.visit_text(part);
             }
         }
@@ -1543,24 +1531,6 @@ pub mod walk {
                 v.visit_suffixed(part);
             }
             ExprWithSuffix::Concat {
-                expr_without_suffix,
-                f1,
-                f2,
-                f3,
-                expr_no_top_alt,
-                ..
-            } => {
-                v.visit_expr_without_suffix(expr_without_suffix);
-                if let Some(inner) = f1 {
-                    v.visit_s(inner);
-                }
-                v.visit_text(f2);
-                if let Some(inner) = f3 {
-                    v.visit_s(inner);
-                }
-                v.visit_expr_no_top_alt(expr_no_top_alt);
-            }
-            ExprWithSuffix::Followed {
                 expr_without_suffix,
                 f1,
                 f2,

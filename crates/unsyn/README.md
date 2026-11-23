@@ -60,9 +60,11 @@ twice:
 The rule is mandatory because a token has no end without it. The reader of a
 `syntax` sequence drops a run of the trivia before every operand, and it is that
 dropping which tells `lexer` from `lexerX`: with no separator the operands abut,
-the two are one uninterrupted run of characters, and `except` — which refuses a
-whole token and never a boundary inside one — cannot save the reading. A build of
-such a file has no code to write, so it is refused before any rule is read.
+the two are one uninterrupted run of characters, and nothing in the language can
+put a boundary back. `except` refuses a whole token and never a boundary inside
+one (§4), and the language has **no lookahead at all** (§4) — so there is not
+even an assertion that could stop a name where a word ends. A build of such a
+file has no code to write, so it is refused before any rule is read.
 
 `r#gen` and `gen` are **one name** — a raw spelling is a sigil on the same
 name, not a second one — so they collide with each other, answer each other's
@@ -73,11 +75,11 @@ references, and bind the same external (§2, §10).
 **Identifiers** are the usual: a letter of `XID_Start` or `_`, then as many
 `XID_Continue` as wanted. A keyword of the language can not name a rule
 (`Keyword`), and a name written after Rust's heart may wear the raw sigil:
-`lexer r#type -> …`. The keywords are exactly six:
+`lexer r#type -> …`. The keywords are exactly five:
 
 | where a name may open a definition | inside a right side |
 |---|---|
-| `lexer`, `syntax`, `whitespace` | `concat`, `followed`, `except` |
+| `lexer`, `syntax`, `whitespace` | `concat`, `except` |
 
 **Character and string literals** are written between `'`:
 
@@ -173,13 +175,14 @@ not:
   the refusal has no character left to take: that is `UnsatisfiableRefusal` (§6),
   told through the names a file reaches as well as through the ones it writes.
 - **`~` is no lookahead.** It takes the character whatever it is, so it is a
-  refusal and not an assertion. The language's one construct that consumes
-  nothing is `followed` (§4), and there is deliberately no zero-width `!X`
-  beside it: every operator has to advance, which is what keeps a repetition
-  from being written around something that matches nothing at all (§6).
-  What a lookahead would be asked for elsewhere is asked of `except` here,
+  refusal and not an assertion. The language has **no lookahead at all**, zero
+  width or otherwise: every operator has to advance, which is what keeps a
+  repetition from being written around something that matches nothing at all
+  (§6). What a lookahead would be asked for elsewhere is asked of `except` here,
   which refuses a whole token rather than a position (§4), or of the repeated
-  refusal `~X*`, which stops at the first character `X` would begin.
+  refusal `~X*`, which stops at the first character `X` would begin. A demand
+  for lookahead at a *sequence* is no demand on a token rule at all: write the
+  operand that was to be looked past as the next operand of the node.
 
 An empty input is no position to refuse at: a bare `~X` where the input has run
 out is `Incomplete`, not a refusal that fits. Under `*` and `+` that never
@@ -193,18 +196,18 @@ reaches an author, since the repetition stops where the characters do.
 - A **choice** joins alternatives with `|` and is read **first-to-fitted**:
   the first alternative whose head matches is the one. Choices sit at the root
   of a right side (`A | B | C`) or inside a group (`( A | B )`).
-- Three operators join two operands in a word of their own:
+- Two operators join two operands in a word of their own:
 
 | operator | reads |
 |---|---|
 | `X concat Y` | the two operands as **one token**: whatever they match, with nothing between them |
-| `X followed Y` | `X`, and nothing of `Y` — the position after `X` must begin `Y`, which is left for whatever reads next |
 | `X except Y` | `X`, refused where `Y` took **the whole of it**: a run that `Y` matches in full is not `X` |
 
 `concat` writes no separator and asks for none: `LitUnicode concat '-'` is
-one word spelling `U+0-`. `followed` and `except` take no field of their
-right operand — the right side is a probe, not a run (what that becomes when
-it is code is §9, and what may stand in each position is the table above).
+one word spelling `U+0-`. `except` takes no field of its right operand — the
+right side is a probe, not a run (what that becomes when it is code is §9, and
+what may stand in each position is the table above). Neither is a lookahead:
+both are decided over the run the left operand took.
 
 ### Repetition
 
@@ -501,7 +504,6 @@ of what the two levels differ in once §8's shape question is settled:
 | `A \| B` inside a group| a nested `Or<…>` — no type, no name                |
 | `<Ext>`                | whatever the build's caller bound `Ext` to         |
 | `X except Y`           | `X`'s field, whose reader also runs `Y` and refuses the whole if `Y` took all of it |
-| `X followed Y`         | `X`'s field, whose reader probes `Y` at the offset `X` ended at and takes nothing |
 | `X concat Y`           | **both** `X` and `Y` as fields, with no trivia between |
 
 Two consequences worth stating because they are load-bearing:
@@ -682,7 +684,7 @@ order, by the **first** thing in the alternative that can supply a word:
 | the alternative is                  | the variant is called     |
 |-------------------------------------|---------------------------|
 | one bare rule name (`LitStr`)       | that rule's name          |
-| a `concat` / `followed` / `except`  | the keyword it reads: `Concat`, `Followed`, `Except` |
+| a `concat` / `except`               | the keyword it reads: `Concat`, `Except` |
 | a literal whose value starts with a letter (`'lexer'`) | that value, capitalized: `Lexer` |
 | anything else                       | nothing — see below       |
 

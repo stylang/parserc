@@ -27,7 +27,7 @@ lexer Ident -> RawIdent | NonKeywordIdent;
 
 lexer Keywords ->
       LeadingKeywords
-    | FollowingKeywords
+    | OperatorKeywords
     ;
 
 lexer LeadingKeywords ->
@@ -36,10 +36,9 @@ lexer LeadingKeywords ->
     | 'whitespace'
     ;
 
-lexer FollowingKeywords ->
+lexer OperatorKeywords ->
       'concat'
     | 'except'
-    | 'followed'
     ;
 
 lexer LitStr ->
@@ -185,15 +184,14 @@ syntax Suffix ->
 syntax ExprWithSuffix ->
       Suffixed
     | ExprWithoutSuffix 'concat' ExprNoTopAlt
-    | ExprWithoutSuffix 'followed' ExprNoTopAlt
     | ExprWithoutSuffix 'except' ExprWithoutSuffix
     ;
 
 /// An operand with one of the quantity operators written after it.
 /// 
-/// The three keywords beside it join, look past or take away, and each says
-/// which by the word it reads. This one reads no word, only the operator
-/// written as a mark, so it is the rule that has to say what it is.
+/// The two keywords beside it join and take away, and each says which by the
+/// word it reads. This one reads no word, only the operator written as a mark,
+/// so it is the rule that has to say what it is.
 syntax Suffixed -> ExprWithoutSuffix Suffix;
 
 /// The bounds a repetition is written with, which the reader of a pattern has

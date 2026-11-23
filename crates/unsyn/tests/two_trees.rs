@@ -117,8 +117,8 @@ recorder! {
         fn visit_keywords: unsyn::compiler::lexer::Keywords<I> => unsyn::compiler::visit::walk::walk_keywords,
         fn visit_leading_keywords:
             unsyn::compiler::lexer::LeadingKeywords<I> => unsyn::compiler::visit::walk::walk_leading_keywords,
-        fn visit_following_keywords:
-            unsyn::compiler::lexer::FollowingKeywords<I> => unsyn::compiler::visit::walk::walk_following_keywords,
+        fn visit_operator_keywords:
+            unsyn::compiler::lexer::OperatorKeywords<I> => unsyn::compiler::visit::walk::walk_operator_keywords,
         fn visit_lit_str: unsyn::compiler::lexer::LitStr<I> => unsyn::compiler::visit::walk::walk_lit_str,
         fn visit_quote_escape: unsyn::compiler::lexer::QuoteEscape<I> => unsyn::compiler::visit::walk::walk_quote_escape,
         fn visit_ascii_escape: unsyn::compiler::lexer::AsciiEscape<I> => unsyn::compiler::visit::walk::walk_ascii_escape,
@@ -172,8 +172,8 @@ recorder! {
         fn visit_ident: crate::generated::Ident<I> => crate::generated::walk::walk_ident,
         fn visit_keywords: crate::generated::Keywords<I> => crate::generated::walk::walk_keywords,
         fn visit_leading_keywords: crate::generated::LeadingKeywords<I> => crate::generated::walk::walk_leading_keywords,
-        fn visit_following_keywords:
-            crate::generated::FollowingKeywords<I> => crate::generated::walk::walk_following_keywords,
+        fn visit_operator_keywords:
+            crate::generated::OperatorKeywords<I> => crate::generated::walk::walk_operator_keywords,
         fn visit_lit_str: crate::generated::LitStr<I> => crate::generated::walk::walk_lit_str,
         fn visit_quote_escape: crate::generated::QuoteEscape<I> => crate::generated::walk::walk_quote_escape,
         fn visit_ascii_escape: crate::generated::AsciiEscape<I> => crate::generated::walk::walk_ascii_escape,
