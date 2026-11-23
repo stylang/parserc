@@ -177,8 +177,12 @@ impl SyntaxKind {
 /// produced while [analyzing](crate::compiler::semantic) a whole file, where a name, a
 /// range or a repetition can only be judged against the rest of the program.
 ///
-/// The variants that concern one named node carry its name, so that a report
-/// reads `undefined symbol `MISSING`` rather than pointing at a bare span.
+/// No variant carries a piece of the file's text. The [`UnsynError`] a report
+/// is written as already holds the span of the thing said of, and whoever holds
+/// the file can read its text back from that span; what a variant may add is one
+/// more span — the *other* place the report needs and the outer one cannot
+/// speak for, such the first of two definitions of one name, or the definition a
+/// mention reaches.
 #[derive(Debug, thiserror::Error, PartialEq, Eq)]
 pub enum SemanticsKind {
     #[error("unicode code point literal of four to six hex digits")]
@@ -198,18 +202,22 @@ pub enum SemanticsKind {
     UnicodeEscape,
     #[error("empty set expression")]
     EmptySet,
+    /// A set member that answers with more than the one character a test of
+    /// this position can ask.
     #[error(
-        "set member `{0}` denotes more than one character; write the refusal or the choice it is instead"
+        "set member denotes more than one character; write the refusal or the choice it is instead"
     )]
-    WideSetMember(String),
+    WideSetMember,
     /// A set member whose definition can be matched by nothing.
     ///
     /// A set asks one question of one character, which is only a question when
     /// every member has a character to answer with; a member matched by nothing
     /// adds no character to the set, and the file that names one has written a
     /// choice of the characters it means, not a set of them.
-    #[error("set member `{0}` can be matched by nothing; a set is one question of one character")]
-    EmptySetMember(String),
+    #[error(
+        "set member reaches a rule that can be matched by nothing, defined at {0:?}; a set is one question of one character"
+    )]
+    EmptySetMember(Span),
     /// A refusal whose operand can be matched by nothing, which nothing can
     /// satisfy.
     ///
@@ -219,10 +227,12 @@ pub enum SemanticsKind {
     /// name can be asked so of: a suffix written beside a `~` stands on the
     /// refusal and not under it, so `~X*` repeats a refusal that always takes
     /// one character, and `~B` is the refusal of whatever `B` reaches to.
-    #[error("a refusal of `{0}`, which can be matched by nothing, is satisfied by nothing")]
-    UnsatisfiableRefusal(String),
-    #[error("undefined symbol `{0}`")]
-    UndefinedSymbol(String),
+    #[error(
+        "refusal of a rule that can be matched by nothing, defined at {0:?}, is satisfied by nothing"
+    )]
+    UnsatisfiableRefusal(Span),
+    #[error("undefined symbol")]
+    UndefinedSymbol,
     #[error("name collision with the previous definition at {0:?}")]
     NameCollision(Span),
     #[error("duplicate `whitespace` declaration")]
@@ -237,8 +247,8 @@ pub enum SemanticsKind {
     /// such a file, so this is said once for the file rather than at each rule.
     #[error("the file declares no `whitespace` rule: without a separator no token has an end")]
     MissingWhitespace,
-    #[error("`syntax` node `{0}` can not be used by a terminal pattern")]
-    UnexpectedSyntax(String),
+    #[error("terminal pattern can not use a `syntax` node, defined at {0:?}")]
+    UnexpectedSyntax(Span),
     #[error("invalid range: the lower bound is greater than the upper bound")]
     InvalidRange,
     #[error("invalid repetition range")]
@@ -248,12 +258,12 @@ pub enum SemanticsKind {
     #[error("expect a single character literal")]
     NotAChar,
     /// A node that can begin with the text it has to match as a whole.
-    #[error("left-recursive definition of node `{0}`")]
-    LeftRecursion(String),
+    #[error("left-recursive definition")]
+    LeftRecursion,
     /// A node whose match at a position can only be decided by deciding its own
     /// match at that same position, which neither advances nor terminates.
-    #[error("definition of node `{0}` must be evaluated to evaluate itself")]
-    SameOffsetRecursion(String),
+    #[error("definition that must be evaluated to evaluate itself")]
+    SameOffsetRecursion,
 }
 
 impl SemanticsKind {
@@ -413,21 +423,25 @@ impl Diagnostics {
 /// the place the file wrote the thing there is no code to write.
 #[derive(Debug, thiserror::Error, PartialEq, Eq, Clone)]
 pub enum BuildKind {
-    /// The file calls an external the builder was not given.
-    #[error("the rule `{0}` calls the external `{1}`, which is not bound")]
-    External(String, String),
+    /// The file calls an external the builder was not given. The span is the
+    /// definition of the rule that calls it; the call itself is where the report
+    /// stands.
+    #[error("the rule defined at {0:?} calls an external that is not bound")]
+    External(Span),
     /// A `whitespace` rule denotes no set of single characters.
-    #[error("the whitespace rule `{0}` does not denote a set of characters")]
-    Whitespace(String),
-    /// A name no item of Rust can carry.
-    #[error("the rule `{0}` is named what no item can be named")]
-    Name(String),
+    #[error("the whitespace rule defined at {0:?} does not denote a set of characters")]
+    Whitespace(Span),
+    /// A name no item of Rust can carry. The report stands on the name itself,
+    /// so this says no more than where it is.
+    #[error("the rule is named what no item can be named")]
+    Name,
     /// A literal that spells no value a parser can be written with.
-    #[error("the rule `{0}` holds a literal that spells nothing to read")]
-    Literal(String),
-    /// A shape of a `syntax` rule that no field of a node can hold.
-    #[error("the syntax rule `{0}` holds a shape no code is written for")]
-    Syntax(String),
+    #[error("the rule holds a literal that spells nothing to read")]
+    Literal,
+    /// A shape of a `syntax` rule that no field of a node can hold. The span is
+    /// the definition of the rule whose shape it is.
+    #[error("the syntax rule defined at {0:?} holds a shape no code is written for")]
+    Syntax(Span),
 }
 
 /// Error information container for `unsyn` parsing.
@@ -450,12 +464,12 @@ pub enum UnsynError {
     Syntax(SyntaxKind, ControlFlow, Span),
 
     /// Reports a semantics error
-    #[error("unexpect/invalid: {0}, {1:?}")]
+    #[error("unexpect/invalid: {0} at {1:?}")]
     Semantics(SemanticsKind, Span),
 
     /// Reports that a build of the file refused: the part at the span is what
     /// no code was written for.
-    #[error("build: wrote no code for {0}, {1:?}")]
+    #[error("build: {0}, part at {1:?}")]
     Build(BuildKind, Span),
 }
 
@@ -535,13 +549,22 @@ mod tests {
             "syntax error: expect ident, Fatal,None"
         );
 
+        // A report of the file's own text carries no name of it: the span is
+        // where the reader looks the name up.
+        assert_eq!(
+            UnsynError::Semantics(SemanticsKind::UndefinedSymbol, Span::Range(11..18)).to_string(),
+            "unexpect/invalid: undefined symbol at Range(11..18)"
+        );
+
+        // What a report needs besides that place is one more place — the first
+        // of two definitions of one name.
         assert_eq!(
             UnsynError::Semantics(
-                SemanticsKind::UndefinedSymbol("MISSING".into()),
-                Span::Range(11..18),
+                SemanticsKind::NameCollision(Span::Range(6..7)),
+                Span::Range(13..14),
             )
             .to_string(),
-            "unexpect/invalid: undefined symbol `MISSING`, Range(11..18)"
+            "unexpect/invalid: name collision with the previous definition at Range(6..7) at Range(13..14)"
         );
     }
 

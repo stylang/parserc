@@ -281,13 +281,24 @@ other than four hex digits, and a `\u{…}` whose digits do not close the
 escape. What is well formed but spells no code point is `InvalidCodePoint`
 (§6); `\x` needs no report — its grammar already admits only 7-bit values.
 
+A report is a kind and the span of the construct that earned it, and **no piece
+of the file's text**. Whoever holds the file reads the text back from the span,
+so a kind that carried a name would carry it twice and could carry it wrong once
+the file was edited. What a kind may add is one more span — the *other* place
+the report needs and the outer one cannot speak for: the first of two
+definitions of one name (`NameCollision`), the definition a mention reaches
+(`UnexpectedSyntax`, `EmptySetMember`, `UnsatisfiableRefusal`), or the rule a
+build refused over (`BuildKind::External`, `Whitespace`, `Syntax`).
+
 ## 7. What a file is told
 
 A lint is a note on a file that *does* denote a grammar and says something it
 need not have said, or said twice. The two channels of a report are kept apart
 by what they imply (`Diagnostics`): the refusals of §6 reject a file; a lint
 travels with a build. Every lint is a `LintKind` and the span of the construct
-that earned it, and there are six kinds.
+that earned it, and there are six kinds. (The members are written by their value
+below for reading; the payloads are still being brought under the rule of §6 —
+the four set conflicts name rather than point, which is the next thing to fix.)
 
 | `LintKind` | fires where |
 |---|---|

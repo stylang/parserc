@@ -280,6 +280,7 @@ where
             field_no: 0,
             field_names: HashSet::new(),
             rule: String::new(),
+            rule_span: Span::None,
             descriptors: Vec::new(),
         };
 
@@ -1284,6 +1285,10 @@ where
     field_names: HashSet<String>,
     /// The rule being written, which is what a refusal is reported against.
     rule: String,
+    /// Where the rule being written was defined, which is what a refusal points
+    /// a caller at when the thing it refuses is the rule rather than a part of
+    /// the text it holds.
+    rule_span: Span,
     /// The shape of every node the module has been written for, in the order
     /// the file declared them, which is what the visitor walks them with.
     descriptors: Vec<(Ident, NodeDesc)>,
@@ -1317,6 +1322,7 @@ where
         let mut allow = wants_allow(text);
 
         self.rule = text.to_owned();
+        self.rule_span = stmt.ident.to_span();
         self.seq = 0;
         self.helpers.clear();
         self.field_no = 0;
@@ -1507,7 +1513,10 @@ where
     /// the syntax asks a function of a character rather than a parser.
     fn whitespace(&mut self, text: &str, stmt: &syntax::Stmt<I>) -> Result<Rule, UnsynError> {
         let arms = expr_arms(self.source, &stmt.expr, self.denotations).ok_or_else(|| {
-            UnsynError::Build(BuildKind::Whitespace(text.to_owned()), stmt.expr.to_span())
+            UnsynError::Build(
+                BuildKind::Whitespace(stmt.ident.to_span()),
+                stmt.expr.to_span(),
+            )
         })?;
 
         let pred = self.unique(format!("is_{}", to_snake_case(text)));
@@ -2487,10 +2496,7 @@ where
                 let name = as_str(self.source, call).to_owned();
 
                 let parser = self.external.get(&external_key(&name)).ok_or_else(|| {
-                    UnsynError::Build(
-                        BuildKind::External(self.rule.clone(), name.clone()),
-                        call.to_span(),
-                    )
+                    UnsynError::Build(BuildKind::External(self.rule_span.clone()), call.to_span())
                 })?;
 
                 Ok(Field {
@@ -2671,7 +2677,7 @@ where
 
     /// The report of a shape the syntax level does not write code for.
     fn unsupported(&self, span: Span) -> UnsynError {
-        UnsynError::Build(BuildKind::Syntax(self.rule.clone()), span)
+        UnsynError::Build(BuildKind::Syntax(self.rule_span.clone()), span)
     }
 
     // -- expressions and statements -----------------------------------------
@@ -2879,10 +2885,7 @@ where
                 let name = as_str(self.source, call).to_owned();
 
                 let parser = self.external.get(&external_key(&name)).ok_or_else(|| {
-                    UnsynError::Build(
-                        BuildKind::External(self.rule.clone(), name.clone()),
-                        call.to_span(),
-                    )
+                    UnsynError::Build(BuildKind::External(self.rule_span.clone()), call.to_span())
                 })?;
 
                 Ok(Code::Expr(parser.clone()))
@@ -2953,10 +2956,7 @@ where
         let (key, args) = match chars[..] {
             [c] => ("next", quote! { (#c) }),
             [] => {
-                return Err(UnsynError::Build(
-                    BuildKind::Literal(self.rule.clone()),
-                    lit.to_span(),
-                ));
+                return Err(UnsynError::Build(BuildKind::Literal, lit.to_span()));
             }
             _ => {
                 let text: String = chars.into_iter().collect();
@@ -3148,14 +3148,14 @@ where
     /// The character a `U+…` of the file spells.
     fn code_of(&self, lit: &lexer::LitUnicode<I>) -> Result<char, UnsynError> {
         lit.value()
-            .ok_or_else(|| UnsynError::Build(BuildKind::Literal(self.rule.clone()), lit.to_span()))
+            .ok_or_else(|| UnsynError::Build(BuildKind::Literal, lit.to_span()))
     }
 
     /// The number of times a bound of the file repeats.
     fn count_of(&self, lit: &lexer::LitDec<I>) -> Result<usize, UnsynError> {
         lit.count()
             .map(|count| count as usize)
-            .ok_or_else(|| UnsynError::Build(BuildKind::Literal(self.rule.clone()), lit.to_span()))
+            .ok_or_else(|| UnsynError::Build(BuildKind::Literal, lit.to_span()))
     }
 
     // -- names --------------------------------------------------------------
@@ -3989,7 +3989,7 @@ fn item_name(text: &str, span: Span) -> Result<Ident, UnsynError> {
     let base = text.strip_prefix("r#").unwrap_or(text);
 
     if !is_item_name(text) {
-        return Err(UnsynError::Build(BuildKind::Name(text.to_owned()), span));
+        return Err(UnsynError::Build(BuildKind::Name, span));
     }
 
     // A name the file wrote raw is written raw here too, which is what lets a rule
@@ -4283,9 +4283,8 @@ mod tests {
         assert!(
             matches!(
                 report.errors[..],
-                [
-                    UnsynError::Semantics(SemanticsKind::WideSetMember(ref member), _)
-                ] if member == "'ab'"
+                [UnsynError::Semantics(SemanticsKind::WideSetMember, ref span)]
+                    if span == &Span::Range(12..16)
             ),
             "{report:?}"
         );
@@ -4398,11 +4397,14 @@ mod tests {
         let file = parse(source);
         let error = Builder::new(&whole, &file).build().unwrap_err();
 
-        assert!(matches!(
-            error,
-            UnsynError::Build(BuildKind::External(rule, name), _)
-                if rule == "A" && name == "NoSuchCombinator"
-        ));
+        assert!(
+            matches!(
+                error,
+                UnsynError::Build(BuildKind::External(ref definition), ref call) if
+                    definition == &Span::Range(6..7) && call == &Span::Range(12..28)
+            ),
+            "{error}"
+        );
     }
 
     #[test]
@@ -4631,7 +4633,8 @@ mod tests {
 
         assert!(matches!(
             error,
-            UnsynError::Build(BuildKind::Whitespace(rule), _) if rule == "W"
+            UnsynError::Build(BuildKind::Whitespace(definition), _)
+                if definition == Span::Range(11..12)
         ));
     }
 
@@ -4645,10 +4648,14 @@ mod tests {
         let file = parse(source);
         let error = Builder::new(&whole, &file).build().unwrap_err();
 
-        assert!(matches!(
-            error,
-            UnsynError::Build(BuildKind::Syntax(rule), _) if rule == "B"
-        ));
+        assert!(
+            matches!(
+                error,
+                UnsynError::Build(BuildKind::Syntax(ref definition), _)
+                    if definition == &Span::Range(23..24)
+            ),
+            "{error}"
+        );
     }
 
     #[test]
@@ -4659,7 +4666,7 @@ mod tests {
         let error = Builder::new(&whole, &file).build();
         assert!(matches!(
             error,
-            Err(UnsynError::Build(BuildKind::Name(_), _))
+            Err(UnsynError::Build(BuildKind::Name, span)) if span == Span::Range(6..7)
         ));
     }
 

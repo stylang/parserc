@@ -670,7 +670,7 @@ impl<'ast, I: UnsynInput> Checker<'ast, I> {
 
             if wide {
                 self.diagnostics.push(UnsynError::Semantics(
-                    SemanticsKind::WideSetMember(member.text.clone()),
+                    SemanticsKind::WideSetMember,
                     member.span.clone(),
                 ));
             }
@@ -782,7 +782,7 @@ impl<'ast, I: UnsynInput> Checker<'ast, I> {
             for mention in &rule.body.uses {
                 let Some(defined) = first.get(&codegen::external_key(&mention.name)) else {
                     self.diagnostics.push(UnsynError::Semantics(
-                        SemanticsKind::UndefinedSymbol(mention.name.clone()),
+                        SemanticsKind::UndefinedSymbol,
                         mention.span.clone(),
                     ));
 
@@ -790,10 +790,13 @@ impl<'ast, I: UnsynInput> Checker<'ast, I> {
                 };
 
                 // A terminal matches characters, so it can only be built out of
-                // other terminals: the node of a tree is nothing to match.
+                // other terminals: the node of a tree is nothing to match. The
+                // report is told at the mention and carries the definition, for
+                // it is the definition's kind that makes the mention mean
+                // nothing here.
                 if rule.kind != Decl::Syntax && defined.kind == Decl::Syntax {
                     self.diagnostics.push(UnsynError::Semantics(
-                        SemanticsKind::UnexpectedSyntax(mention.name.clone()),
+                        SemanticsKind::UnexpectedSyntax(defined.span.clone()),
                         mention.span.clone(),
                     ));
                 }
@@ -809,10 +812,10 @@ impl<'ast, I: UnsynInput> Checker<'ast, I> {
                 if self.empty.contains(&codegen::external_key(&mention.name)) {
                     let kind = match mention.mention {
                         Mention::SetMember => {
-                            Some(SemanticsKind::EmptySetMember(mention.name.clone()))
+                            Some(SemanticsKind::EmptySetMember(defined.span.clone()))
                         }
                         Mention::Operand => {
-                            Some(SemanticsKind::UnsatisfiableRefusal(mention.name.clone()))
+                            Some(SemanticsKind::UnsatisfiableRefusal(defined.span.clone()))
                         }
                         Mention::Plain => None,
                     };
@@ -886,9 +889,9 @@ impl<'ast, I: UnsynInput> Checker<'ast, I> {
             }
 
             let kind = if definition.body.nullable {
-                SemanticsKind::SameOffsetRecursion(name.to_string())
+                SemanticsKind::SameOffsetRecursion
             } else {
-                SemanticsKind::LeftRecursion(name.to_string())
+                SemanticsKind::LeftRecursion
             };
 
             self.diagnostics
@@ -1480,15 +1483,12 @@ mod tests {
 
     #[test]
     fn a_name_that_is_no_definition_means_nothing() {
-        assert_eq!(
-            errors("syntax A -> B;"),
-            [SemanticsKind::UndefinedSymbol("B".into())]
-        );
+        assert_eq!(errors("syntax A -> B;"), [SemanticsKind::UndefinedSymbol]);
 
         // A member of a set is a mention of a name like any other.
         assert_eq!(
             errors("lexer A -> [MISSING];"),
-            [SemanticsKind::UndefinedSymbol("MISSING".into())]
+            [SemanticsKind::UndefinedSymbol]
         );
     }
 
@@ -1510,7 +1510,7 @@ mod tests {
     fn a_terminal_can_not_reach_a_node_of_the_tree() {
         assert_eq!(
             errors("lexer A -> B; syntax B -> 'b';"),
-            [SemanticsKind::UnexpectedSyntax("B".into())]
+            [SemanticsKind::UnexpectedSyntax(Span::Range(21..22))]
         );
 
         // A rule of nodes reaches one, and the trivia of the language is a
@@ -1538,7 +1538,7 @@ mod tests {
         // where it is written, and the refusal it meant is `~`.
         assert_eq!(
             errors("lexer A -> ['ab', 'c'];"),
-            [SemanticsKind::WideSetMember("'ab'".into())]
+            [SemanticsKind::WideSetMember]
         );
 
         // A name answers the set only where its definition settles down to
@@ -1546,7 +1546,7 @@ mod tests {
         // definition's own — a rule is free to spell a word.
         assert_eq!(
             errors("lexer W -> 'ab'; lexer A -> [W];"),
-            [SemanticsKind::WideSetMember("W".into())]
+            [SemanticsKind::WideSetMember]
         );
         assert_eq!(report("lexer W -> 'ab';"), Diagnostics::default());
 
@@ -1579,11 +1579,11 @@ mod tests {
         // names one has written a choice of characters it never named.
         assert_eq!(
             errors("lexer B -> 'b'*; lexer A -> [B];"),
-            [SemanticsKind::EmptySetMember("B".into())]
+            [SemanticsKind::EmptySetMember(Span::Range(6..7))]
         );
         assert_eq!(
             errors("lexer B -> 'b'?; lexer A -> ['a', B, 'c'];"),
-            [SemanticsKind::EmptySetMember("B".into())]
+            [SemanticsKind::EmptySetMember(Span::Range(6..7))]
         );
         // The nothing is told through the names as far as it reaches, and the
         // member is told of rather than the rule that wrote the nothing: a
@@ -1591,11 +1591,11 @@ mod tests {
         // set that asked it for a character.
         assert_eq!(
             errors("lexer B -> C; lexer C -> 'c'?; lexer A -> [B];"),
-            [SemanticsKind::EmptySetMember("B".into())]
+            [SemanticsKind::EmptySetMember(Span::Range(6..7))]
         );
         assert_eq!(
             errors("lexer B -> 'b'{,3}; lexer A -> [B];"),
-            [SemanticsKind::EmptySetMember("B".into())]
+            [SemanticsKind::EmptySetMember(Span::Range(6..7))]
         );
 
         // A rule matched by nothing is still a rule to write, and a choice of
@@ -1613,7 +1613,7 @@ mod tests {
         // report below, and not this one.
         assert_eq!(
             errors("lexer B -> 'b'*; lexer A -> ~B;"),
-            [SemanticsKind::UnsatisfiableRefusal("B".into())]
+            [SemanticsKind::UnsatisfiableRefusal(Span::Range(6..7))]
         );
     }
 
@@ -1628,27 +1628,27 @@ mod tests {
         // quantity of its own.
         assert_eq!(
             errors("lexer A -> ~B; lexer B -> 'b'*;"),
-            [SemanticsKind::UnsatisfiableRefusal("B".into())]
+            [SemanticsKind::UnsatisfiableRefusal(Span::Range(21..22))]
         );
         assert_eq!(
             errors("lexer A -> ~B; lexer B -> 'b'?;"),
-            [SemanticsKind::UnsatisfiableRefusal("B".into())]
+            [SemanticsKind::UnsatisfiableRefusal(Span::Range(21..22))]
         );
         assert_eq!(
             errors("lexer A -> ~B; lexer B -> 'b'{0,3};"),
-            [SemanticsKind::UnsatisfiableRefusal("B".into())]
+            [SemanticsKind::UnsatisfiableRefusal(Span::Range(21..22))]
         );
         // `{,n}` is `{0,n}`, and `{0}` asks for nothing at all.
         assert_eq!(
             errors("lexer A -> ~B; lexer B -> 'b'{,3};"),
-            [SemanticsKind::UnsatisfiableRefusal("B".into())]
+            [SemanticsKind::UnsatisfiableRefusal(Span::Range(21..22))]
         );
 
         // The nothing a refusal reaches is told through the names as well: B
         // writes no suffix itself, and is only an answer to the one it names.
         assert_eq!(
             errors("lexer A -> ~B; lexer B -> C; lexer C -> 'c'?;"),
-            [SemanticsKind::UnsatisfiableRefusal("B".into())]
+            [SemanticsKind::UnsatisfiableRefusal(Span::Range(21..22))]
         );
 
         // A refusal of a rule that has to answer is the refusal of a
@@ -1751,17 +1751,14 @@ mod tests {
     fn a_definition_can_not_begin_with_itself() {
         assert_eq!(
             errors("syntax A -> A 'x' | 'y';"),
-            [SemanticsKind::LeftRecursion("A".into())]
+            [SemanticsKind::LeftRecursion]
         );
 
         // Through another definition is the same fault, and is told for every
         // definition in the cycle.
         assert_eq!(
             errors("syntax A -> B; syntax B -> A 'x';"),
-            [
-                SemanticsKind::LeftRecursion("A".into()),
-                SemanticsKind::LeftRecursion("B".into()),
-            ]
+            [SemanticsKind::LeftRecursion, SemanticsKind::LeftRecursion,]
         );
     }
 
@@ -1769,17 +1766,14 @@ mod tests {
     fn a_definition_that_begins_with_itself_may_not_match_nothing() {
         assert_eq!(
             errors("syntax A -> A?;"),
-            [SemanticsKind::SameOffsetRecursion("A".into())]
+            [SemanticsKind::SameOffsetRecursion]
         );
 
         // `{0}` asks for nothing at all and is reported for that; a bound of one
         // asks for the operand, and so advances.
         assert_eq!(
             errors("syntax A -> 'x'{0}; syntax B -> B{1};"),
-            [
-                SemanticsKind::InvalidRepeat,
-                SemanticsKind::LeftRecursion("B".into()),
-            ]
+            [SemanticsKind::InvalidRepeat, SemanticsKind::LeftRecursion,]
         );
     }
 
@@ -2046,11 +2040,11 @@ lexer B -> A | '/*' A;
         // operand of a `followed`, but both are names the file has to mean.
         assert_eq!(
             errors("lexer A -> B except MISSING; lexer B -> 'b';"),
-            [SemanticsKind::UndefinedSymbol("MISSING".into())]
+            [SemanticsKind::UndefinedSymbol]
         );
         assert_eq!(
             errors("syntax A -> 'x' followed MISSING;"),
-            [SemanticsKind::UndefinedSymbol("MISSING".into())]
+            [SemanticsKind::UndefinedSymbol]
         );
     }
 
@@ -2109,14 +2103,14 @@ lexer B -> A | '/*' A;
         // which is what the run of leading nullable operands counts.
         assert_eq!(
             errors("syntax A -> 'x'? A;"),
-            [SemanticsKind::LeftRecursion("A".into())]
+            [SemanticsKind::LeftRecursion]
         );
 
         // A `followed` that comes first in its sequence is tested at the offset
         // the definition begins at, and consumes nothing to get past it.
         assert_eq!(
             errors("syntax A -> A followed 'x';"),
-            [SemanticsKind::LeftRecursion("A".into())]
+            [SemanticsKind::LeftRecursion]
         );
     }
 
