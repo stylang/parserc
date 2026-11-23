@@ -468,7 +468,61 @@ meaningless to the generator, the analyzer and the lint alike.
 
 ---
 
-## 8. What the derive accepts
+## 8. What the file is noted for: the lints
+
+A lint is a note on a file that means what it wrote and need not have written
+it, or wrote it twice. The two channels of a report are kept apart by what they
+imply (`Diagnostics`): the refusals of §7 reject a build; a lint travels with a
+model that builds. Every lint is a `LintKind` and the span of the construct
+that earned it, and there are six kinds.
+
+| `LintKind` | fires where |
+|---|---|
+| `DuplicateMember(m)` | a set member `m` denotes exactly what an earlier member of the same set already denotes: `[ 'a', 'a' ]`, `[ 'a', U+0061 ]`, `[ LF, LF ]` |
+| `CoveredMember(m, e)` | `m` denotes nothing that the earlier `e` does not — `m` is the redundant write: `[ 'a'-'d', 'b' ]` |
+| `CoversMember(m, e)` | `m` denotes everything `e` does and more — the *earlier* member is the redundant one: `[ 'b', 'a'-'d' ]` |
+| `OverlappingMember(m, e)` | `m` and `e` share some values and each keeps some of its own: `[ 'a'-'b', 'b'-'c' ]` |
+| `RedundantSeparator(name)` | a `syntax` rule mentions the file's `whitespace` rule anywhere short of the whole of an alternative, where its generated separator takes that trivia whether it is named or not: `syntax A -> S 'x';` over `whitespace S -> …` — and one report per mention |
+| `UnnamedAlternative` | an alternative of a root choice names no rule and reads no word, or a choice stands inside a group of a `syntax` rule — the situations, the table, and every exemption are §5 |
+
+### Set members compared as values
+
+The four `…Member` kinds come from comparing one member's *value* against
+another's (`conflict`), where a value is what the member denotes:
+
+- a one-character literal is a character; a code-point literal and a range are
+  code-point intervals; a longer literal is a **string** — and a character and
+  a string of more than one character are never the same value, so `'a'` and
+  `'ab'` simply do not compare;
+- a member named by a rule is compared **by its name alone**: what the name
+  denotes is what that rule's definition denotes, which is not this pass's
+  business — two members naming one rule are a `DuplicateMember`, and a name
+  and a literal never conflict;
+- characters compare four ways — same (`Same`), inside an earlier one
+  (`Covered`), around an earlier one (`Covers`), sharing some code points
+  (`Overlap`) — and strings only compare for exact equality.
+
+A member is told **once**: of the earlier members it conflicts with, the first
+one earns the report and the rest are not repeated; the text each report
+names is the member as the file wrote it. What cannot be settled as a value —
+a range whose ends are not both single characters — is a refusal, not a lint
+(`BuildKind::Literal`, §7), and never reaches the comparison.
+
+### Naming the separator twice
+
+`RedundantSeparator` is asked only of a `syntax` rule, and only of a mention
+that is *not* the whole of an alternative: a rule whose right side is just `S`
+names the trivia as the tree's own field, and no lint touches it — `syntax A ->
+'a' | S | 'b';` stays silent, and the group `(S)` is the mention itself, not a
+second ask. A suffix or a `concat` on the mention does not dissolve it: `S*`
+and `S concat 'x'` both ask for a run the separator takes anyway, and each
+mention in the rule is told once on its own. The name is
+matched through `external_key`, so a rule written `r#S` is the separator the
+file names just as plainly as one written `S`.
+
+---
+
+## 9. What the derive accepts
 
 Everything above is what the generator *writes*; this is what the derive it
 writes against *reads*, and the two are deliberately the same vocabulary.
@@ -567,7 +621,7 @@ therefore restricted: `input = Type` on an item only, `crucial` and
 
 ---
 
-## 9. Reading this back
+## 10. Reading this back
 
 The fastest check of any claim above is to regenerate and diff:
 
