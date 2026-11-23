@@ -182,6 +182,7 @@ use unicode_ident::{is_xid_continue, is_xid_start};
 use super::input::UnsynInput;
 
 use super::{
+    decode,
     errors::{BuildKind, UnsynError},
     lexer, syntax,
     syntax::Decl,
@@ -539,7 +540,7 @@ where
         syntax::ExprNoTopAlt::WithoutSuffix(syntax::ExprWithoutSuffix::Str(lit)) => {
             // The value the literal spells names the variant, not the quotes
             // it was written between.
-            let text: String = lit.chars().into_iter().collect();
+            let text: String = decode::literal_chars(lit).into_iter().collect();
 
             text.chars()
                 .next()
@@ -1037,11 +1038,11 @@ where
     match atom {
         // What a `'…'` spells is one character here and a token of several there,
         // and only one character is a value a class can hold.
-        syntax::ExprWithoutSuffix::Str(lit) => match lit.chars()[..] {
+        syntax::ExprWithoutSuffix::Str(lit) => match decode::literal_chars(lit)[..] {
             [c] => Some(vec![Arm::Char(c)]),
             _ => None,
         },
-        syntax::ExprWithoutSuffix::Unicode(lit) => Some(vec![Arm::Char(lit.value()?)]),
+        syntax::ExprWithoutSuffix::Unicode(lit) => Some(vec![Arm::Char(decode::code_point(lit)?)]),
         syntax::ExprWithoutSuffix::Set(set) => set_arms(source, set, known),
         syntax::ExprWithoutSuffix::Paren { expr: group, .. } => expr_arms(source, group, known),
         syntax::ExprWithoutSuffix::Reference(ident) => known.get(as_str(source, ident)).cloned(),
@@ -1069,11 +1070,11 @@ where
     for item in set_items(set) {
         match item {
             syntax::SetItem::Range(range) => arms.push(range_arm(range)?),
-            syntax::SetItem::Str(lit) => match lit.chars()[..] {
+            syntax::SetItem::Str(lit) => match decode::literal_chars(lit)[..] {
                 [c] => arms.push(Arm::Char(c)),
                 _ => return None,
             },
-            syntax::SetItem::Unicode(lit) => arms.push(Arm::Char(lit.value()?)),
+            syntax::SetItem::Unicode(lit) => arms.push(Arm::Char(decode::code_point(lit)?)),
             syntax::SetItem::Reference(ident) => {
                 arms.extend(known.get(as_str(source, ident))?.iter().copied());
             }
@@ -1089,8 +1090,11 @@ where
     I: UnsynInput,
 {
     let (from, to) = match range {
-        syntax::Range::Unicode(from, _, to) => (from.value()?, to.value()?),
-        syntax::Range::Str(from, _, to) => (one_char(from.chars())?, one_char(to.chars())?),
+        syntax::Range::Unicode(from, _, to) => (decode::code_point(from)?, decode::code_point(to)?),
+        syntax::Range::Str(from, _, to) => (
+            one_char(decode::literal_chars(from))?,
+            one_char(decode::literal_chars(to))?,
+        ),
     };
 
     Some(Arm::Range(from, to))
@@ -2414,7 +2418,7 @@ where
                 })
             }
             syntax::ExprWithoutSuffix::Str(lit) => {
-                let chars = lit.chars();
+                let chars = decode::literal_chars(lit);
 
                 match chars[..] {
                     [c] => Ok(Field {
@@ -2602,7 +2606,7 @@ where
     ) -> Result<Vec<TokenStream>, UnsynError> {
         match atom {
             syntax::ExprWithoutSuffix::Reference(ident) => Ok(vec![self.reference_type(ident)?]),
-            syntax::ExprWithoutSuffix::Str(lit) => match lit.chars()[..] {
+            syntax::ExprWithoutSuffix::Str(lit) => match decode::literal_chars(lit)[..] {
                 [c] => Ok(vec![quote! { ::parserc::syntax::Char<I, #c> }]),
                 _ => Err(self.unsupported(lit.to_span())),
             },
@@ -2900,7 +2904,7 @@ where
     /// One character is one item of the input, and more than one is a word of it,
     /// which the two combinators of `parserc` are asked apart.
     fn code_of_str(&self, lit: &lexer::LitStr<I>) -> Result<Code, UnsynError> {
-        let chars = lit.chars();
+        let chars = decode::literal_chars(lit);
 
         let (key, args) = match chars[..] {
             [c] => ("next", quote! { (#c) }),
@@ -3079,13 +3083,12 @@ where
 
     /// The character a `U+…` of the file spells.
     fn code_of(&self, lit: &lexer::LitUnicode<I>) -> Result<char, UnsynError> {
-        lit.value()
-            .ok_or_else(|| UnsynError::Build(BuildKind::Literal, lit.to_span()))
+        decode::code_point(lit).ok_or_else(|| UnsynError::Build(BuildKind::Literal, lit.to_span()))
     }
 
     /// The number of times a bound of the file repeats.
     fn count_of(&self, lit: &lexer::LitDec<I>) -> Result<usize, UnsynError> {
-        lit.count()
+        decode::decimal(lit)
             .map(|count| count as usize)
             .ok_or_else(|| UnsynError::Build(BuildKind::Literal, lit.to_span()))
     }

@@ -1170,7 +1170,14 @@ mod tests {
 
         impl<'a, 'ast> Visit<'ast, TokenStream<'ast>> for Definitions<'a> {
             fn visit_stmt(&mut self, node: &'ast Stmt<TokenStream<'ast>>) {
-                self.keywords.push(node.keyword.word());
+                // Which word a definition opened with is the variant it landed
+                // on; the tree keeps no word of its own, since a build writes
+                // types and no method beside them.
+                self.keywords.push(match node.keyword {
+                    lexer::LeadingKeywords::Lexer(_) => "lexer",
+                    lexer::LeadingKeywords::Syntax(_) => "syntax",
+                    lexer::LeadingKeywords::Whitespace(_) => "whitespace",
+                });
                 self.names
                     .push(as_str(&self.source, &node.ident).to_owned());
                 walk::walk_stmt(self, node);

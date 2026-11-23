@@ -267,18 +267,6 @@ where
     Whitespace(#[parserc(keyword = "whitespace", map_err = KeywordKind::Whitespace.map())] I),
 }
 
-impl<I: UnsynInput> LeadingKeywords<I> {
-    /// The word that was read.
-    #[inline]
-    pub fn word(&self) -> &'static str {
-        match self {
-            LeadingKeywords::Lexer(_) => "lexer",
-            LeadingKeywords::Syntax(_) => "syntax",
-            LeadingKeywords::Whitespace(_) => "whitespace",
-        }
-    }
-}
-
 /// The word that joins two operands of a pattern into one construct.
 #[derive(Debug, PartialEq, Eq, PartialOrd, Ord, Clone, Syntax)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
@@ -291,17 +279,6 @@ where
     Concat(#[parserc(keyword = "concat", map_err = KeywordKind::Concat.map())] I),
     /// `except`, which removes what one operand matches from another.
     Except(#[parserc(keyword = "except", map_err = KeywordKind::Except.map())] I),
-}
-
-impl<I: UnsynInput> OperatorKeywords<I> {
-    /// The word that was read.
-    #[inline]
-    pub fn word(&self) -> &'static str {
-        match self {
-            OperatorKeywords::Concat(_) => "concat",
-            OperatorKeywords::Except(_) => "except",
-        }
-    }
 }
 
 // ---------------------------------------------------------------------------
@@ -345,7 +322,7 @@ where
 /// production — `take_while` over the two characters the rule allows, and the
 /// fastest reading of a number a grammar can name. An underscore is part of the
 /// token and carries no value, so the count is taken from the text with the
-/// separators dropped, which is what `count` does.
+/// separators dropped, which is what [`decimal`](super::decode::decimal) does.
 #[derive(Debug, PartialEq, Eq, PartialOrd, Ord, Clone, Syntax)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct LitDec<I>
@@ -357,21 +334,6 @@ where
     /// Every digit and separator after it, as one run.
     #[parserc(take_while = |c: char| matches!(c, '0'..='9' | '_'))]
     pub tail: I,
-}
-
-impl<I: UnsynInput> LitDec<I> {
-    /// The number the digits spell, with the underscores the rule allows
-    /// between them dropped.
-    ///
-    /// `None` says the number is past what a count of repetitions can be kept
-    /// to, which no reading of the digits can turn into a count.
-    pub fn count(&self) -> Option<u32> {
-        let mut digits = String::from(self.head.0.as_str());
-
-        digits.extend(self.tail.as_str().chars().filter(|c| *c != '_'));
-
-        digits.parse::<u32>().ok()
-    }
 }
 
 // ---------------------------------------------------------------------------
@@ -433,21 +395,6 @@ where
     Ok(digits)
 }
 
-impl<I: UnsynInput> LitUnicode<I> {
-    /// The code point the digits spell, when they spell a character.
-    ///
-    /// Four hex digits is the shape the reader counted, so the only thing left
-    /// to answer is whether the number of them is a character, which `D800`
-    /// through `DFFF` are not.
-    pub fn value(&self) -> Option<char> {
-        let digits: String = self.digits.iter().map(|digit| digit.0.as_str()).collect();
-
-        u32::from_str_radix(&digits, 16)
-            .ok()
-            .and_then(char::from_u32)
-    }
-}
-
 // ---------------------------------------------------------------------------
 // `lexer QuoteEscape -> '\\'';`
 // `lexer AsciiEscape -> '\\x' OctDigit HexDigit | '\\n' | '\\r' | '\\t'`
@@ -499,31 +446,6 @@ where
     Backslash(#[parserc(keyword = "\\\\")] I),
     /// `\0`, the nul character.
     Zero(#[parserc(keyword = "\\0")] I),
-}
-
-impl<I: UnsynInput> AsciiEscape<I> {
-    /// The character the escape spells.
-    ///
-    /// Every shape the enum holds spells exactly one character, and the
-    /// seven-bit pair of the first variant is two hex digits by the rule of
-    /// [`HexDigit`], so there is nothing left for a refusal to say.
-    pub fn value(&self) -> char {
-        match self {
-            AsciiEscape::Hex { oct, hex, .. } => {
-                let digits = format!("{}{}", oct.0.as_str(), hex.0.as_str());
-
-                u32::from_str_radix(&digits, 16)
-                    .ok()
-                    .and_then(char::from_u32)
-                    .expect("a pair of hex digits whose leader is below `8` is a character")
-            }
-            AsciiEscape::N(_) => '\n',
-            AsciiEscape::R(_) => '\r',
-            AsciiEscape::T(_) => '\t',
-            AsciiEscape::Backslash(_) => '\\',
-            AsciiEscape::Zero(_) => '\0',
-        }
-    }
 }
 
 /// An escape of a code point, as `\u{1F600}` is.
@@ -578,21 +500,6 @@ where
     }
 
     Ok(digits)
-}
-
-impl<I: UnsynInput> UnicodeEscape<I> {
-    /// The code point the digits spell, when they spell a character.
-    ///
-    /// One to six hex digits is a number, and a number past `DFFF` or short of
-    /// `D800`'s refusal is no character; the pass that reads a value is the one
-    /// that says so, from the span of the escape it was reading.
-    pub fn value(&self) -> Option<char> {
-        let digits: String = self.digits.iter().map(|digit| digit.0.as_str()).collect();
-
-        u32::from_str_radix(&digits, 16)
-            .ok()
-            .and_then(char::from_u32)
-    }
 }
 
 // ---------------------------------------------------------------------------
@@ -664,27 +571,6 @@ where
     }
 
     Ok(whole.split_to(taken))
-}
-
-impl<I: UnsynInput> LitStr<I> {
-    /// What the body spells: the characters of the literal, and the span of
-    /// every escape among them that spells no character.
-    ///
-    /// The two quotes bound the literal and carry no value, so only the body is
-    /// read, and the offsets the refusals carry are the source's because the
-    /// body says where in the source it began.
-    pub fn decoded(&self) -> super::decode::Body {
-        super::decode::string_body(self.body.as_str(), self.body.start())
-    }
-
-    /// The characters the literal spells.
-    ///
-    /// An escape of no character yields no character: the refusal it is worth
-    /// is in [`decoded`](LitStr::decoded), and the pass that reads a value is
-    /// the one to say so from that span.
-    pub fn chars(&self) -> Vec<char> {
-        self.decoded().chars
-    }
 }
 
 // ---------------------------------------------------------------------------

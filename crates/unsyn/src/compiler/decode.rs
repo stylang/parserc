@@ -7,6 +7,12 @@
 //! and the passes that need one — `'a'` as a member of a set, `'\n'` as the end
 //! of a range, `\u{…}` as a code point, `{12, 34}` as a count — read it here.
 //!
+//! These are free functions and not methods of the node types on purpose. The
+//! tree is what a build of [`unsyn`](crate) writes, and a build writes types,
+//! parsers and a visitor and no inherent method of its own: a `fn count` beside
+//! a decimal literal would be a hand-written patch on a generated file, gone the
+//! moment the spec compiles itself.
+//!
 //! Decoding is the mirror of the reading, so it follows the escape rules the
 //! spec writes and no others. The parser has already refused a literal whose
 //! escapes are not among those, so the only thing left to report is a number of
@@ -14,6 +20,10 @@
 //! come back as ranges of the source the literal was read from, so a diagnostic
 //! points at the escape and not at the whole literal.
 
+use crate::compiler::{
+    input::UnsynInput,
+    lexer::{LitDec, LitStr, LitUnicode},
+};
 use parserc::Span;
 
 /// What the body of a string literal spells.
@@ -27,6 +37,51 @@ pub struct Body {
     pub chars: Vec<char>,
     /// The span of every `\u{…}` that spells no character, as `D800` does.
     pub invalid: Vec<Span>,
+}
+
+/// The number a decimal literal spells, with the underscores the rule allows
+/// between its digits dropped.
+///
+/// `None` says the number is past what a count of repetitions can be kept to,
+/// which no reading of the digits can turn into a count.
+pub fn decimal<I: UnsynInput>(lit: &LitDec<I>) -> Option<u32> {
+    let mut digits = String::from(lit.head.0.as_str());
+
+    digits.extend(lit.tail.as_str().chars().filter(|c| *c != '_'));
+
+    digits.parse::<u32>().ok()
+}
+
+/// The code point a `U+` literal spells, when it spells a character.
+///
+/// Four hex digits is the shape the reader counted, so the only thing left to
+/// answer is whether the number of them is a character, which `D800` through
+/// `DFFF` are not.
+pub fn code_point<I: UnsynInput>(lit: &LitUnicode<I>) -> Option<char> {
+    let digits: String = lit.digits.iter().map(|digit| digit.0.as_str()).collect();
+
+    u32::from_str_radix(&digits, 16)
+        .ok()
+        .and_then(char::from_u32)
+}
+
+/// What the body of a string literal spells: its characters, and the span of
+/// every escape among them that spells no character.
+///
+/// The two quotes bound the literal and carry no value, so only the body is
+/// read, and the offsets the refusals carry are the source's because the body
+/// says where in the source it began.
+pub fn literal<I: UnsynInput>(lit: &LitStr<I>) -> Body {
+    string_body(lit.body.as_str(), lit.body.start())
+}
+
+/// The characters a string literal spells.
+///
+/// An escape of no character yields no character: the refusal it is worth is in
+/// [`literal`], and the pass that reads a value is the one to say so from that
+/// span.
+pub fn literal_chars<I: UnsynInput>(lit: &LitStr<I>) -> Vec<char> {
+    literal(lit).chars
 }
 
 /// Reads the body of a string literal: the text between the two quotes, which

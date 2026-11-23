@@ -53,6 +53,7 @@ use super::errors::{Diagnostics, LintKind, SemanticsKind, UnsynError};
 use super::input::UnsynInput;
 use super::visit::{Visit, walk};
 use super::{codegen, lexer, syntax, syntax::Decl};
+use crate::compiler::decode;
 
 /// Reports what `file` gets wrong beyond the shape of its text.
 ///
@@ -73,8 +74,8 @@ where
         .filter_map(|item| match item {
             syntax::Item::Stmt(stmt) => Some(Skeleton {
                 key: codegen::external_key(as_str(source, &stmt.ident)),
-                nullable: stmt.expr.writes_nothing(),
-                bare: stmt.expr.bare_name(source).map(codegen::external_key),
+                nullable: writes_nothing(&stmt.expr),
+                bare: bare_name(&stmt.expr, source).map(codegen::external_key),
             }),
             _ => None,
         })
@@ -151,6 +152,85 @@ fn definitions_matched_by_nothing(skeletons: &[Skeleton]) -> BTreeSet<String> {
             return empty;
         }
     }
+}
+
+// ---------------------------------------------------------------------------
+// What a pattern is written with
+// ---------------------------------------------------------------------------
+
+/// Whether the expression can be matched by nothing at all.
+///
+/// This is read off the shape of what the file wrote, without reaching past any
+/// name: only a quantity the expression itself carries answers here, since every
+/// other operand takes at least one character and a sequence of several is
+/// matched by nothing never.
+///
+/// A plain function and not a method of the node, which is what a build writes
+/// with no opinion of its own about what its types mean.
+fn writes_nothing<I: UnsynInput>(expr: &syntax::Expr<I>) -> bool {
+    expr.is_single()
+        && expr
+            .branches()
+            .any(|branch| branch.elements().any(alt_writes_nothing))
+}
+
+/// Whether one part of a sequence can be matched by nothing.
+///
+/// An operand standing alone always consumes — that is what every operator of
+/// the language holds to — so only a suffix that bounds nothing says so here.
+/// `~X` is no exception written the other way: a suffix beside a `~` stands on
+/// the refusal and not under it, so `~X*` is the refusal repeated, which is the
+/// whole of a sequence once more.
+fn alt_writes_nothing<I: UnsynInput>(alt: &syntax::ExprNoTopAlt<I>) -> bool {
+    match alt {
+        syntax::ExprNoTopAlt::WithoutSuffix(_) => false,
+        syntax::ExprNoTopAlt::WithSuffix(with_suffix) => match with_suffix {
+            syntax::ExprWithSuffix::Grouped { suffix, .. } => suffix_may_be_zero(suffix),
+            syntax::ExprWithSuffix::Concat { .. } | syntax::ExprWithSuffix::Except { .. } => false,
+        },
+    }
+}
+
+/// Whether the suffix is satisfied by matching the operand no times at all.
+fn suffix_may_be_zero<I: UnsynInput>(suffix: &syntax::Suffix<I>) -> bool {
+    match suffix {
+        syntax::Suffix::Star(_) | syntax::Suffix::Question(_) => true,
+        syntax::Suffix::Plus(_) => false,
+        syntax::Suffix::Repeat(repeat) => bound_may_be_zero(&repeat.bound),
+    }
+}
+
+/// Whether the bound asks for the operand no fewer than no times.
+///
+/// `{,n}` asks it and `{0,n}` asks it; `{n}` asks it only when `n` is `0`, which
+/// is a bound the analyzer refuses for another reason.
+fn bound_may_be_zero<I: UnsynInput>(bound: &syntax::RepeatBound<I>) -> bool {
+    match bound {
+        syntax::RepeatBound::RangeTo(..) => true,
+        syntax::RepeatBound::RangeFrom(from, ..) => {
+            matches!(decode::decimal(from), Some(0))
+        }
+        syntax::RepeatBound::Count(count) => matches!(decode::decimal(count), Some(0)),
+    }
+}
+
+/// The one name the expression is written as, when it is nothing but one.
+///
+/// A definition written as one name is matched by nothing exactly when the rule
+/// it names is, which is what lets the nothing a file writes travel from a
+/// definition to the names that stand for it.
+fn bare_name<'s, I: UnsynInput>(expr: &'s syntax::Expr<I>, source: &'s I) -> Option<&'s str> {
+    if !expr.is_single() || !expr.first.rest.is_empty() {
+        return None;
+    }
+
+    let syntax::ExprNoTopAlt::WithoutSuffix(syntax::ExprWithoutSuffix::Reference(ident)) =
+        &expr.first.first
+    else {
+        return None;
+    };
+
+    Some(as_str(source, ident))
 }
 
 // ---------------------------------------------------------------------------
@@ -546,7 +626,7 @@ impl<'ast, I: UnsynInput> Checker<'ast, I> {
     /// hands those out by span — the literal is one run of text, so nothing
     /// below it has a span of its own to point at.
     fn chars_of(&mut self, lit: &'ast lexer::LitStr<I>) -> Vec<char> {
-        let decoded = lit.decoded();
+        let decoded = decode::literal(lit);
 
         for span in decoded.invalid {
             self.diagnostics
@@ -562,7 +642,7 @@ impl<'ast, I: UnsynInput> Checker<'ast, I> {
     /// the only thing left for this pass to say is that `D800` and its like are
     /// no character, which no count of digits can tell.
     fn code_of(&mut self, lit: &'ast lexer::LitUnicode<I>) -> Option<u32> {
-        match lit.value() {
+        match decode::code_point(lit) {
             Some(c) => Some(c as u32),
             None => {
                 self.diagnostics.push(UnsynError::Semantics(
@@ -595,7 +675,7 @@ impl<'ast, I: UnsynInput> Checker<'ast, I> {
     /// The count a [`lexer::LitDec`] spells, with the underscores the rule allows
     /// between its digits dropped.
     fn count_of(&mut self, lit: &'ast lexer::LitDec<I>) -> u32 {
-        match lit.count() {
+        match decode::decimal(lit) {
             Some(count) => count,
             // A bound past what a count of repetitions can be kept to is no
             // bound, whatever the digits of it say.

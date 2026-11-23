@@ -26,7 +26,7 @@
 //! [`Ident`] or [`LitStr`]: it keeps no trivia either, since its text is read
 //! into the text of the rule that reaches it.
 
-use parserc::{as_str, syntax::Syntax};
+use parserc::syntax::Syntax;
 
 use crate::compiler::lexer::{Ident, LeadingKeywords, LitDec, LitStr, LitUnicode, S};
 use crate::compiler::{
@@ -257,37 +257,6 @@ impl<I: UnsynInput> Expr<I> {
     pub fn is_single(&self) -> bool {
         self.rest.is_empty()
     }
-
-    /// Whether the expression can be matched by nothing at all.
-    ///
-    /// This is read off the shape of what the file wrote, without reaching past
-    /// any name: only a quantity the expression itself carries answers here,
-    /// since every other operand takes at least one character and a sequence
-    /// of several is matched by nothing never.
-    pub fn writes_nothing(&self) -> bool {
-        self.is_single()
-            && self
-                .branches()
-                .any(|branch| branch.elements().any(ExprNoTopAlt::writes_nothing))
-    }
-
-    /// The one name the expression is written as, when it is nothing but one.
-    ///
-    /// A definition written as one name is matched by nothing exactly when the
-    /// rule it names is, which is what lets the nothing a file writes travel
-    /// from a definition to the names that stand for it.
-    pub fn bare_name<'s>(&self, source: &'s I) -> Option<&'s str> {
-        if !self.is_single() || !self.first.rest.is_empty() {
-            return None;
-        }
-
-        let ExprNoTopAlt::WithoutSuffix(ExprWithoutSuffix::Reference(ident)) = &self.first.first
-        else {
-            return None;
-        };
-
-        Some(as_str(source, ident))
-    }
 }
 
 /// The group `('|' ExprNoTopAlt+)` of the [`Expr`] rule, in the shape the
@@ -323,25 +292,6 @@ where
     WithSuffix(ExprWithSuffix<I>),
     /// An operand that stands alone.
     WithoutSuffix(ExprWithoutSuffix<I>),
-}
-
-impl<I: UnsynInput> ExprNoTopAlt<I> {
-    /// Whether this part of a sequence can be matched by nothing.
-    ///
-    /// An operand standing alone always consumes — that is what every operator
-    /// of the language holds to — so only a suffix that bounds nothing says so
-    /// here. `~X` is no exception written the other way: a suffix beside a `~`
-    /// stands on the refusal and not under it, so `~X*` is the refusal
-    /// repeated, which is the whole of a sequence once more.
-    pub fn writes_nothing(&self) -> bool {
-        match self {
-            ExprNoTopAlt::WithoutSuffix(_) => false,
-            ExprNoTopAlt::WithSuffix(with_suffix) => match with_suffix {
-                ExprWithSuffix::Grouped { suffix, .. } => suffix.may_be_zero(),
-                ExprWithSuffix::Concat { .. } | ExprWithSuffix::Except { .. } => false,
-            },
-        }
-    }
 }
 
 // ---------------------------------------------------------------------------
@@ -502,17 +452,6 @@ where
     Repeat(Repeat<I>),
 }
 
-impl<I: UnsynInput> Suffix<I> {
-    /// Whether the suffix is satisfied by matching the operand no times at all.
-    pub fn may_be_zero(&self) -> bool {
-        match self {
-            Suffix::Star(_) | Suffix::Question(_) => true,
-            Suffix::Plus(_) => false,
-            Suffix::Repeat(repeat) => repeat.bound.may_be_zero(),
-        }
-    }
-}
-
 /// An operand carrying one suffix.
 ///
 /// The quantity operators are the [`Suffix`] rule the spec names, so they are
@@ -637,20 +576,6 @@ where
         /// The count.
         LitDec<I>,
     ),
-}
-
-impl<I: UnsynInput> RepeatBound<I> {
-    /// Whether the bound asks for the operand no fewer than no times.
-    ///
-    /// `{,n}` asks it and `{0,n}` asks it; `{n}` asks it only when `n` is `0`,
-    /// which is a bound the analyzer refuses for another reason.
-    pub fn may_be_zero(&self) -> bool {
-        match self {
-            RepeatBound::RangeTo(..) => true,
-            RepeatBound::RangeFrom(from, ..) => matches!(from.count(), Some(0)),
-            RepeatBound::Count(count) => matches!(count.count(), Some(0)),
-        }
-    }
 }
 
 // ---------------------------------------------------------------------------
@@ -901,6 +826,20 @@ mod tests {
         Ok(node)
     }
 
+    /// The word a definition opened with.
+    ///
+    /// Written here rather than as a method of [`LeadingKeywords`] because the
+    /// tree is what a build writes, and a build writes no inherent method: the
+    /// variant is the fact, and a test that wants the word says which variant
+    /// means which.
+    fn keyword_word(keyword: &LeadingKeywords<TokenStream<'_>>) -> &'static str {
+        match keyword {
+            LeadingKeywords::Lexer(_) => "lexer",
+            LeadingKeywords::Syntax(_) => "syntax",
+            LeadingKeywords::Whitespace(_) => "whitespace",
+        }
+    }
+
     #[test]
     fn a_terminal_is_its_word_and_nothing_else() {
         // A terminal keeps no run: the CST lays the trivia between the operands
@@ -1123,7 +1062,7 @@ mod tests {
         let source = "syntax Expr -> ExprNoTopAlt+ ( '|' ExprNoTopAlt+ )*;";
         let stmt = whole::<Stmt<_>>(source).unwrap();
 
-        assert_eq!(stmt.keyword.word(), "syntax");
+        assert_eq!(keyword_word(&stmt.keyword), "syntax");
         assert_eq!(as_str(&TokenStream::from(source), &stmt.ident), "Expr");
         assert_eq!(stmt.to_span(), Span::Range(0..source.len()));
 
@@ -1266,16 +1205,37 @@ mod tests {
             .items
             .iter()
             .filter_map(|item| match item {
-                Item::Stmt(stmt) => Some(stmt.keyword.word().to_string()),
+                // Which word a definition opened with is the variant it landed
+                // on, told as a `Decl`; the tree keeps no word of its own, since
+                // a build writes types and no method beside them.
+                Item::Stmt(stmt) => Some(stmt.decl()),
                 _ => None,
             })
             .collect::<Vec<_>>();
 
         // One `whitespace`, twenty-six `lexer` and twenty-three `syntax` rules.
         assert_eq!(statements.len(), 50);
-        assert_eq!(statements.iter().filter(|k| *k == "lexer").count(), 26);
-        assert_eq!(statements.iter().filter(|k| *k == "syntax").count(), 23);
-        assert_eq!(statements.iter().filter(|k| *k == "whitespace").count(), 1);
+        assert_eq!(
+            statements
+                .iter()
+                .filter(|kind| matches!(kind, Decl::Lexer))
+                .count(),
+            26
+        );
+        assert_eq!(
+            statements
+                .iter()
+                .filter(|kind| matches!(kind, Decl::Syntax))
+                .count(),
+            23
+        );
+        assert_eq!(
+            statements
+                .iter()
+                .filter(|kind| matches!(kind, Decl::Whitespace))
+                .count(),
+            1
+        );
 
         // Every one of them is named, which is what says that a rule of the spec
         // and a type of this crate are the same thing under the same name.
