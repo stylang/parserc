@@ -49,16 +49,20 @@ The keyword says what kind of thing the rule is:
 | `lexer`      | a **terminal** (token)            | one run of characters, matched without skipping anything |
 | `syntax`     | a **node**                        | a piece of structure, read operand by operand with the separator between them |
 
-A file may declare the separator at most once, and may not define one name
+A file must declare the separator exactly once, and may not define one name
 twice:
 
-- a second `whitespace` is `DuplicateWhitespace`;
+- no `whitespace` is `MissingWhitespace`, and a second one is
+  `DuplicateWhitespace`;
 - a name the file already defined is `NameCollision`, pointing at the first
   definition.
 
-Declaring it is **optional**. A file without a `whitespace` rule has no
-separator: the operands of a `syntax` sequence abut, the structure is read
-from where it is written, and nothing is skipped between the parts of a node.
+The rule is mandatory because a token has no end without it. The reader of a
+`syntax` sequence drops a run of the trivia before every operand, and it is that
+dropping which tells `lexer` from `lexerX`: with no separator the operands abut,
+the two are one uninterrupted run of characters, and `except` — which refuses a
+whole token and never a boundary inside one — cannot save the reading. A build of
+such a file has no code to write, so it is refused before any rule is read.
 
 `r#gen` and `gen` are **one name** — a raw spelling is a sigil on the same
 name, not a second one — so they collide with each other, answer each other's
@@ -233,6 +237,7 @@ the build never runs.
 | `Keyword` | a keyword of the language is used to name a rule |
 | `NameCollision` | a name is defined twice — raw and plain spellings are one name |
 | `DuplicateWhitespace` | more than one `whitespace` declaration |
+| `MissingWhitespace` | the file declares no `whitespace` rule, and so has no separator to end a token with (§1) |
 | `UndefinedSymbol` | a pattern names a rule the file never defines (a reference, a set member, or the target of a refusal) |
 | `UnexpectedSyntax` | a `lexer` rule names a `syntax` rule |
 | `EmptySet` | `[]`, or `~[]`, stands in a pattern |

@@ -208,6 +208,16 @@ pub enum SemanticsKind {
     NameCollision(Span),
     #[error("duplicate `whitespace` declaration")]
     DuplicateWhitespace,
+    /// A file that names no trivia has no separator, and so no tokens.
+    ///
+    /// The generated reader of a `syntax` rule drops a run of the trivia between
+    /// every two operands, and it is that dropping which tells `lexer` from
+    /// `lexerX`: without a separator the two are one uninterrupted run of
+    /// characters, and an `except` on a keyword refuses only a whole token, never
+    /// the boundary between one token and the next. No build can be written for
+    /// such a file, so this is said once for the file rather than at each rule.
+    #[error("the file declares no `whitespace` rule: without a separator no token has an end")]
+    MissingWhitespace,
     #[error("`syntax` node `{0}` can not be used by a terminal pattern")]
     UnexpectedSyntax(String),
     #[error("invalid range: the lower bound is greater than the upper bound")]

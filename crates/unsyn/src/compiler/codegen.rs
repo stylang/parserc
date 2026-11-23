@@ -4064,20 +4064,45 @@ mod tests {
     use crate::compiler::input::TokenStream as Spec;
     use crate::compiler::semantic;
 
+    /// `source` as the whole file the tests here are written against.
+    ///
+    /// A file that names no separator is given one, because such a file means
+    /// nothing whatever the rest of it says and no build is written for it (see
+    /// [`semantic`]'s `MissingWhitespace`). The separator a file names is no
+    /// part of the code of a rule, so what is asked of `source` is unaffected.
+    ///
+    /// The text is appended and not prefixed, so every span `source` earns keeps
+    /// the offset it was written at. It is leaked, because a tree of the DSL
+    /// borrows the text it was read from and a test wants to hand one back.
+    fn whole(source: &str) -> &'static str {
+        if source
+            .lines()
+            .any(|line| line.trim_start().starts_with("whitespace "))
+        {
+            Box::leak(source.to_owned().into_boxed_str())
+        } else {
+            Box::leak(format!("{source}\nwhitespace _WS -> U+0020;\n").into_boxed_str())
+        }
+    }
+
     /// Reads `source` as a file of the DSL, and asks the analyzer first whether
     /// it is a file a build may be trusted to read.
-    fn parse(source: &str) -> syntax::Crate<Spec<'_>> {
-        let whole = Spec::from(source);
-        let mut input = Spec::from(source);
+    fn parse(source: &str) -> syntax::Crate<Spec<'static>> {
+        let source = whole(source);
 
-        let tree = input
-            .parse::<syntax::Crate<_>>()
-            .expect("the source should be a file of the language");
+        let tree = {
+            let mut input = Spec::from(source);
+            let tree = input
+                .parse::<syntax::Crate<_>>()
+                .expect("the source should be a file of the language");
 
-        assert!(input.is_empty(), "the file left text unread");
+            assert!(input.is_empty(), "the file left text unread");
 
-        let report = semantic::analyze(&whole, &tree);
-        assert!(report.errors.is_empty(), "{:?}", report.errors);
+            tree
+        };
+
+        let report = semantic::analyze(&Spec::from(source), &tree);
+        assert!(report.errors.is_empty(), "{:#?}", report.errors);
 
         tree
     }
@@ -4088,6 +4113,7 @@ mod tests {
     /// Unlike [`parse`], this does not insist the analysis found nothing: a
     /// probe of what a file earns in warnings needs the report, not an assertion.
     fn analyzed(source: &str) -> crate::compiler::errors::Diagnostics {
+        let source = whole(source);
         let whole = Spec::from(source);
         let tree = {
             let mut input = Spec::from(source);
@@ -4100,14 +4126,14 @@ mod tests {
         semantic::analyze(&whole, &tree)
     }
 
-    /// The code the file is written as, with what the builder was given.
-    ///
-    /// `<IdentOrKeyword>` is bound to a scan of the module's own, which is what
-    /// an external is: the code written for it reaches nothing of the file.
-    fn build(source: &str) -> Result<TokenStream, UnsynError> {
-        let whole = Spec::from(source);
-        let file = parse(source);
-        let mut builder = Builder::new(&whole, &file);
+    /// The builder a file of the tests is built with: every external a file of
+    /// the DSL reaches for, bound to what reads it here.
+    fn builder<'a>(
+        source: &'a Spec<'a>,
+        file: &'a syntax::Crate<Spec<'a>>,
+    ) -> Builder<'a, Spec<'a>> {
+        let mut builder = Builder::new(source, file);
+
         builder.external(
             "XID_Start",
             quote! { ::parserc::next_if(::unicode_ident::is_xid_start) },
@@ -4125,7 +4151,19 @@ mod tests {
                 })
             },
         );
-        builder.build()
+
+        builder
+    }
+
+    /// The code the file is written as, with what the builder was given.
+    ///
+    /// `<IdentOrKeyword>` is bound to a scan of the module's own, which is what
+    /// an external is: the code written for it reaches nothing of the file.
+    fn build(source: &str) -> Result<TokenStream, UnsynError> {
+        let file = parse(source);
+        let whole = Spec::from(whole(source));
+
+        builder(&whole, &file).build()
     }
 
     /// The code of a file of terminals, which is what a build of one is asked for.
@@ -4135,10 +4173,34 @@ mod tests {
             .to_string()
     }
 
+    /// The code of a file as it stands, given no separator it does not name.
+    ///
+    /// Such a file means nothing, and the analyzer says so; the build is asked
+    /// here only of files whose *shape* is the subject, which no separator
+    /// changes but every field of a rule of nodes does.
+    fn bare(source: &str) -> String {
+        let file = {
+            let mut input = Spec::from(source);
+            let tree = input
+                .parse::<syntax::Crate<_>>()
+                .expect("the source should be a file of the language");
+
+            assert!(input.is_empty(), "the file left text unread");
+
+            tree
+        };
+
+        let whole = Spec::from(source);
+
+        builder(&whole, &file)
+            .build()
+            .expect("the file should be generated")
+            .to_string()
+    }
+
     /// The code of a file whose `syntax` rules are left out, since a `lexer` rule
     /// reaches no `syntax` one and what is left still reads.
     fn terminals(source: &str) -> String {
-        let whole = Spec::from(source);
         let file = parse(source);
 
         let terminals = syntax::Crate {
@@ -4151,18 +4213,9 @@ mod tests {
                 .collect(),
         };
 
-        let mut builder = Builder::new(&whole, &terminals);
-        builder.external(
-            "IdentOrKeyword",
-            quote! {
-                ::parserc::take_while_with(1.., |c: char| {
-                    ::unicode_ident::is_xid_continue(c) || ::unicode_ident::is_xid_start(c)
-                        || c == '_'
-                })
-            },
-        );
+        let whole = Spec::from(whole(source));
 
-        builder
+        builder(&whole, &terminals)
             .build()
             .expect("the file should be generated")
             .to_string()
@@ -4340,7 +4393,7 @@ mod tests {
 
     #[test]
     fn an_unbound_external_is_refused() {
-        let source = "lexer A -> <NoSuchCombinator>;";
+        let source = whole("lexer A -> <NoSuchCombinator>;");
         let whole = Spec::from(source);
         let file = parse(source);
         let error = Builder::new(&whole, &file).build().unwrap_err();
@@ -4571,7 +4624,7 @@ mod tests {
 
     #[test]
     fn whitespace_that_denotes_no_class_is_refused() {
-        let source = "whitespace W -> <XID_Start>;";
+        let source = whole("whitespace W -> <XID_Start>;");
         let whole = Spec::from(source);
         let file = parse(source);
         let error = Builder::new(&whole, &file).build().unwrap_err();
@@ -4587,7 +4640,7 @@ mod tests {
         // A call of an external, a set of more than one character's denoting,
         // and a counted bound have no type of `parserc` to stand in a group
         // of the tree, and the file that writes one is told so.
-        let source = "lexer A -> 'a'; syntax B -> A{2};";
+        let source = whole("lexer A -> 'a'; syntax B -> A{2};");
         let whole = Spec::from(source);
         let file = parse(source);
         let error = Builder::new(&whole, &file).build().unwrap_err();
@@ -4600,7 +4653,7 @@ mod tests {
 
     #[test]
     fn a_name_no_item_can_wear_is_refused() {
-        let source = "lexer _ -> 'a';";
+        let source = whole("lexer _ -> 'a';");
         let whole = Spec::from(source);
         let file = parse(source);
         let error = Builder::new(&whole, &file).build();
@@ -4684,14 +4737,15 @@ mod tests {
         // name is spelled, not which name it is. A second definition of one
         // name is a collision, and the collision is reported whatever sigil
         // the second of the two wears.
+        let source = "lexer gen -> 'a'; lexer r#gen -> 'b'; whitespace _WS -> U+0020;";
         let tree = {
-            let mut input = Spec::from("lexer gen -> 'a'; lexer r#gen -> 'b';");
+            let mut input = Spec::from(source);
 
             input
                 .parse::<syntax::Crate<_>>()
                 .expect("two names is a file of the language")
         };
-        let report = semantic::analyze(&Spec::from("lexer gen -> 'a'; lexer r#gen -> 'b';"), &tree);
+        let report = semantic::analyze(&Spec::from(source), &tree);
 
         assert!(
             matches!(
@@ -4726,7 +4780,7 @@ mod tests {
 
     #[test]
     fn a_cycle_of_nodes_is_built_through_the_pointer() {
-        let soup = code("syntax A -> 'a' B; syntax B -> 'b' A;");
+        let soup = bare("syntax A -> 'a' B; syntax B -> 'b' A;");
 
         assert!(has(&soup, quote! { Box < B < I > }), "{soup}");
         assert!(has(&soup, quote! { Box < A < I > }), "{soup}");
@@ -4737,7 +4791,7 @@ mod tests {
         // `A` is read as a list of `B`s, which is finite whatever the list
         // holds — and the `A` in `B`'s field reaches back only through that
         // list. No type of this file contains itself through a field.
-        let soup = code("syntax A -> B*; syntax B -> 'b' A;");
+        let soup = bare("syntax A -> B*; syntax B -> 'b' A;");
 
         assert!(has(&soup, quote! { Vec < B < I > }), "{soup}");
         assert!(!soup.contains("Box"), "{soup}");
@@ -4748,7 +4802,7 @@ mod tests {
         // `+` answers with the head beside the list, and the head is held
         // directly: the pair is on a cycle of containment whatever the list
         // cuts, and both directions of this file's cycle want the pointer.
-        let soup = code("syntax A -> B+; syntax B -> 'b' A;");
+        let soup = bare("syntax A -> B+; syntax B -> 'b' A;");
 
         assert!(has(&soup, quote! { Box < B < I > }), "{soup}");
         assert!(has(&soup, quote! { Box < A < I > }), "{soup}");

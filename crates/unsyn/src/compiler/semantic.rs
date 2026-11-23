@@ -782,6 +782,17 @@ impl<'ast, I: UnsynInput> Visit<'ast, I> for Checker<'ast, I> {
         let rules = std::mem::take(&mut self.rules);
 
         self.collisions(&rules);
+
+        // A file with no separator is told before its names are resolved: every
+        // definition it holds still denotes something read on its own, so the
+        // missing rule is the file's fault and not each definition's.
+        if self.trivia.is_none() {
+            self.diagnostics.push(UnsynError::Semantics(
+                SemanticsKind::MissingWhitespace,
+                Span::None,
+            ));
+        }
+
         self.resolve(&rules);
         self.recursion(&rules);
     }
@@ -1206,8 +1217,8 @@ mod tests {
     use super::*;
     use crate::compiler::input::TokenStream;
 
-    /// Reads `source` as a whole file and analyzes it.
-    fn report(source: &str) -> Diagnostics {
+    /// Reads `source` as a whole file and analyzes it, exactly as it stands.
+    fn report_raw(source: &str) -> Diagnostics {
         let whole = TokenStream::from(source);
         let tree = {
             let mut input = TokenStream::from(source);
@@ -1221,6 +1232,28 @@ mod tests {
         };
 
         analyze(&whole, &tree)
+    }
+
+    /// `source` with a separator added, since a file without one means nothing
+    /// whatever the rest of it says.
+    ///
+    /// The rule is appended and not prefixed, so that every span the source's
+    /// own text earns keeps the offset it was written at.
+    fn declared(source: &str) -> String {
+        if source
+            .lines()
+            .any(|line| line.trim_start().starts_with("whitespace "))
+        {
+            source.to_owned()
+        } else {
+            format!("{source}\nwhitespace _WS -> U+0020;\n")
+        }
+    }
+
+    /// Reads `source` as a whole file and analyzes it, with the separator it
+    /// does not name itself.
+    fn report(source: &str) -> Diagnostics {
+        report_raw(&declared(source))
     }
 
     /// The kinds of the errors of `source`, in the order they were reported.
@@ -1269,6 +1302,33 @@ mod tests {
         assert_eq!(
             errors("whitespace S -> U+0020; whitespace T -> U+0009;"),
             [SemanticsKind::DuplicateWhitespace]
+        );
+    }
+
+    #[test]
+    fn a_file_that_declares_no_separator_is_refused() {
+        // Nothing else the file says matters: without a separator the reader of
+        // a rule of nodes has no way to tell where one token ends and the next
+        // begins, so no code is written for any of its rules.
+        assert_eq!(
+            report_raw("lexer A -> 'a'; syntax B -> A;"),
+            Diagnostics {
+                errors: vec![UnsynError::Semantics(
+                    SemanticsKind::MissingWhitespace,
+                    Span::None,
+                )],
+                lints: Vec::new(),
+            }
+        );
+
+        // The one rule of a separator is enough to say it, wherever it stands.
+        assert_eq!(
+            report_raw("whitespace S -> U+0020;"),
+            Diagnostics::default()
+        );
+        assert_eq!(
+            report_raw("lexer A -> 'a'; whitespace S -> U+0020;"),
+            Diagnostics::default()
         );
     }
 
