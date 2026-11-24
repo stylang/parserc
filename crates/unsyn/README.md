@@ -243,12 +243,18 @@ reaches an author, since the repetition stops where the characters do.
 
 | operator | reads |
 |---|---|
-| `X concat Y` | the two operands as **one token**: whatever they match, with nothing between them |
+| `X concat Y` | the two operands with **nothing between them** — the run a `syntax` sequence would have laid, and at the `lexer` level nothing at all ([§5](#5-kinds-again-from-the-pattern-side)) |
 | `X except Y` | `X`, refused where `Y` took **the whole of it**: a run that `Y` matches in full is not `X` |
 
-`concat` writes no separator and asks for none: `LitUnicode concat '-'` is
-one word spelling `U+0-`. `except` takes no field of its right operand — the
-right side is a probe, not a run (what that becomes when it is code
+`concat` says one thing and only one: **no separator between these two
+operands**. That is a claim about the `syntax` level, where a sequence lays a run
+by default — `syntax UnicodeRange -> LitUnicode concat '-' concat LitUnicode;`
+is what keeps `U+0000 - U+0009` from being read as a range at all. At the
+`lexer` level a sequence lays nothing whatever is written
+([§5](#5-kinds-again-from-the-pattern-side)), so a `concat` inside a terminal
+changes neither what the rule reads nor the type it becomes, and the spec writes
+none. `except` takes no field of its right operand — the right side is a probe,
+not a run (what that becomes when it is code
 is [§9](#9-right-side--shape), and
 what may stand in each position is the table above). Neither is a lookahead:
 both are decided over the run the left operand took.
@@ -292,8 +298,10 @@ the notation *is for*:
   separator between them, and a reference reaches whatever it names as a piece
   of structure or a token.
 - a **`lexer`** rule is one token: its whole match is one run of characters,
-  nothing inside it skips the separator, and a reference inside it reaches a
-  token too — a terminal may not name a `syntax` rule at all
+  nothing inside it skips the separator — which is why `concat` says nothing
+  here that the level has not already said, and why the spec keeps that operator
+  out of terminals — and a reference inside it reaches a
+  token too; a terminal may not name a `syntax` rule at all
   (`UnexpectedSyntax`).
 - the **`whitespace`** rule is a pattern like any other — its right side is
   read at the `lexer` level — and its purpose is to say what the separator
@@ -571,13 +579,18 @@ question is settled:
 | `A \| B` inside a group| a nested `Or<…>` — no type, no name                |
 | `<Ext>`                | whatever the build's caller bound `Ext` to         |
 | `X except Y`           | `X`'s field, whose reader also runs `Y` and refuses the whole if `Y` took all of it |
-| `X concat Y`           | **both** `X` and `Y` as fields, with no trivia between |
+| `X concat Y`           | **both** `X` and `Y` as fields, with no trivia between — what a `lexer` sequence writes anyway |
 
 Two consequences worth stating because they are load-bearing:
 
-- **`concat` is not a field.** It joins two operands into one token, so it
-  writes the operands and no separator. `lexer LitUnicode -> 'U+' concat
-  HexDigit{4};` is *two* fields, not three.
+- **`concat` is not a field.** It asks for no separator between the two
+  operands and writes none, so it is never a field of its word:
+  `syntax UnicodeRange -> LitUnicode concat '-' concat LitUnicode;` is *three*
+  fields, not five. Inside a terminal the same word would be a field neither
+  way — a `lexer` sequence is already two fields and no run
+  ([§5](#5-kinds-again-from-the-pattern-side)), which is what
+  `a_joining_in_a_terminal_says_what_the_level_has_already_said` pins by
+  compiling both spellings and comparing.
 - **an unnamed group is structure without a name.** A group of one alternative
   becomes a tuple; a group of several becomes a nested `Or`. Neither gets a
   type, a visitor hook, or a lint — but see [§7](#7-what-a-file-is-told)
@@ -1005,7 +1018,9 @@ single `impl` block because [`src/compiler/read.rs`](src/compiler/read.rs) is
 what
 reads a tree.
 
-The plan for where this is going — self-hosting, and the hand-written side still
-lagging the ten rules the spec made nodes — is in
-[`MODELING_PLAN.md`](MODELING_PLAN.md), whose open item M8.2b-10 records exactly
-which rules the two trees still settle differently.
+The hand-written side still lags the spec on the parts of a pattern the spec
+gave a left side of their own, and it is
+[`tests/two_trees.rs`](tests/two_trees.rs) that keeps the list honest: its
+parity check records what the two trees say, and the test beside it names every
+rule the comparison reaches on one side and not the other — so a rule the hand
+tree has yet to give a type of its own is said, not silently agreed with.

@@ -784,8 +784,9 @@ where
 /// How many operands one alternative writes.
 ///
 /// `concat` is an operator between two operands and not an operand of its own,
-/// so `'U+' concat HexDigit{4}` is a sequence of two however the tree holds it
-/// as one element — and a sequence is what earns a field apiece.
+/// so `LitUnicode concat '-' concat LitUnicode` is a sequence of three however
+/// the tree holds it as one element — and a sequence is what earns a field
+/// apiece.
 fn operand_count<I>(branch: &syntax::OneOrMore<I, syntax::ExprNoTopAlt<I>>) -> usize
 where
     I: UnsynInput,
@@ -4409,23 +4410,43 @@ mod tests {
 
     #[test]
     fn a_joining_writes_a_field_apiece_and_no_run_between_them() {
-        let soup = code("lexer A -> 'ab' concat 'cd';");
+        // `concat` asks that no run of the trivia stand between two operands,
+        // and only a `syntax` sequence lays one to begin with — so this is the
+        // level where the word means something.
+        let joined = code("syntax A -> 'ab' concat 'cd';");
 
-        // `concat` joins two operands, so the rule is the sequence of two it
-        // writes — a field apiece — and nothing stands between them, which is
-        // what tells a joining from a plain sequence of a `syntax` rule.
-        assert!(has(
-            &soup,
-            quote! {
-                pub struct A<I>(
-                    #[parserc(keyword = "ab")] pub I,
-                    #[parserc(keyword = "cd")] pub I,
-                )
-                where
-                    I: ::parserc::chars::CharsInput;
-            }
-        ));
-        assert!(!soup.contains("Option < S < I >>"), "{soup}");
+        assert!(
+            has(
+                &joined,
+                quote! {
+                    pub struct A<I>(
+                        #[parserc(keyword = "ab")] pub I,
+                        #[parserc(keyword = "cd")] pub I,
+                    )
+                    where
+                        I: ::parserc::chars::CharsInput;
+                }
+            ),
+            "{joined}"
+        );
+        assert!(!joined.contains("Option < _WS < I >>"), "{joined}");
+
+        // The same two operands written without the word are a sequence, and a
+        // sequence of nodes keeps the run between them as a field of its own.
+        let apart = code("syntax A -> 'ab' 'cd';");
+        assert!(apart.contains("Option < _WS < I >>"), "{apart}");
+    }
+
+    #[test]
+    fn a_joining_in_a_terminal_says_what_the_level_has_already_said() {
+        // A terminal lays no run between its operands whatever is written, so a
+        // `concat` inside one changes nothing of what the rule reads and nothing
+        // of the type it becomes. The spec therefore writes none, and this is
+        // what says the two spellings are one.
+        assert_eq!(
+            code("lexer HexDigit -> ['0'-'9']; lexer U -> 'U+' concat HexDigit{4};"),
+            code("lexer HexDigit -> ['0'-'9']; lexer U -> 'U+' HexDigit{4};")
+        );
     }
 
     #[test]

@@ -75,7 +75,7 @@ lexer HexDigit -> ['0'-'9','a'-'f','A'-'F'];
 
 lexer LitDec -> DecDigit ( DecDigit | '_' )*;
 
-lexer LitUnicode -> 'U+' concat HexDigit{4};
+lexer LitUnicode -> 'U+' HexDigit{4};
 
 lexer BlockComment ->
       BlockCommentBody

@@ -344,17 +344,17 @@ where
 }
 
 // ---------------------------------------------------------------------------
-// `lexer LitUnicode -> 'U+' concat HexDigit{4};`
+// `lexer LitUnicode -> 'U+' HexDigit{4};`
 // ---------------------------------------------------------------------------
 
 /// A code point written in a string, as `U+0009` is.
 ///
 /// The two sub-expressions of the rule are the two fields of the node: the `U+`
-/// the spec puts there with `concat`, and the four digits behind it. `concat`
-/// leaves nothing between the two, so a fifth digit is not part of this token —
-/// it belongs to whatever operand comes next, which is what the generated code
-/// does with the same production, and the two readings have to accept the same
-/// text for one spec to compile itself.
+/// the spec writes first, and the four digits behind it. A terminal lays no run
+/// between its operands, so a fifth digit is not part of this token — it belongs
+/// to whatever operand comes next, which is what the generated code does with
+/// the same production, and the two readings have to accept the same text for
+/// one spec to compile itself.
 #[derive(Debug, PartialEq, Eq, PartialOrd, Ord, Clone, Syntax)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct LitUnicode<I>

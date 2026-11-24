@@ -172,7 +172,7 @@ where
         walk::walk_repeat_bound(self, node);
     }
 
-    /// `syntax Range -> LitUnicode '-' LitUnicode | LitStr concat '-' concat LitStr;`
+    /// `syntax Range -> UnicodeRange | StrRange;`
     fn visit_range(&mut self, node: &'ast syntax::Range<I>) {
         walk::walk_range(self, node);
     }
@@ -390,7 +390,7 @@ where
         walk::walk_lit_dec(self, node);
     }
 
-    /// `lexer LitUnicode -> 'U+' concat HexDigit{4};`
+    /// `lexer LitUnicode -> 'U+' HexDigit{4};`
     fn visit_lit_unicode(&mut self, node: &'ast lexer::LitUnicode<I>) {
         walk::walk_lit_unicode(self, node);
     }
