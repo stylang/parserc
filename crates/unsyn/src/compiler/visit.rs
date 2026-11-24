@@ -319,7 +319,7 @@ where
         walk::walk_ident_or_keyword(self, node);
     }
 
-    /// `lexer RawIdent -> 'r#' IdentOrKeyword;`
+    /// `lexer RawIdent -> 'r#' NonKeywordIdent;`
     fn visit_raw_ident(&mut self, node: &'ast lexer::RawIdent<I>) {
         walk::walk_raw_ident(self, node);
     }
@@ -967,7 +967,7 @@ pub mod walk {
         node: &'ast lexer::RawIdent<I>,
     ) {
         v.visit_text(&node.sigil);
-        v.visit_ident_or_keyword(&node.name);
+        v.visit_non_keyword_ident(&node.name);
     }
 
     pub fn walk_non_keyword_ident<'ast, I: UnsynInput, V: ?Sized + Visit<'ast, I>>(

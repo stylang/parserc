@@ -52,7 +52,7 @@ where
 {
     #[parserc(keyword = "r#")]
     pub f1: I,
-    pub ident_or_keyword: IdentOrKeyword<I>,
+    pub non_keyword_ident: NonKeywordIdent<I>,
 }
 fn read_non_keyword_ident<I>(
     input: &mut I,
@@ -1082,7 +1082,7 @@ pub mod walk {
         V: ?Sized + Visit<'ast, I>,
     {
         v.visit_text(&node.f1);
-        v.visit_ident_or_keyword(&node.ident_or_keyword);
+        v.visit_non_keyword_ident(&node.non_keyword_ident);
     }
     # [doc = concat ! ("Descend through the node of `" , stringify ! (NonKeywordIdent) , "`.")]
     pub fn walk_non_keyword_ident<'ast, I, V>(v: &mut V, node: &'ast NonKeywordIdent<I>)

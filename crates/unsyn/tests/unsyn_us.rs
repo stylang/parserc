@@ -185,13 +185,13 @@ mod and_it_reads {
     /// Which of the two forms of [`Ident`] was read, and what it read.
     ///
     /// The raw form is a name of two parts — the sigil and, behind it, a name
-    /// read again by the rule that names no word — and the plain form is the
-    /// one text the `except` left standing. Both answer with the whole of the
-    /// name, sigil and all, which is what a definition's name is.
+    /// read again by the rule that names no word — and the plain form is the one
+    /// text the `except` left standing. Both answer with the whole of the name,
+    /// sigil and all, which is what a definition's name is.
     fn name(node: &Ident<TokenStream<'_>>) -> (String, &'static str) {
         match node {
             Ident::RawIdent(raw) => (
-                raw.f1.as_str().to_owned() + raw.ident_or_keyword.0.as_str(),
+                raw.f1.as_str().to_owned() + raw.non_keyword_ident.0.as_str(),
                 "RawIdent",
             ),
             Ident::NonKeywordIdent(plain) => (plain.0.as_str().to_owned(), "NonKeywordIdent"),
@@ -221,11 +221,19 @@ mod and_it_reads {
 
     #[test]
     fn a_name_says_which_of_its_two_forms_it_is() {
-        let raw = parse::<Ident<_>>("r#lexer").expect("a raw name");
-        assert_eq!(name(&raw), ("r#lexer".to_owned(), "RawIdent"));
+        let raw = parse::<Ident<_>>("r#type").expect("a raw name");
+        assert_eq!(name(&raw), ("r#type".to_owned(), "RawIdent"));
 
         let plain = parse::<Ident<_>>("lexer2").expect("a name that is no word");
         assert_eq!(name(&plain), ("lexer2".to_owned(), "NonKeywordIdent"));
+
+        // The sigil borrows a word of Rust, not one of the language: the rule it
+        // reaches is the one that refuses the words of the DSL, and its refusal
+        // is fatal, so `r#lexer` is no name and no other form is tried.
+        assert!(
+            parse::<Ident<_>>("r#lexer").is_err(),
+            "a word of the language under a sigil is still that word"
+        );
 
         assert!(
             parse::<Ident<_>>("lexer").is_err(),
@@ -345,7 +353,7 @@ mod and_it_reads_this_crate {
 
         assert!(
             matches!(
-                parse::<Ident<_>>("r#lexer").expect("a raw name"),
+                parse::<Ident<_>>("r#type").expect("a raw name"),
                 Ident::RawIdent(_)
             ),
             "a name read over this crate's own stream should still say which form"

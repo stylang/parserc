@@ -35,7 +35,9 @@
 //! [`Ident`]. A semantics error is fatal, so once a rule has refused text for
 //! meaning nothing no enclosing choice may try another way — and `NonKeywordIdent`
 //! reads `r#foo` as the name `r`, which is a name and is not fatal; [`RawIdent`]
-//! therefore comes first, and takes the word whole.
+//! therefore comes first, and takes the sigil and the name whole. Its own
+//! refusal is the same [`Keyword`](SemanticsKind::Keyword) one and fatal too,
+//! which is what keeps `r#lexer` from falling through to be read as anything.
 
 use parserc::syntax::Syntax;
 use parserc::{ControlFlow, Input, Kind, Parser, ToSpan, keyword, next, next_if, take_while};
@@ -143,21 +145,26 @@ where
 }
 
 // ---------------------------------------------------------------------------
-// `lexer RawIdent -> 'r#' IdentOrKeyword;`
+// `lexer RawIdent -> 'r#' NonKeywordIdent;`
 // `lexer NonKeywordIdent -> IdentOrKeyword except Keywords;`
-// `lexer Ident -> NonKeywordIdent | RawIdent;` — the hand tree reads the raw
+// `lexer Ident -> RawIdent | NonKeywordIdent;` — the hand tree reads the raw
 // form first, which is what the order of a choice decides and not what the
 // spec means to say about either form.
 // ---------------------------------------------------------------------------
 
-/// A name written with the `r#` sigil, which is how a word of the language is
-/// named as a name.
+/// A name written with the `r#` sigil.
+///
+/// The sigil borrows a word of **Rust**, not one of this language: what it
+/// marks is still a name that is no word of the DSL, since the rule reaches
+/// [`NonKeywordIdent`] and carries that rule's refusal with it. A name written
+/// `r#lexer` is therefore no name at all — the sigil is not a way around the
+/// words of the language, only around the reserved words of the language the
+/// tree is written in.
 ///
 /// The two sub-expressions of the rule are the two fields of the node: the
-/// sigil, and behind it a name read again by the rule that names no word. The
-/// sigil is what tells the two forms of a name apart, so what stands where it
-/// was written is not this name, and no other reading of the rule begins there
-/// either.
+/// sigil, and behind it the name. The sigil is what tells the two forms of a
+/// name apart, so what stands where it was written is not this name, and no
+/// other reading of the rule begins there either.
 #[derive(Debug, PartialEq, Eq, PartialOrd, Ord, Clone, Syntax)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct RawIdent<I>
@@ -167,9 +174,9 @@ where
     /// The `r#` that opens the name.
     #[parserc(keyword = "r#", map_err = SyntaxKind::Ident.map())]
     pub sigil: I,
-    /// The name the sigil marks, read as a name and not as a word, which is
-    /// what lets a raw name be a word of the language.
-    pub name: IdentOrKeyword<I>,
+    /// The name the sigil marks, read by the rule that refuses a word of the
+    /// language — which is what keeps `r#` for the words of Rust alone.
+    pub name: NonKeywordIdent<I>,
 }
 
 /// A name that is not a word of the language.
@@ -209,8 +216,8 @@ where
     Ok(name.0)
 }
 
-/// A name of a node: either a word of the language written raw, or one that is
-/// no word of it.
+/// A name of a node: either one that borrows a word of Rust under the `r#`
+/// sigil, or one that is plain and no word of either language.
 ///
 /// The spec writes the raw form second, where it has to stand first: a name is
 /// read by the first alternative that fits, and `NonKeywordIdent` fits the `r` of
@@ -1037,14 +1044,31 @@ mod tests {
     }
 
     #[test]
-    fn a_raw_name_may_be_a_word_of_the_language() {
+    fn a_raw_name_borrows_a_word_of_rust_and_not_one_of_the_language() {
         assert_eq!(text::<RawIdent<_>>("r#where"), "r#where");
-        assert_eq!(text::<RawIdent<_>>("r#lexer"), "r#lexer");
+        assert_eq!(text::<RawIdent<_>>("r#type"), "r#type");
         assert!(parse::<RawIdent<_>>("r#1").is_err());
 
+        // The sigil reaches the rule that refuses a word of the language, so
+        // `r#` opens no way around the words of the DSL: it is for the words of
+        // Rust alone.
+        assert!(matches!(
+            parse::<RawIdent<_>>("r#lexer"),
+            Err(UnsynError::Semantics(SemanticsKind::Keyword, _))
+        ));
+
         // The raw form is read first, because `NonKeywordIdent` would settle for
-        // the `r` of `r#lexer` and leave `#lexer` behind.
-        assert!(matches!(parse::<Ident<_>>("r#lexer"), Ok(Ident::Raw(_))));
+        // the `r` of `r#type` and leave `#type` behind, and because the refusal
+        // of `r#lexer` is fatal: read in the other order it would be the name
+        // `r` that stands, and `r` is a name.
+        assert!(matches!(parse::<Ident<_>>("r#type"), Ok(Ident::Raw(_))));
+        assert!(
+            matches!(
+                parse::<Ident<_>>("r#lexer"),
+                Err(UnsynError::Semantics(SemanticsKind::Keyword, _))
+            ),
+            "a word under the sigil is no name at all, and no other alternative is tried"
+        );
         assert!(matches!(
             parse::<Ident<_>>("lexer2"),
             Ok(Ident::NonKeyword(_))

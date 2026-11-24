@@ -346,7 +346,9 @@ fn a_name_written_raw_is_two_parts_in_both_trees() {
 
     let (generated, hand) = both_trees(source);
 
-    // The name behind the sigil is a node of its own, and both trees reach it.
+    // The name behind the sigil is a node of its own, and both trees reach it:
+    // the rule the sigil reaches is the one that refuses a word of the language,
+    // so the raw form holds a name and not a bare run of characters.
     assert!(
         generated.iter().any(|(hook, _)| *hook == "visit_raw_ident"),
         "the generated tree never reached the raw form of a name"
@@ -354,7 +356,7 @@ fn a_name_written_raw_is_two_parts_in_both_trees() {
     assert!(
         generated
             .iter()
-            .any(|(hook, _)| *hook == "visit_ident_or_keyword"),
+            .any(|(hook, _)| *hook == "visit_non_keyword_ident"),
         "the generated tree never reached the name behind the sigil"
     );
 
