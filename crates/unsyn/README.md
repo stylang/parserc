@@ -299,17 +299,18 @@ A lint is a note on a file that *does* denote a grammar and says something it
 need not have said, or said twice. The two channels of a report are kept apart
 by what they imply (`Diagnostics`): the refusals of §6 reject a file; a lint
 travels with a build. Every lint is a `LintKind` and the span of the construct
-that earned it, and there are six kinds. (The members are written by their value
-below for reading; the payloads are still being brought under the rule of §6 —
-the four set conflicts name rather than point, which is the next thing to fix.)
+that earned it, and there are six kinds. A lint carries no text of the file,
+either (§6): it holds at most one more span, the *other* member or definition it
+compares to. The members are written by their value below for reading; what the
+lint itself holds is the span of each.
 
 | `LintKind` | fires where |
 |---|---|
-| `DuplicateMember(m)` | a set member `m` denotes exactly what an earlier member of the same set already denotes: `[ 'a', 'a' ]`, `[ 'a', U+0061 ]`, `[ LF, LF ]` |
-| `CoveredMember(m, e)` | `m` denotes nothing that the earlier `e` does not — `m` is the redundant write: `[ 'a'-'d', 'b' ]` |
-| `CoversMember(m, e)` | `m` denotes everything `e` does and more — the *earlier* member is the redundant one: `[ 'b', 'a'-'d' ]` |
-| `OverlappingMember(m, e)` | `m` and `e` share some values and each keeps some of its own: `[ 'a'-'b', 'b'-'c' ]` |
-| `RedundantSeparator(name)` | a `syntax` rule mentions the file's `whitespace` rule anywhere short of the whole of an alternative, where its generated separator takes that trivia whether it is named or not: `syntax A -> S 'x';` over `whitespace S -> …` — and one report per mention |
+| `DuplicateMember` | a set member `m` denotes exactly what an earlier member of the same set already denotes: `[ 'a', 'a' ]`, `[ 'a', U+0061 ]`, `[ LF, LF ]` |
+| `CoveredMember(e)` | `m` denotes nothing that the earlier `e` does not — `m` is the redundant write: `[ 'a'-'d', 'b' ]`. The lint stands on `m` and holds the span of `e` |
+| `CoversMember(e)` | `m` denotes everything `e` does and more — the *earlier* member is the redundant one: `[ 'b', 'a'-'d' ]` |
+| `OverlappingMember(e)` | `m` and `e` share some values and each keeps some of its own: `[ 'a'-'b', 'b'-'c' ]` |
+| `RedundantSeparator(d)` | a `syntax` rule mentions the file's `whitespace` rule anywhere short of the whole of an alternative, where its generated separator takes that trivia whether it is named or not: `syntax A -> S 'x';` over `whitespace S -> …` — and one report per mention. The lint stands on the mention and holds the span of the declaration `d` that named the trivia |
 | `UnnamedAlternative` | an alternative of a root choice names no rule and reads no word, or a choice stands inside a group of a `syntax` rule — the table and every exemption are below |
 
 ### Set members compared as values

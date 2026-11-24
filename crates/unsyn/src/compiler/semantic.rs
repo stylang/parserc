@@ -430,12 +430,20 @@ struct Use {
 
 /// One member of a set, read to the values it denotes.
 struct Member {
-    /// The member as it was written, for the report about it.
-    text: String,
-    /// Where it was written.
+    /// Where it was written, which is where a report about it stands.
     span: Span,
     /// What it denotes.
     value: Value,
+}
+
+/// The trivia of the language, as the one `whitespace` declaration named it.
+#[derive(Clone)]
+struct Trivia {
+    /// The name, sigil folded.
+    name: String,
+    /// Where the declaration wrote the name, which is what a rule of nodes is
+    /// pointed at when it names the trivia without needing to.
+    span: Span,
 }
 
 /// What a member of a set denotes, as far as this pass can tell without reading
@@ -461,8 +469,6 @@ struct Ends {
     /// The interval the two ends spell, when each of them denotes exactly one
     /// character and the lower is not above the higher.
     interval: Option<(u32, u32)>,
-    /// The range as it was written, for the report about the member it makes.
-    text: String,
 }
 
 /// The number of times a repetition asks for its operand.
@@ -507,8 +513,8 @@ struct Checker<'ast, I> {
     diagnostics: Diagnostics,
     /// The definitions the file has finished, in the order it wrote them.
     rules: Vec<Rule>,
-    /// The name the `whitespace` declaration gave the trivia, when there is one.
-    trivia: Option<String>,
+    /// The trivia the file's `whitespace` declaration named, when it named one.
+    trivia: Option<Trivia>,
     /// The rules whose definitions settle down to characters, one a piece.
     ///
     /// A set may name only these — a member that settles wider denotes no
@@ -781,16 +787,10 @@ impl<'ast, I: UnsynInput> Checker<'ast, I> {
             for earlier in &members[..index] {
                 let kind = match conflict(&member.value, &earlier.value) {
                     None => continue,
-                    Some(Conflict::Same) => LintKind::DuplicateMember(member.text.clone()),
-                    Some(Conflict::Covered) => {
-                        LintKind::CoveredMember(member.text.clone(), earlier.text.clone())
-                    }
-                    Some(Conflict::Covers) => {
-                        LintKind::CoversMember(member.text.clone(), earlier.text.clone())
-                    }
-                    Some(Conflict::Overlap) => {
-                        LintKind::OverlappingMember(member.text.clone(), earlier.text.clone())
-                    }
+                    Some(Conflict::Same) => LintKind::DuplicateMember,
+                    Some(Conflict::Covered) => LintKind::CoveredMember(earlier.span.clone()),
+                    Some(Conflict::Covers) => LintKind::CoversMember(earlier.span.clone()),
+                    Some(Conflict::Overlap) => LintKind::OverlappingMember(earlier.span.clone()),
                 };
 
                 self.diagnostics.lint(kind, member.span.clone());
@@ -826,7 +826,10 @@ impl<'ast, I: UnsynInput> Checker<'ast, I> {
             }
 
             if rule.kind == Decl::Whitespace && self.trivia.is_none() {
-                self.trivia = Some(rule.name.clone());
+                self.trivia = Some(Trivia {
+                    name: codegen::external_key(&rule.name),
+                    span: rule.span.clone(),
+                });
             }
         }
 
@@ -907,12 +910,13 @@ impl<'ast, I: UnsynInput> Checker<'ast, I> {
                 // whether the rule names it or not, so naming it says it twice —
                 // unless naming it is the whole of what the rule offers there,
                 // which is then the tree's own field and not a separator.
-                if rule.kind == Decl::Syntax
+                if let Some(trivia) = trivia.as_ref()
+                    && rule.kind == Decl::Syntax
                     && !mention.alone
-                    && trivia.as_deref() == Some(codegen::external_key(&mention.name).as_str())
+                    && trivia.name == codegen::external_key(mention.name.as_str())
                 {
                     self.diagnostics.lint(
-                        LintKind::RedundantSeparator(mention.name.clone()),
+                        LintKind::RedundantSeparator(trivia.span.clone()),
                         mention.span.clone(),
                     );
                 }
@@ -1279,18 +1283,9 @@ impl<'ast, I: UnsynInput> Visit<'ast, I> for Checker<'ast, I> {
     fn visit_range(&mut self, node: &'ast syntax::Range<I>) {
         walk::walk_range(self, node);
 
-        // The text of a range is the source under its span, which is the three
-        // operands of it read as the one run they were written in — no
-        // rebuilding piece by piece to guess at what stood between them.
-        let written = as_str(self.source, node).to_owned();
-
-        let (text, ends) = match node {
-            syntax::Range::Unicode(from, _, to) => {
-                (written, [self.code_of(from), self.code_of(to)])
-            }
-            syntax::Range::Str(from, _, to) => {
-                (written, [self.end_of_range(from), self.end_of_range(to)])
-            }
+        let ends = match node {
+            syntax::Range::Unicode(from, _, to) => [self.code_of(from), self.code_of(to)],
+            syntax::Range::Str(from, _, to) => [self.end_of_range(from), self.end_of_range(to)],
         };
 
         let interval = match ends {
@@ -1308,7 +1303,7 @@ impl<'ast, I: UnsynInput> Visit<'ast, I> for Checker<'ast, I> {
             _ => None,
         };
 
-        self.ranges.push(Ends { interval, text });
+        self.ranges.push(Ends { interval });
     }
 
     fn visit_set_item(&mut self, node: &'ast syntax::SetItem<I>) {
@@ -1318,13 +1313,9 @@ impl<'ast, I: UnsynInput> Visit<'ast, I> for Checker<'ast, I> {
 
         let member = match node {
             syntax::SetItem::Range(_) => {
-                let ends = self.ranges.pop().unwrap_or_else(|| Ends {
-                    text: String::new(),
-                    interval: None,
-                });
+                let ends = self.ranges.pop().unwrap_or(Ends { interval: None });
 
                 Member {
-                    text: ends.text,
                     span,
                     value: match ends.interval {
                         Some((from, to)) => Value::Chars(vec![(from, to)]),
@@ -1336,7 +1327,6 @@ impl<'ast, I: UnsynInput> Visit<'ast, I> for Checker<'ast, I> {
             // is a string, which no character is ever the same value as, and which
             // is only the same as another member when the two are the same string.
             syntax::SetItem::Str(lit) => {
-                let text = as_str(self.source, lit).to_owned();
                 let chars = self.chars_of(lit);
 
                 let value = match chars.len() {
@@ -1345,25 +1335,19 @@ impl<'ast, I: UnsynInput> Visit<'ast, I> for Checker<'ast, I> {
                     _ => Value::Strings(vec![chars.into_iter().collect()]),
                 };
 
-                Member { text, span, value }
+                Member { span, value }
             }
-            syntax::SetItem::Unicode(lit) => {
-                let text = as_str(self.source, lit).to_owned();
-
-                Member {
-                    span,
-                    text,
-                    value: match self.code_of(lit) {
-                        Some(code) => Value::Chars(vec![(code, code)]),
-                        None => Value::Unknown,
-                    },
-                }
-            }
+            syntax::SetItem::Unicode(lit) => Member {
+                span,
+                value: match self.code_of(lit) {
+                    Some(code) => Value::Chars(vec![(code, code)]),
+                    None => Value::Unknown,
+                },
+            },
             syntax::SetItem::Reference(ident) => {
                 let name = as_str(self.source, ident).to_owned();
 
                 Member {
-                    text: name.clone(),
                     span,
                     value: Value::Name(name),
                 }
@@ -1879,42 +1863,51 @@ lexer B -> A | '/*' A;
 
     #[test]
     fn a_member_of_a_set_that_adds_nothing_is_reported() {
+        // Every report is told at the later member, and the member it compares
+        // is pointed at by span rather than written out: the file holds the text
+        // of both, at the place each is said of.
         let kinds = lints("lexer A -> ['a', 'a'];");
-        assert_eq!(kinds, [LintKind::DuplicateMember("'a'".into())]);
+        assert_eq!(
+            kinds,
+            [LintKind::DuplicateMember],
+            "the second `'a'`, at 17..20"
+        );
 
         let kinds = lints("lexer A -> ['a'-'d', 'b'];");
         assert_eq!(
             kinds,
-            [LintKind::CoveredMember("'b'".into(), "'a'-'d'".into())]
+            [LintKind::CoveredMember(Span::Range(12..19))],
+            "`'b'` at 21..24 is covered by `'a'-'d'` at 12..19"
         );
 
         let kinds = lints("lexer A -> ['b', 'a'-'d'];");
         assert_eq!(
             kinds,
-            [LintKind::CoversMember("'a'-'d'".into(), "'b'".into())]
+            [LintKind::CoversMember(Span::Range(12..15))],
+            "`'a'-'d'` at 17..24 covers `'b'` at 12..15"
         );
 
         let kinds = lints("lexer A -> ['a'-'c', 'b'-'d'];");
         assert_eq!(
             kinds,
-            [LintKind::OverlappingMember(
-                "'b'-'d'".into(),
-                "'a'-'c'".into()
-            )]
+            [LintKind::OverlappingMember(Span::Range(12..19))],
+            "`'b'-'d'` at 21..28 overlaps `'a'-'c'` at 12..19"
         );
 
         // A character and a string of two are never the same value, and a code
         // point and the string of the one character it is are.
         assert_eq!(
             lints("lexer A -> ['a', 'ab', U+0061];"),
-            [LintKind::DuplicateMember("U+0061".into())]
+            [LintKind::DuplicateMember],
+            "`U+0061` at 23..29 is the `'a'` at 12..15"
         );
 
         // A rule named as a member is compared by its name alone, since what it
         // denotes is what its definition goes on to settle.
         assert_eq!(
             lints("lexer LF -> U+000A; lexer A -> [LF, LF];"),
-            [LintKind::DuplicateMember("LF".into())]
+            [LintKind::DuplicateMember],
+            "the second `LF`, at 32..34"
         );
         assert_eq!(
             report("lexer LF -> U+000A; lexer CR -> U+000D; lexer A -> [LF, CR];"),
@@ -1949,9 +1942,9 @@ lexer B -> A | '/*' A;
         assert_eq!(
             lints("lexer A -> ['a', 'a', 'a'-'b', 'b'-'c'];"),
             [
-                LintKind::DuplicateMember("'a'".into()),
-                LintKind::CoversMember("'a'-'b'".into(), "'a'".into()),
-                LintKind::OverlappingMember("'b'-'c'".into(), "'a'-'b'".into()),
+                LintKind::DuplicateMember,
+                LintKind::CoversMember(Span::Range(12..15)),
+                LintKind::OverlappingMember(Span::Range(22..29)),
             ]
         );
     }
@@ -1963,17 +1956,18 @@ lexer B -> A | '/*' A;
         // time it is asked for.
         assert_eq!(
             lints("whitespace S -> U+0020; syntax A -> S 'x';"),
-            [LintKind::RedundantSeparator("S".into())]
+            [LintKind::RedundantSeparator(Span::Range(11..12))],
+            "the mention is told of, and pointed at the declaration at 11..12"
         );
         assert_eq!(
             lints("whitespace S -> U+0020; syntax A -> 'x' S;"),
-            [LintKind::RedundantSeparator("S".into())]
+            [LintKind::RedundantSeparator(Span::Range(11..12))]
         );
         assert_eq!(
             lints("whitespace S -> U+0020; syntax A -> S S;"),
             [
-                LintKind::RedundantSeparator("S".into()),
-                LintKind::RedundantSeparator("S".into()),
+                LintKind::RedundantSeparator(Span::Range(11..12)),
+                LintKind::RedundantSeparator(Span::Range(11..12)),
             ]
         );
     }
@@ -1999,11 +1993,11 @@ lexer B -> A | '/*' A;
     fn a_suffix_on_the_trivia_is_still_a_second_mention_of_it() {
         assert_eq!(
             lints("whitespace S -> U+0020; syntax A -> S*;"),
-            [LintKind::RedundantSeparator("S".into())]
+            [LintKind::RedundantSeparator(Span::Range(11..12))]
         );
         assert_eq!(
             lints("whitespace S -> U+0020; syntax A -> S concat 'x';"),
-            [LintKind::RedundantSeparator("S".into())]
+            [LintKind::RedundantSeparator(Span::Range(11..12))]
         );
     }
 

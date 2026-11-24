@@ -283,27 +283,35 @@ impl SemanticsKind {
 /// over with the model of a file it accepted (see
 /// [`Diagnostics::lints`]); a caller that would rather refuse such a file is
 /// free to treat a lint as fatal.
+///
+/// Like an error, a lint carries **no text of the file**: [`Lint`] holds the span
+/// of the member the lint is said of, and the variants below hold at most one
+/// more span — the other member or definition the lint compares it to, which is
+/// the one place the outer span cannot point.
 #[derive(Debug, thiserror::Error, PartialEq, Eq, Clone)]
 pub enum LintKind {
     /// A member of a set whose value an earlier member of the same set already
     /// denotes.
-    #[error("member `{0}` of this set is already declared")]
-    DuplicateMember(String),
+    #[error("member of this set is already declared")]
+    DuplicateMember,
     /// A member every value of which an earlier member of the same set denotes.
-    #[error("member `{0}` is covered by the earlier member `{1}` of this set")]
-    CoveredMember(String, String),
+    #[error("member is covered by the earlier member at {0:?} of this set")]
+    CoveredMember(Span),
     /// A member that denotes everything an earlier member of the same set does,
     /// and more besides, which makes that earlier member the redundant one.
-    #[error("member `{0}` covers the earlier member `{1}` of this set")]
-    CoversMember(String, String),
+    #[error("member covers the earlier member at {0:?} of this set")]
+    CoversMember(Span),
     /// A member that denotes some — but not all — of the values of an earlier
     /// member of the same set.
-    #[error("member `{0}` overlaps the earlier member `{1}` of this set")]
-    OverlappingMember(String, String),
+    #[error("member overlaps the earlier member at {0:?} of this set")]
+    OverlappingMember(Span),
     /// A rule of nodes that asks for the trivia the language separates itself
     /// with, which its generated separator takes whether it is named or not.
-    #[error("`{0}` is the natural separator of the language, which a rule of nodes takes anyway")]
-    RedundantSeparator(String),
+    /// The span is the `whitespace` declaration that named the trivia.
+    #[error(
+        "the trivia declared at {0:?} is the natural separator of the language, which a rule of nodes takes anyway"
+    )]
+    RedundantSeparator(Span),
     /// A choice written inside a group rather than as the whole of a right side.
     ///
     /// The root of a right side turns an `|` into the alternatives of a named
@@ -670,43 +678,45 @@ mod tests {
     }
 
     /// The wording of the lint channel is as much a part of what a user reads as
-    /// the wording of the errors, and it names the members by their value.
+    /// the wording of the errors, and it points at the member it compares.
     #[test]
-    fn every_lint_names_the_members_it_compares() {
+    fn every_lint_points_at_the_member_it_compares() {
         assert_eq!(
             Lint {
-                kind: LintKind::DuplicateMember("'a'".into()),
+                kind: LintKind::DuplicateMember,
                 span: Span::Range(6..9),
             }
             .to_string(),
-            "lint: member `'a'` of this set is already declared, Range(6..9)"
+            "lint: member of this set is already declared, Range(6..9)"
         );
 
+        // The other member is the one place the lint's own span cannot be: the
+        // report stands on the later member and points back at the earlier one.
         assert_eq!(
             Lint {
-                kind: LintKind::CoveredMember("'c'".into(), "'a'-'z'".into()),
+                kind: LintKind::CoveredMember(Span::Range(2..8)),
                 span: Span::Range(12..15),
             }
             .to_string(),
-            "lint: member `'c'` is covered by the earlier member `'a'-'z'` of this set, Range(12..15)"
+            "lint: member is covered by the earlier member at Range(2..8) of this set, Range(12..15)"
         );
 
         assert_eq!(
             Lint {
-                kind: LintKind::CoversMember("'a'-'z'".into(), "'c'".into()),
+                kind: LintKind::CoversMember(Span::Range(2..5)),
                 span: Span::Range(10..16),
             }
             .to_string(),
-            "lint: member `'a'-'z'` covers the earlier member `'c'` of this set, Range(10..16)"
+            "lint: member covers the earlier member at Range(2..5) of this set, Range(10..16)"
         );
 
         assert_eq!(
             Lint {
-                kind: LintKind::OverlappingMember("'b'-'d'".into(), "'a'-'c'".into()),
+                kind: LintKind::OverlappingMember(Span::Range(2..8)),
                 span: Span::Range(16..22),
             }
             .to_string(),
-            "lint: member `'b'-'d'` overlaps the earlier member `'a'-'c'` of this set, Range(16..22)"
+            "lint: member overlaps the earlier member at Range(2..8) of this set, Range(16..22)"
         );
     }
 
@@ -721,7 +731,7 @@ mod tests {
             SemanticsKind::EmptySet,
             Span::Range(0..2),
         ));
-        report.lint(LintKind::DuplicateMember("'a'".into()), Span::Range(1..4));
+        report.lint(LintKind::DuplicateMember, Span::Range(1..4));
 
         assert!(report.has_errors());
         assert!(!report.is_empty());
