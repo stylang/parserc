@@ -30,6 +30,11 @@ syn = { version = "^2", features = ["full"] }
 [features]
 default = ["serde", "compiler", "runtimes"]
 runtimes = []
+# The bootstrap comparison: the crate's own analysis, compiled a second time
+# over the front end a build wrote. Inert by default because the loop is the
+# work in BOOTSTRAP_LOG.md and does not close yet; `--all-targets` must stay
+# green while the distance is being counted down.
+bootstrap = ["compiler"]
 compiler = ["dep:proc-macro2", "dep:quote", "dep:thiserror", "dep:unicode-ident", "parserc/syntax"]
 serde = ["dep:serde", "parserc/serde"]
 
@@ -44,3 +49,9 @@ required-features = ["compiler"]
 [[test]]
 name = "two_trees"
 required-features = ["compiler"]
+
+# The fixed point, and the compiler's own list of what a build must still learn
+# to write. See `examples/bootstrap/main.rs`.
+[[example]]
+name = "bootstrap"
+required-features = ["bootstrap"]

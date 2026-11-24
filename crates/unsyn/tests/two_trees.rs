@@ -144,7 +144,7 @@ recorder! {
 
 recorder! {
     /// Records the generated tree.
-    Generated: crate::generated::Visit<'ast, I>, parserc::chars::CharsInput,
+    Generated: crate::generated::Visit<'ast, I>, crate::generated::UnsynInput,
         crate::generated::S<I>, crate::generated::walk::walk_s,
     [
         fn visit_crate: crate::generated::Crate<I> => crate::generated::walk::walk_crate,
@@ -217,7 +217,10 @@ fn both_trees(source: &str) -> (Vec<Event>, Vec<Event>) {
         "the hand parser left text of {source:?}"
     );
 
-    let mut generated_input = parserc::chars::TokenStream::<parserc::Kind>::from(source);
+    // The generated front end names its own stream, as the hand front end
+    // names its own: the two are the same concrete stream over the same error,
+    // so the spans the two trees report are measured against one source.
+    let mut generated_input = generated::TokenStream::from(source);
     let generated_tree = generated_input
         .parse::<generated::Crate<_>>()
         .unwrap_or_else(|error| panic!("the generated parser reads {source:?}: {error}"));

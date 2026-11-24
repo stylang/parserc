@@ -7,12 +7,17 @@
 //!
 //! The two test crates that compile the generated file each bring this in
 //! and re-export it at their root, which is where the binding points.
+//!
+//! The bound is the whole of what the scan uses — one character at a time,
+//! and a position that can be snapshotted — so that whatever stream a build
+//! is written against can be given to it, whether it reports its failures as
+//! a `Kind` or as an `UnsynError`.
 
 use parserc::Parser;
 
 pub fn scan_ident_or_keyword<I>(input: &mut I) -> Result<I, <I as parserc::Input>::Error>
 where
-    I: parserc::chars::CharsInput,
+    I: parserc::Input<Item = char> + Clone,
 {
     let mut whole = input.clone();
     let before = input.len();

@@ -204,6 +204,28 @@ where
     source: &'a I,
     file: &'a syntax::Crate<I>,
     external: HashMap<String, TokenStream>,
+    /// The name the generated code gives its stream, which is the trait a rule
+    /// is written against.
+    input_name: String,
+    /// The capabilities the emitted trait demands of a stream, beside the stream
+    /// itself. A build cannot read these off a grammar: the rules it writes may
+    /// ask nothing of a stream beyond taking one character at a time, while
+    /// whoever *analyzes* the tree it writes asks more. They are therefore said
+    /// here, and the default is the set this crate's analysis is written
+    /// against — so an unconfigured build writes the trait the crate ships.
+    input_bounds: Vec<String>,
+    /// The name the generated code gives its error.
+    error_name: String,
+    /// The path the error is found at, which the file imports it from. The
+    /// error families of the analysis — what a well formed token can still
+    /// denote wrongly, what was said twice, what no code answers — are the
+    /// DSL's own rules and no target grammar states them, so they are carried
+    /// from here rather than invented. The lexical families a build *could*
+    /// derive are not yet emitted; see BOOTSTRAP_LOG.md D3/D6.
+    errors_at: TokenStream,
+    /// Where the stream trait is found, when the file is to import it rather
+    /// than write it. `None` — the default — means the build emits the trait.
+    input_path: Option<TokenStream>,
 }
 
 impl<'a, I> Builder<'a, I>
@@ -224,7 +246,68 @@ where
             source,
             file,
             external: HashMap::new(),
+            input_name: String::from("UnsynInput"),
+            // The bound set this crate's analysis is written against. A build
+            // cannot read it off a grammar — the rules it writes ask only to
+            // take one character at a time, while the analysis of the tree asks
+            // more — so it is said here, and the default keeps an unconfigured
+            // build writing the trait the crate ships.
+            input_bounds: INPUT_BOUNDS.iter().map(|bound| bound.to_string()).collect(),
+            error_name: String::from("UnsynError"),
+            errors_at: quote! { ::unsyn::compiler::errors },
+            input_path: None,
         }
+    }
+
+    /// Names the trait the generated rules are written against.
+    ///
+    /// Every type a build writes is generic over one `I`, and the bound on it
+    /// is this name — the default is the compiler's own [`UnsynInput`], so an
+    /// unconfigured build writes a file that the crate it came from compiles. A
+    /// language of its own names the trait of its own input, and says so here.
+    #[inline]
+    pub fn input_name(&mut self, name: &str) -> &mut Self {
+        self.input_name = name.to_owned();
+        self
+    }
+
+    /// Says where the input trait is found, as a path the file imports rather
+    /// than writes. By default there is none: a build emits the trait itself.
+    #[inline]
+    pub fn input_at<P>(&mut self, path: P) -> &mut Self
+    where
+        P: ToTokens,
+    {
+        self.input_path = Some(path.to_token_stream());
+        self
+    }
+
+    /// Names the error the generated code reports, and where it is found.
+    ///
+    /// The stream trait and the `TokenStream` alias name this type in their
+    /// clauses, so the two are one decision. The families of an analysis —
+    /// what a well formed token can still denote wrongly, what was said twice,
+    /// what no code answers — are the DSL's own rules, which no target grammar
+    /// states, so they are carried from `path` rather than invented.
+    #[inline]
+    pub fn error_at<P>(&mut self, name: &str, path: P) -> &mut Self
+    where
+        P: ToTokens,
+    {
+        self.error_name = name.to_owned();
+        self.errors_at = path.to_token_stream();
+        self
+    }
+
+    /// Adds a capability the emitted stream trait demands of a stream, beside
+    /// taking one item at a time. These cannot be read off the grammar that
+    /// names them, so a caller aiming a build at its own analysis says them
+    /// [`input_at`](Self::input_at) instead imports a trait already
+    /// written, and then none of these are emitted.
+    #[inline]
+    pub fn input_bound(&mut self, bound: &str) -> &mut Self {
+        self.input_bounds.push(bound.to_owned());
+        self
     }
 
     /// Binds the external `<#name#>` to the parser `parser`.
@@ -275,6 +358,10 @@ where
             nodes: &nodes,
             trivia,
             cyclic: &cyclic,
+            // The name is checked as any other name the code wears is, so that
+            // a builder configured with something no item can be called says
+            // so here rather than at the first bound it is written into.
+            input: item_name(&self.input_name, Span::None)?.to_token_stream(),
             taken: HashSet::new(),
             helpers: Vec::new(),
             prelude: Vec::new(),
@@ -286,11 +373,105 @@ where
             descriptors: Vec::new(),
         };
 
+        // The one import the file needs: the bound every type it writes is
+        // this name, and a name a file does not import is no name at all. It
+        // goes in only once the file has been written, because a build keeps an
+        // empty prelude to mean that no helper has been asked for yet.
+        let input_path = self.input_path.clone();
+        let input = generator.input.clone();
+        let error = item_name(&self.error_name, Span::None)?.to_token_stream();
+        let errors_at = self.errors_at.clone();
+        let bounds = self.input_bounds.clone();
         let items = generator.crate_of()?;
         let visit = generator.visit_items();
-        let prelude = std::mem::take(&mut generator.prelude);
+        let mut prelude = std::mem::take(&mut generator.prelude);
+        prelude.splice(
+            0..0,
+            input_defs(&input, &input_path, &errors_at, &error, &bounds)?,
+        );
 
         Ok(quote! { #(#prelude)* #items #visit })
+    }
+}
+
+/// The capabilities the stream trait of this crate demands, beside the stream
+/// itself: what the analysis of the tree asks of a stream, which no grammar
+/// that only names the rules can say.
+const INPUT_BOUNDS: [&str; 9] = [
+    "::parserc::AsBytes",
+    "::parserc::AsStr",
+    "::parserc::StartWith<&'static str>",
+    "::parserc::StartWith<&'static [u8]>",
+    "::parserc::Find<&'static str>",
+    "::parserc::Find<&'static [u8]>",
+    "::core::clone::Clone",
+    "::core::fmt::Debug",
+    "::core::cmp::PartialEq",
+];
+
+/// The items that put the stream in the file: the trait and the alias it is
+/// read through, or — where the caller said the trait is written elsewhere —
+/// the one import of it.
+///
+/// The two are one decision because the trait names the error in its own
+/// `Error =` clause, and the alias binds a stream to that same error: a build
+/// that writes the trait writes what `I::Error` will be, so the bound it
+/// carries and the error it reports cannot disagree — which is why emitting
+/// both, rather than importing one, is what makes the file self-contained.
+fn input_defs(
+    input: &TokenStream,
+    path: &Option<TokenStream>,
+    errors_at: &TokenStream,
+    error: &TokenStream,
+    bounds: &[String],
+) -> Result<Vec<TokenStream>, UnsynError> {
+    // A trait found elsewhere is only named: nothing of the stream is written,
+    // which is what lets a build aim at a crate that has the stream already
+    // and its own analysis to go with it.
+    if let Some(path) = path {
+        return Ok(vec![input_import(path, input)]);
+    }
+
+    let error_type = quote! { #errors_at::#error };
+
+    let bounds = bounds
+        .iter()
+        .map(|bound| {
+            bound
+                .parse()
+                .map_err(|_| UnsynError::Build(BuildKind::Name, Span::None))
+        })
+        .collect::<Result<Vec<TokenStream>, _>>()?;
+
+    Ok(vec![quote! {
+        pub trait #input: ::parserc::Input<Item = char, Error = #error_type> #(+ #bounds)* {}
+
+        pub type TokenStream<'a> = ::parserc::chars::TokenStream<'a, #error_type>;
+
+        impl<'a> #input for TokenStream<'a> {}
+    }])
+}
+
+/// The import that brings the input trait to the name the file calls it by.
+///
+/// The alias is written only where it says something: a path whose last
+/// segment already is the name needs no `as` to be called by it, and Rust
+/// does not write one — so neither does a build, whose output a formatter
+/// would otherwise round-trip to a different file than it wrote.
+fn input_import(path: &TokenStream, name: &TokenStream) -> TokenStream {
+    let last = path
+        .clone()
+        .into_iter()
+        .filter(|tree| !matches!(tree, TokenTree::Punct(punct) if punct.as_char() == ':'))
+        .last();
+
+    let bare = matches!(last, Some(TokenTree::Ident(_)))
+        && last.map(|tree| tree.to_string()) == Some(name.to_string());
+
+    if bare {
+        quote! { use #path; }
+    } else {
+        quote! { use #path as #name; }
     }
 }
 
@@ -1256,6 +1437,9 @@ where
     /// The pairs of rules on a cycle of containment, read from the whole
     /// file before any code is: the only references the code may box.
     cyclic: &'a HashSet<(String, String)>,
+    /// The bound every written type carries: the name the builder was given for
+    /// the stream, which the file imports under that name.
+    input: TokenStream,
     /// The names of the functions the module has been given already.
     taken: HashSet<String>,
     /// The functions the rule being written has asked for, in the order asked.
@@ -1307,6 +1491,7 @@ where
     /// The code of one definition: the functions its pattern asked for, and the
     /// node its name declares.
     fn stmt(&mut self, stmt: &syntax::Stmt<I>) -> Result<Vec<TokenStream>, UnsynError> {
+        let input = self.input.clone();
         let text = as_str(self.source, &stmt.ident);
         let name = item_name(text, stmt.ident.to_span())?;
         let mut allow = wants_allow(text);
@@ -1412,7 +1597,7 @@ where
                 #allow
                 pub enum #name<I>
                 where
-                    I: ::parserc::chars::CharsInput,
+                    I: #input,
                 {
                     #( #variants ),*
                 }
@@ -1464,20 +1649,26 @@ where
             // said of the *type*: the attribute stands on the item, beside the
             // `derive`, because a field of one leaves nothing for a field-level
             // attribute to narrow. `#[parserc(read_x)] struct X<I>(pub I)`.
-            Rule::Field(parser) => {
-                newtype(&name, &allow, &field_parser(&parser), &quote! { pub I })
-            }
+            Rule::Field(parser) => newtype(
+                &name,
+                &allow,
+                &field_parser(&parser),
+                &quote! { pub I },
+                &input,
+            ),
             Rule::Combinator { key, ref args } => newtype(
                 &name,
                 &allow,
                 &field_combinator(key, args),
                 &quote! { pub I },
+                &input,
             ),
             Rule::Read(read) => newtype(
                 &name,
                 &allow,
                 &field_parser(&read.to_token_stream()),
                 &quote! { pub I },
+                &input,
             ),
             // The bound is written here and not left to `take_while` because a
             // run of the trivia is what separates two operands, and a separator
@@ -1488,11 +1679,12 @@ where
                 &allow,
                 &quote! { #[parserc(take_while_with = (1.., #pred))] },
                 &quote! { pub I },
+                &input,
             ),
             Rule::Fields { tuple, fields } => {
                 use quote::ToTokens as _;
 
-                struct_item(&name, &allow.to_token_stream(), tuple, &fields)
+                struct_item(&name, &allow.to_token_stream(), tuple, &fields, &input)
             }
         });
 
@@ -1547,7 +1739,8 @@ where
             // keeps the text those statements took.
             Code::Stmt(stmts) => {
                 let read = self.unique(format!("read_{}", to_snake_case(text)));
-                self.helpers.push(reader(&read, &stmts));
+                let input = self.input.clone();
+                self.helpers.push(reader(&read, &stmts, &input));
                 Ok(Rule::Read(read))
             }
         }
@@ -1764,6 +1957,7 @@ where
     /// The function that reads one reference repeated a bounded number of
     /// times, and hands back the nodes it took.
     fn bounded_reader(&mut self, ty: &Ident, at_least: usize, at_most: Option<usize>) -> Ident {
+        let input = self.input.clone();
         let seq = self.seq;
         self.seq += 1;
 
@@ -1813,7 +2007,7 @@ where
                 input: &mut I,
             ) -> ::core::result::Result<::std::vec::Vec<#ty<I>>, <I as ::parserc::Input>::Error>
             where
-                I: ::parserc::chars::CharsInput,
+                I: #input,
             {
                 use ::parserc::Parser as _;
 
@@ -1879,6 +2073,7 @@ where
         text: &str,
         stmt: &syntax::Stmt<I>,
     ) -> Result<Vec<TokenStream>, UnsynError> {
+        let input = self.input.clone();
         let name = item_name(text, stmt.ident.to_span())?;
         let body = &stmt.expr;
         let mut allow = wants_allow(text);
@@ -1917,7 +2112,7 @@ where
                     #allow
                     pub struct #name<I>(pub #ty)
                     where
-                        I: ::parserc::chars::CharsInput;
+                        I: #input;
                 }
             } else {
                 let fields = self.finish_fields(fields);
@@ -1932,7 +2127,7 @@ where
                     },
                 ));
 
-                struct_item(&name, &allow, tuple, &fields)
+                struct_item(&name, &allow, tuple, &fields, &input)
             }
         } else {
             let mut variant_descs = Vec::new();
@@ -2028,7 +2223,7 @@ where
                 #allow
                 pub enum #name<I>
                 where
-                    I: ::parserc::chars::CharsInput,
+                    I: #input,
                 {
                     #(#variants,)*
                 }
@@ -2128,18 +2323,33 @@ where
     /// boundary the before-run was said at, and the matches after it carry
     /// their own. A repetition of several fields wraps the tuple they read
     /// as, whose runs between them are already inside.
+    ///
+    /// The name of what is repeated is the name of the field, which the type
+    /// around it does not take away: `syntax Crate -> InnerDoc* Item*;`
+    /// repeats one operand that reaches one rule, and the field that holds it
+    /// is called by that rule as plainly as the same rule reached without a
+    /// bound would call its field. Only a repetition of *several* fields — a
+    /// group, or a rule whose right side is a sequence — has nothing to be
+    /// called by, because what it read is no one rule's node.
     fn repetition_field(
         &mut self,
         bounds: (usize, Option<usize>),
         inner: Vec<Field>,
         leads: bool,
     ) -> Field {
+        // A repetition of one operand that had a name keeps it; the wrapping
+        // says how many times it was read, not what it was.
+        let name = match inner.len() {
+            1 => inner.first().and_then(|field| field.name.clone()),
+            _ => None,
+        };
+
         let types: Vec<TokenStream> = inner.into_iter().map(|field| field.ty).collect();
 
         let ty = self.repetition_ty(bounds, types, leads);
 
         Field {
-            name: None,
+            name,
             ty,
             attr: None,
         }
@@ -2316,6 +2526,7 @@ where
     /// is all of what the field took: the probe is run over a copy, and what it
     /// reads is taken from nothing.
     fn refusal_reader(&mut self, ty: &TokenStream, probe: TokenStream) -> Ident {
+        let input = self.input.clone();
         let seq = self.seq;
         self.seq += 1;
 
@@ -2356,7 +2567,7 @@ where
                 input: &mut I,
             ) -> ::core::result::Result<#ty, <I as ::parserc::Input>::Error>
             where
-                I: ::parserc::chars::CharsInput,
+                I: #input,
             {
                 use ::parserc::Parser as _;
                 use ::parserc::ToSpan as _;
@@ -2700,6 +2911,7 @@ where
     /// every other alternative is text already and wrapping it again would cost
     /// a clone of the input on every character a lexer's hottest loop reads.
     fn as_text(&mut self, parser: TokenStream, yields_node: bool) -> TokenStream {
+        let input = self.input.clone();
         if !yields_node {
             return parser;
         }
@@ -2716,7 +2928,7 @@ where
                     input: &mut I,
                 ) -> ::core::result::Result<I, <I as ::parserc::Input>::Error>
                 where
-                    I: ::parserc::chars::CharsInput,
+                    I: #input,
                     P: ::parserc::Parser<I>,
                 {
                     let mut whole = input.clone();
@@ -3108,7 +3320,8 @@ where
                 self.seq += 1;
 
                 let read = self.unique(format!("read_{}_{}", to_snake_case(&self.rule), seq + 1));
-                self.helpers.push(reader(&read, &stmts));
+                let input = self.input.clone();
+                self.helpers.push(reader(&read, &stmts, &input));
                 let _ = named;
 
                 quote! { #read }
@@ -3123,6 +3336,7 @@ where
     /// text every leaf ends with — the same shape the hand tree's visitor
     /// has, built from the shapes the file declared and nothing else.
     fn visit_items(&mut self) -> TokenStream {
+        let input = self.input.clone();
         use quote::format_ident;
 
         let mut hooks = Vec::new();
@@ -3146,7 +3360,7 @@ where
                 #[doc = concat!("Descend through the node of `", stringify!(#rule), "`.")]
                 pub fn #walk<'ast, I, V>(v: &mut V, node: &'ast #rule<I>)
                 where
-                    I: ::parserc::chars::CharsInput,
+                    I: #input,
                     V: ?Sized + Visit<'ast, I>,
                 {
                     #body
@@ -3163,7 +3377,7 @@ where
             /// [`syn`]: https://docs.rs/syn/latest/syn/visit/index.html
             pub trait Visit<'ast, I>
             where
-                I: ::parserc::chars::CharsInput,
+                I: #input,
             {
                 /// The text of one token, which is the leaf every descent
                 /// hands over.
@@ -3181,8 +3395,12 @@ where
                 // which is the order the walks below read them — and the
                 // formatter sorts a list of names, so this one stands as
                 // written: a skip of the line, not of the module.
+                //
+                // The bound of every walk is the name the file imports, and a
+                // module of its own sees none of what stands outside it, so
+                // that name comes in with the rules it bounds.
                 #[rustfmt::skip]
-                use super::{Visit, #(#names),*};
+                use super::{Visit, #input, #(#names),*};
 
                 #(#walks)*
             }
@@ -3679,6 +3897,7 @@ fn struct_item(
     allow: &dyn quote::ToTokens,
     tuple: bool,
     fields: &[Field],
+    input: &TokenStream,
 ) -> TokenStream {
     let decl = if tuple {
         let tys = fields.iter().map(|field| {
@@ -3708,7 +3927,7 @@ fn struct_item(
         quote! {
             pub struct #name<I>
             where
-                I: ::parserc::chars::CharsInput,
+                I: #input,
             {
                 #(#decls)*
             }
@@ -3718,7 +3937,7 @@ fn struct_item(
     let where_ = if tuple {
         quote! {
             where
-                I: ::parserc::chars::CharsInput;
+                I: #input;
         }
     } else {
         quote! {}
@@ -3745,6 +3964,7 @@ fn newtype(
     allow: &dyn quote::ToTokens,
     attr: &TokenStream,
     field: &TokenStream,
+    input: &TokenStream,
 ) -> TokenStream {
     quote! {
         #[derive(Debug, PartialEq, Eq, PartialOrd, Ord, Clone, ::parserc::syntax::Syntax)]
@@ -3752,7 +3972,7 @@ fn newtype(
         #attr
         pub struct #name<I>(#field)
         where
-            I: ::parserc::chars::CharsInput;
+            I: #input;
     }
 }
 
@@ -3875,11 +4095,11 @@ fn one_argument(args: &TokenStream) -> Option<TokenStream> {
 }
 
 /// The function that reads `stmts` and keeps the text they took.
-fn reader(read: &Ident, stmts: &[TokenStream]) -> TokenStream {
+fn reader(read: &Ident, stmts: &[TokenStream], input: &TokenStream) -> TokenStream {
     quote! {
         fn #read<I>(input: &mut I) -> ::core::result::Result<I, <I as ::parserc::Input>::Error>
         where
-            I: ::parserc::chars::CharsInput,
+            I: #input,
         {
             use ::parserc::Parser as _;
 
@@ -4354,7 +4574,11 @@ mod tests {
     fn a_syntax_choice_is_written_as_an_enum_and_a_sequence_as_a_struct() {
         let soup = code("lexer A -> 'a'; lexer B -> 'b'; syntax C -> A | B;");
 
-        assert!(soup.contains("pub enum C < I > where I : :: parserc :: chars :: CharsInput , { A (A < I >) , B (B < I >) , }"));
+        assert!(
+            soup.contains(
+                "pub enum C < I > where I : UnsynInput , { A (A < I >) , B (B < I >) , }"
+            )
+        );
 
         // A word of the alternative names the variant that reads it.
         let soup = code("lexer A -> 'a'; syntax B -> A concat A | A except A;");
@@ -4410,6 +4634,9 @@ mod tests {
 
     #[test]
     fn a_joining_writes_a_field_apiece_and_no_run_between_them() {
+        // The bound a build writes is the name the builder was given, which is
+        // its own unless a caller says otherwise.
+        let input = quote! { UnsynInput };
         // `concat` asks that no run of the trivia stand between two operands,
         // and only a `syntax` sequence lays one to begin with — so this is the
         // level where the word means something.
@@ -4424,7 +4651,7 @@ mod tests {
                         #[parserc(keyword = "cd")] pub I,
                     )
                     where
-                        I: ::parserc::chars::CharsInput;
+                        I: #input;
                 }
             ),
             "{joined}"
@@ -4451,6 +4678,7 @@ mod tests {
 
     #[test]
     fn the_trivia_of_a_lexer_rule_is_not_taken() {
+        let input = quote! { UnsynInput };
         // The sequence is a field apiece, and no field of a lexer node is a
         // run of the trivia: a literal's field is the keyword's own text.
         let soup = code("lexer A -> 'a'; lexer C -> A 'x';");
@@ -4464,7 +4692,7 @@ mod tests {
         let soup = code("lexer A -> 'a' | 'b';");
         assert!(
             soup.contains(
-                "pub enum A < I > where I : :: parserc :: chars :: CharsInput , { \
+                "pub enum A < I > where I : UnsynInput , { \
                  A (# [parserc (next = 'a')] I ,) , \
                  B (# [parserc (next = 'b')] I ,) }"
             ),
@@ -4482,7 +4710,7 @@ mod tests {
                 #[parserc(keyword = "ab")]
                 pub struct A<I>(pub I)
                 where
-                    I: ::parserc::chars::CharsInput;
+                    I: #input;
             }
         ));
     }

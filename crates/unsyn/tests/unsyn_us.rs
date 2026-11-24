@@ -158,24 +158,29 @@ fn the_kept_file_is_the_code_of_the_spec() {
 /// that compiles and then takes the wrong span, or takes nothing, or takes what
 /// the rule after it should have, is caught only by running it.
 ///
-/// Two streams are read, one per row of the table the two phases make. The plain
-/// [`parserc`] char stream says that the code a build writes names nothing of
-/// this crate, so a grammar can live in a crate that never depends on unsyn.
-/// The stream of this crate says the other half, which is that the same code is
-/// the parser this crate would bootstrap itself with, refusals and all: what it
-/// answers with is an [`UnsynError`] rather than a [`Kind`], and the generated
-/// code is none the wiser for which of the two it is handing back.
+/// Two streams are read, one per row of the table the two phases make. The
+/// stream of this crate is what a build is asked for by default: the name of
+/// the input trait it writes is `UnsynInput`, so the file it writes is the
+/// parser this crate would bootstrap itself with, refusals and all — what it
+/// answers with is an [`UnsynError`] rather than a [`Kind`].
+///
+/// The other half is that this is a *default* and not a fact about the code:
+/// `a_build_aimed_at_another_crate_names_that_crate`, at the foot of this
+/// file, configures the same generator with a name of its own and gets a file
+/// that reaches nothing of unsyn at all, which is what lets a grammar live in
+/// a crate that never depends on unsyn.
 mod and_it_reads {
+    use super::generated::{
+        BlockComment, Ident, LitStr, LitUnicode, S, TokenStream, UnicodeEscape,
+    };
     use parserc::{
-        AsStr, Kind,
-        chars::TokenStream,
+        AsStr,
         syntax::{Syntax, SyntaxInput},
     };
-
-    use super::generated::{BlockComment, Ident, LitStr, LitUnicode, S, UnicodeEscape};
+    use unsyn::compiler::errors::UnsynError;
 
     /// Reads the node `T` from the start of `source`.
-    fn parse<'a, T>(source: &'a str) -> Result<T, Kind>
+    fn parse<'a, T>(source: &'a str) -> Result<T, UnsynError>
     where
         T: Syntax<TokenStream<'a>>,
     {
@@ -253,7 +258,7 @@ mod and_it_reads {
 
         // Four digits and no more: a fifth is not part of the literal but the
         // text of whatever operand comes next.
-        let mut input = parserc::chars::TokenStream::<parserc::Kind>::from("U+00419");
+        let mut input = TokenStream::from("U+00419");
         let lit = input
             .parse::<LitUnicode<_>>()
             .expect("the first four digits");
@@ -278,7 +283,7 @@ mod and_it_reads {
         // The rule bounds the digits and writes nothing between them, so a
         // separator is no part of an escape: the six digits are taken and the
         // brace is then asked for where the `_` stands.
-        let mut input = parserc::chars::TokenStream::<parserc::Kind>::from(r"\u{1F_600}");
+        let mut input = TokenStream::from(r"\u{1F_600}");
         assert!(
             input.parse::<UnicodeEscape<_>>().is_err(),
             "an underscore separates no digits"
@@ -331,10 +336,12 @@ mod and_it_reads_this_crate {
         syntax::{Syntax, SyntaxInput},
     };
 
-    use super::generated::{Ident, LitStr};
-    use unsyn::compiler::{errors::UnsynError, input::TokenStream};
+    use super::generated::{Ident, LitStr, TokenStream};
+    use unsyn::compiler::errors::UnsynError;
 
-    /// Reads the node `T` from the start of `source`, over this crate's input.
+    /// Reads the node `T` from the start of `source`, over the stream the
+    /// generated front end names — which is the same concrete stream this
+    /// crate reads, reached by the path the build wrote into the file.
     fn parse<'a, T>(source: &'a str) -> Result<T, UnsynError>
     where
         T: Syntax<TokenStream<'a>>,
@@ -375,11 +382,12 @@ mod and_it_reads_this_crate {
 /// disagree.
 #[test]
 fn the_generated_parser_reads_the_spec_it_was_generated_from() {
-    use parserc::chars::TokenStream as Chars;
     use parserc::syntax::SyntaxInput as _;
     use parserc::{AsStr, Input};
 
-    use crate::generated::{Crate as GeneratedCrate, Item as GeneratedItem};
+    use crate::generated::{
+        Crate as GeneratedCrate, Item as GeneratedItem, TokenStream as GeneratedStream,
+    };
     use unsyn::compiler::input::TokenStream as UnsynStream;
     use unsyn::compiler::{syntax, syntax::Item};
 
@@ -390,7 +398,11 @@ fn the_generated_parser_reads_the_spec_it_was_generated_from() {
         .parse::<syntax::Crate<_>>()
         .expect("the hand parser reads its own spec");
 
-    let mut generated = Chars::<parserc::Kind>::from(SOURCE);
+    // Each front end names its own stream, and the two are the same concrete
+    // stream over the same error — which is what lets the two trees be
+    // compared span for span. A build aimed elsewhere would have been
+    // configured to name another. See [`a_build_aimed_at_another_crate_names_that_crate`].
+    let mut generated = GeneratedStream::from(SOURCE);
     let tree = generated
         .parse::<GeneratedCrate<_>>()
         .expect("the generated parser reads the spec it was generated from");
@@ -402,7 +414,7 @@ fn the_generated_parser_reads_the_spec_it_was_generated_from() {
     );
 
     // The generated `Crate` is the struct its pattern writes: two repeated
-    // operands, nameless and numbered, the items being the second.
+    // operands, each called by the rule it holds.
     let defined = |name: &unsyn::compiler::lexer::Ident<UnsynStream<'_>>| name.to_span();
 
     let hand_names: Vec<_> = hand
@@ -415,7 +427,7 @@ fn the_generated_parser_reads_the_spec_it_was_generated_from() {
         .collect();
 
     let generated_names: Vec<_> = tree
-        .1
+        .item
         .iter()
         .filter_map(|item| match item {
             GeneratedItem::Stmt(stmt) => Some(stmt.ident.to_span()),
@@ -448,22 +460,65 @@ fn the_generated_visitor_hands_over_every_character_once() {
 
     impl<'ast, I> crate::generated::Visit<'ast, I> for Echo
     where
-        I: parserc::chars::CharsInput,
+        I: crate::generated::UnsynInput,
     {
         fn visit_text(&mut self, text: &'ast I) {
             self.0.push_str(text.as_str());
         }
     }
 
-    let mut input = parserc::chars::TokenStream::<parserc::Kind>::from(SOURCE);
+    let mut input = crate::generated::TokenStream::from(SOURCE);
     let tree = input
-        .parse::<crate::generated::Crate<parserc::chars::TokenStream<parserc::Kind>>>()
+        .parse::<crate::generated::Crate<crate::generated::TokenStream<'_>>>()
         .expect("the generated parser reads the spec");
 
     let mut echo = Echo(String::new());
     echo.visit_crate(&tree);
 
     assert_eq!(echo.0, SOURCE, "every character, exactly once, in order");
+}
+
+/// A build aimed at another crate names that crate's stream, and nothing here.
+///
+/// The default input name is the compiler's own, which is what makes the file
+/// a drop-in front end for this crate. A grammar of another language lives in
+/// a crate that never depends on unsyn, and says so by giving the generator
+/// the name to write and the path to find it at. Renaming is the whole of
+/// aiming elsewhere: the file reaches its stream only through that name.
+#[test]
+fn a_build_aimed_at_another_crate_names_that_crate() {
+    use parserc::syntax::SyntaxInput as _;
+    use proc_macro2::TokenStream as Syntax;
+
+    const SOURCE: &str = "whitespace W -> [' ']; lexer A -> 'a'; syntax B -> A;";
+
+    let whole = TokenStream::from(SOURCE);
+    let mut input = TokenStream::from(SOURCE);
+    let file = input
+        .parse::<syntax::Crate<_>>()
+        .expect("a file of the language");
+
+    let report = semantic::analyze(&whole, &file);
+    assert!(report.errors.is_empty(), "{SOURCE}: {:#?}", report.errors);
+
+    let mut builder = Builder::new(&whole, &file);
+    builder.input_name("GrammarInput");
+    builder.input_at(Syntax::from_str("::other::GrammarInput").unwrap());
+
+    let code = builder
+        .build()
+        .expect("the file should be generated")
+        .to_string();
+
+    // The name the builder was given is the name every bound wears, and it
+    // comes from the path the builder was given.
+    assert!(code.contains("use :: other :: GrammarInput ;"), "{code}");
+    assert!(code.contains("I : GrammarInput"), "{code}");
+
+    // Nothing of this crate survives the renaming, which is the whole of what
+    // a crate that never depends on unsyn needs to be true.
+    assert!(!code.contains("UnsynInput"), "{code}");
+    assert!(!code.contains("unsyn"), "{code}");
 }
 
 /// Rewrites the file the code is kept in, for when the generator changed.

@@ -8,12 +8,27 @@
     clippy::type_complexity,
     clippy::enum_variant_names
 )]
+pub trait UnsynInput:
+    ::parserc::Input<Item = char, Error = ::unsyn::compiler::errors::UnsynError>
+    + ::parserc::AsBytes
+    + ::parserc::AsStr
+    + ::parserc::StartWith<&'static str>
+    + ::parserc::StartWith<&'static [u8]>
+    + ::parserc::Find<&'static str>
+    + ::parserc::Find<&'static [u8]>
+    + ::core::clone::Clone
+    + ::core::fmt::Debug
+    + ::core::cmp::PartialEq
+{
+}
+pub type TokenStream<'a> = ::parserc::chars::TokenStream<'a, ::unsyn::compiler::errors::UnsynError>;
+impl<'a> UnsynInput for TokenStream<'a> {}
 fn text_of<P, I>(
     parser: P,
     input: &mut I,
 ) -> ::core::result::Result<I, <I as ::parserc::Input>::Error>
 where
-    I: ::parserc::chars::CharsInput,
+    I: UnsynInput,
     P: ::parserc::Parser<I>,
 {
     let mut whole = input.clone();
@@ -29,26 +44,26 @@ fn is_s(c: char) -> bool {
 # [parserc (take_while_with = (1 .. , is_s))]
 pub struct S<I>(pub I)
 where
-    I: ::parserc::chars::CharsInput;
+    I: UnsynInput;
 #[derive(Debug, PartialEq, Eq, PartialOrd, Ord, Clone, :: parserc :: syntax :: Syntax)]
 #[parserc(next = '\n')]
 pub struct LF<I>(pub I)
 where
-    I: ::parserc::chars::CharsInput;
+    I: UnsynInput;
 #[derive(Debug, PartialEq, Eq, PartialOrd, Ord, Clone, :: parserc :: syntax :: Syntax)]
 #[parserc(next = '\r')]
 pub struct CR<I>(pub I)
 where
-    I: ::parserc::chars::CharsInput;
+    I: UnsynInput;
 #[derive(Debug, PartialEq, Eq, PartialOrd, Ord, Clone, :: parserc :: syntax :: Syntax)]
 #[parserc(crate::scan_ident_or_keyword)]
 pub struct IdentOrKeyword<I>(pub I)
 where
-    I: ::parserc::chars::CharsInput;
+    I: UnsynInput;
 #[derive(Debug, PartialEq, Eq, PartialOrd, Ord, Clone, :: parserc :: syntax :: Syntax)]
 pub struct RawIdent<I>
 where
-    I: ::parserc::chars::CharsInput,
+    I: UnsynInput,
 {
     #[parserc(keyword = "r#")]
     pub f1: I,
@@ -58,7 +73,7 @@ fn read_non_keyword_ident<I>(
     input: &mut I,
 ) -> ::core::result::Result<I, <I as ::parserc::Input>::Error>
 where
-    I: ::parserc::chars::CharsInput,
+    I: UnsynInput,
 {
     use ::parserc::Parser as _;
     let mut whole = input.clone();
@@ -88,11 +103,11 @@ where
 #[parserc(read_non_keyword_ident)]
 pub struct NonKeywordIdent<I>(pub I)
 where
-    I: ::parserc::chars::CharsInput;
+    I: UnsynInput;
 #[derive(Debug, PartialEq, Eq, PartialOrd, Ord, Clone, :: parserc :: syntax :: Syntax)]
 pub enum Ident<I>
 where
-    I: ::parserc::chars::CharsInput,
+    I: UnsynInput,
 {
     RawIdent(RawIdent<I>),
     NonKeywordIdent(NonKeywordIdent<I>),
@@ -100,7 +115,7 @@ where
 #[derive(Debug, PartialEq, Eq, PartialOrd, Ord, Clone, :: parserc :: syntax :: Syntax)]
 pub enum Keywords<I>
 where
-    I: ::parserc::chars::CharsInput,
+    I: UnsynInput,
 {
     LeadingKeywords(LeadingKeywords<I>),
     OperatorKeywords(OperatorKeywords<I>),
@@ -108,7 +123,7 @@ where
 #[derive(Debug, PartialEq, Eq, PartialOrd, Ord, Clone, :: parserc :: syntax :: Syntax)]
 pub enum LeadingKeywords<I>
 where
-    I: ::parserc::chars::CharsInput,
+    I: UnsynInput,
 {
     Lexer(#[parserc(keyword = "lexer")] I),
     Syntax(#[parserc(keyword = "syntax")] I),
@@ -117,14 +132,14 @@ where
 #[derive(Debug, PartialEq, Eq, PartialOrd, Ord, Clone, :: parserc :: syntax :: Syntax)]
 pub enum OperatorKeywords<I>
 where
-    I: ::parserc::chars::CharsInput,
+    I: UnsynInput,
 {
     Concat(#[parserc(keyword = "concat")] I),
     Except(#[parserc(keyword = "except")] I),
 }
 fn read_lit_str_1<I>(input: &mut I) -> ::core::result::Result<I, <I as ::parserc::Input>::Error>
 where
-    I: ::parserc::chars::CharsInput,
+    I: UnsynInput,
 {
     use ::parserc::Parser as _;
     let mut whole = input.clone();
@@ -156,16 +171,16 @@ pub struct LitStr<I>(
     #[parserc(next = '\'')] pub I,
 )
 where
-    I: ::parserc::chars::CharsInput;
+    I: UnsynInput;
 #[derive(Debug, PartialEq, Eq, PartialOrd, Ord, Clone, :: parserc :: syntax :: Syntax)]
 #[parserc(keyword = "\\'")]
 pub struct QuoteEscape<I>(pub I)
 where
-    I: ::parserc::chars::CharsInput;
+    I: UnsynInput;
 #[derive(Debug, PartialEq, Eq, PartialOrd, Ord, Clone, :: parserc :: syntax :: Syntax)]
 pub enum AsciiEscape<I>
 where
-    I: ::parserc::chars::CharsInput,
+    I: UnsynInput,
 {
     AsciiHexEscape(AsciiHexEscape<I>),
     F2(#[parserc(keyword = "\\n")] I),
@@ -177,7 +192,7 @@ where
 #[derive(Debug, PartialEq, Eq, PartialOrd, Ord, Clone, :: parserc :: syntax :: Syntax)]
 pub struct AsciiHexEscape<I>
 where
-    I: ::parserc::chars::CharsInput,
+    I: UnsynInput,
 {
     #[parserc(keyword = "\\x")]
     pub f1: I,
@@ -188,7 +203,7 @@ fn read_unicode_escape_1<I>(
     input: &mut I,
 ) -> ::core::result::Result<::std::vec::Vec<HexDigit<I>>, <I as ::parserc::Input>::Error>
 where
-    I: ::parserc::chars::CharsInput,
+    I: UnsynInput,
 {
     use ::parserc::Parser as _;
     let mut taken = ::std::vec::Vec::new();
@@ -214,7 +229,7 @@ where
 #[derive(Debug, PartialEq, Eq, PartialOrd, Ord, Clone, :: parserc :: syntax :: Syntax)]
 pub struct UnicodeEscape<I>
 where
-    I: ::parserc::chars::CharsInput,
+    I: UnsynInput,
 {
     #[parserc(keyword = "\\u{")]
     pub f1: I,
@@ -227,21 +242,21 @@ where
 # [parserc (next_if = | c : char | matches ! (c , '0' ..= '7'))]
 pub struct OctDigit<I>(pub I)
 where
-    I: ::parserc::chars::CharsInput;
+    I: UnsynInput;
 #[derive(Debug, PartialEq, Eq, PartialOrd, Ord, Clone, :: parserc :: syntax :: Syntax)]
 # [parserc (next_if = | c : char | matches ! (c , '0' ..= '9'))]
 pub struct DecDigit<I>(pub I)
 where
-    I: ::parserc::chars::CharsInput;
+    I: UnsynInput;
 #[derive(Debug, PartialEq, Eq, PartialOrd, Ord, Clone, :: parserc :: syntax :: Syntax)]
 # [parserc (next_if = | c : char | matches ! (c , '0' ..= '9' | 'a' ..= 'f' | 'A' ..= 'F'))]
 pub struct HexDigit<I>(pub I)
 where
-    I: ::parserc::chars::CharsInput;
+    I: UnsynInput;
 #[derive(Debug, PartialEq, Eq, PartialOrd, Ord, Clone, :: parserc :: syntax :: Syntax)]
 pub struct LitDec<I>
 where
-    I: ::parserc::chars::CharsInput,
+    I: UnsynInput,
 {
     pub dec_digit: DecDigit<I>,
     # [parserc (take_while = | c : char | matches ! (c , '0' ..= '9' | '_'))]
@@ -251,7 +266,7 @@ fn read_lit_unicode_1<I>(
     input: &mut I,
 ) -> ::core::result::Result<::std::vec::Vec<HexDigit<I>>, <I as ::parserc::Input>::Error>
 where
-    I: ::parserc::chars::CharsInput,
+    I: UnsynInput,
 {
     use ::parserc::Parser as _;
     let mut taken = ::std::vec::Vec::new();
@@ -277,7 +292,7 @@ where
 #[derive(Debug, PartialEq, Eq, PartialOrd, Ord, Clone, :: parserc :: syntax :: Syntax)]
 pub struct LitUnicode<I>
 where
-    I: ::parserc::chars::CharsInput,
+    I: UnsynInput,
 {
     #[parserc(keyword = "U+")]
     pub f1: I,
@@ -287,7 +302,7 @@ where
 #[derive(Debug, PartialEq, Eq, PartialOrd, Ord, Clone, :: parserc :: syntax :: Syntax)]
 pub enum BlockComment<I>
 where
-    I: ::parserc::chars::CharsInput,
+    I: UnsynInput,
 {
     BlockCommentBody(BlockCommentBody<I>),
     F2(#[parserc(keyword = "/**/")] I),
@@ -297,7 +312,7 @@ fn read_block_comment_body_1<I>(
     input: &mut I,
 ) -> ::core::result::Result<I, <I as ::parserc::Input>::Error>
 where
-    I: ::parserc::chars::CharsInput,
+    I: UnsynInput,
 {
     use ::parserc::Parser as _;
     let mut whole = input.clone();
@@ -325,7 +340,7 @@ fn read_block_comment_body_2<I>(
     input: &mut I,
 ) -> ::core::result::Result<I, <I as ::parserc::Input>::Error>
 where
-    I: ::parserc::chars::CharsInput,
+    I: UnsynInput,
 {
     use ::parserc::Parser as _;
     let mut whole = input.clone();
@@ -352,7 +367,7 @@ fn read_block_comment_body_3<I>(
     input: &mut I,
 ) -> ::core::result::Result<I, <I as ::parserc::Input>::Error>
 where
-    I: ::parserc::chars::CharsInput,
+    I: UnsynInput,
 {
     use ::parserc::Parser as _;
     let mut whole = input.clone();
@@ -379,7 +394,7 @@ pub struct BlockCommentBody<I>(
     #[parserc(keyword = "*/")] pub I,
 )
 where
-    I: ::parserc::chars::CharsInput;
+    I: UnsynInput;
 #[derive(Debug, PartialEq, Eq, PartialOrd, Ord, Clone, :: parserc :: syntax :: Syntax)]
 pub struct InnerLineDoc<I>(
     #[parserc(keyword = "//!")]
@@ -387,12 +402,12 @@ pub struct InnerLineDoc<I>(
     # [parserc (take_while = | c : char | ! (matches ! (c , '\n' | '\r')))] pub I,
 )
 where
-    I: ::parserc::chars::CharsInput;
+    I: UnsynInput;
 fn read_inner_block_doc_1<I>(
     input: &mut I,
 ) -> ::core::result::Result<I, <I as ::parserc::Input>::Error>
 where
-    I: ::parserc::chars::CharsInput,
+    I: UnsynInput,
 {
     use ::parserc::Parser as _;
     let mut whole = input.clone();
@@ -419,7 +434,7 @@ fn read_inner_block_doc_2<I>(
     input: &mut I,
 ) -> ::core::result::Result<I, <I as ::parserc::Input>::Error>
 where
-    I: ::parserc::chars::CharsInput,
+    I: UnsynInput,
 {
     use ::parserc::Parser as _;
     let mut whole = input.clone();
@@ -444,12 +459,12 @@ pub struct InnerBlockDoc<I>(
     #[parserc(keyword = "*/")] pub I,
 )
 where
-    I: ::parserc::chars::CharsInput;
+    I: UnsynInput;
 fn read_outer_line_doc_1<I>(
     input: &mut I,
 ) -> ::core::result::Result<I, <I as ::parserc::Input>::Error>
 where
-    I: ::parserc::chars::CharsInput,
+    I: UnsynInput,
 {
     use ::parserc::Parser as _;
     let mut whole = input.clone();
@@ -462,7 +477,7 @@ fn read_outer_line_doc_2<I>(
     input: &mut I,
 ) -> ::core::result::Result<I, <I as ::parserc::Input>::Error>
 where
-    I: ::parserc::chars::CharsInput,
+    I: UnsynInput,
 {
     use ::parserc::Parser as _;
     let mut whole = input.clone();
@@ -477,12 +492,12 @@ pub struct OuterLineDoc<I>(
     #[parserc(read_outer_line_doc_2)] pub I,
 )
 where
-    I: ::parserc::chars::CharsInput;
+    I: UnsynInput;
 fn read_outer_block_doc_1<I>(
     input: &mut I,
 ) -> ::core::result::Result<I, <I as ::parserc::Input>::Error>
 where
-    I: ::parserc::chars::CharsInput,
+    I: UnsynInput,
 {
     use ::parserc::Parser as _;
     let mut whole = input.clone();
@@ -509,7 +524,7 @@ fn read_outer_block_doc_2<I>(
     input: &mut I,
 ) -> ::core::result::Result<I, <I as ::parserc::Input>::Error>
 where
-    I: ::parserc::chars::CharsInput,
+    I: UnsynInput,
 {
     use ::parserc::Parser as _;
     let mut whole = input.clone();
@@ -536,7 +551,7 @@ fn read_outer_block_doc_3<I>(
     input: &mut I,
 ) -> ::core::result::Result<I, <I as ::parserc::Input>::Error>
 where
-    I: ::parserc::chars::CharsInput,
+    I: UnsynInput,
 {
     use ::parserc::Parser as _;
     let mut whole = input.clone();
@@ -563,23 +578,26 @@ pub struct OuterBlockDoc<I>(
     #[parserc(keyword = "*/")] pub I,
 )
 where
-    I: ::parserc::chars::CharsInput;
+    I: UnsynInput;
 #[derive(Debug, PartialEq, Eq, PartialOrd, Ord, Clone, :: parserc :: syntax :: Syntax)]
 pub enum BlockCommentOrDoc<I>
 where
-    I: ::parserc::chars::CharsInput,
+    I: UnsynInput,
 {
     BlockComment(BlockComment<I>),
     OuterBlockDoc(OuterBlockDoc<I>),
     InnerBlockDoc(InnerBlockDoc<I>),
 }
 #[derive(Debug, PartialEq, Eq, PartialOrd, Ord, Clone, :: parserc :: syntax :: Syntax)]
-pub struct Expr<I>(
-    pub  (
+pub struct Expr<I>
+where
+    I: UnsynInput,
+{
+    pub expr_no_top_alt: (
         Box<ExprNoTopAlt<I>>,
         ::std::vec::Vec<(::core::option::Option<S<I>>, Box<ExprNoTopAlt<I>>)>,
     ),
-    pub  ::std::vec::Vec<(
+    pub f1: ::std::vec::Vec<(
         ::core::option::Option<S<I>>,
         ::parserc::syntax::Char<I, '|'>,
         ::core::option::Option<S<I>>,
@@ -588,13 +606,11 @@ pub struct Expr<I>(
             ::std::vec::Vec<(::core::option::Option<S<I>>, Box<ExprNoTopAlt<I>>)>,
         ),
     )>,
-)
-where
-    I: ::parserc::chars::CharsInput;
+}
 #[derive(Debug, PartialEq, Eq, PartialOrd, Ord, Clone, :: parserc :: syntax :: Syntax)]
 pub enum ExprNoTopAlt<I>
 where
-    I: ::parserc::chars::CharsInput,
+    I: UnsynInput,
 {
     ExprWithSuffix(Box<ExprWithSuffix<I>>),
     ExprWithoutSuffix(Box<ExprWithoutSuffix<I>>),
@@ -613,11 +629,11 @@ pub struct Set<I>(
     pub ::parserc::syntax::Char<I, ']'>,
 )
 where
-    I: ::parserc::chars::CharsInput;
+    I: UnsynInput;
 #[derive(Debug, PartialEq, Eq, PartialOrd, Ord, Clone, :: parserc :: syntax :: Syntax)]
 pub enum ExprWithoutSuffix<I>
 where
-    I: ::parserc::chars::CharsInput,
+    I: UnsynInput,
 {
     NegatedSet(Box<NegatedSet<I>>),
     Call(Call<I>),
@@ -630,7 +646,7 @@ where
 #[derive(Debug, PartialEq, Eq, PartialOrd, Ord, Clone, :: parserc :: syntax :: Syntax)]
 pub struct NegatedSet<I>
 where
-    I: ::parserc::chars::CharsInput,
+    I: UnsynInput,
 {
     pub f1: ::parserc::syntax::Char<I, '~'>,
     pub f2: ::core::option::Option<S<I>>,
@@ -639,7 +655,7 @@ where
 #[derive(Debug, PartialEq, Eq, PartialOrd, Ord, Clone, :: parserc :: syntax :: Syntax)]
 pub struct Call<I>
 where
-    I: ::parserc::chars::CharsInput,
+    I: UnsynInput,
 {
     pub f1: ::parserc::syntax::Char<I, '<'>,
     pub f2: ::core::option::Option<S<I>>,
@@ -650,7 +666,7 @@ where
 #[derive(Debug, PartialEq, Eq, PartialOrd, Ord, Clone, :: parserc :: syntax :: Syntax)]
 pub struct Paren<I>
 where
-    I: ::parserc::chars::CharsInput,
+    I: UnsynInput,
 {
     pub f1: ::parserc::syntax::Char<I, '('>,
     pub f2: ::core::option::Option<S<I>>,
@@ -661,7 +677,7 @@ where
 #[derive(Debug, PartialEq, Eq, PartialOrd, Ord, Clone, :: parserc :: syntax :: Syntax)]
 pub enum Suffix<I>
 where
-    I: ::parserc::chars::CharsInput,
+    I: UnsynInput,
 {
     F1(::parserc::syntax::Char<I, '*'>),
     F2(::parserc::syntax::Char<I, '?'>),
@@ -671,7 +687,7 @@ where
 #[derive(Debug, PartialEq, Eq, PartialOrd, Ord, Clone, :: parserc :: syntax :: Syntax)]
 pub enum ExprWithSuffix<I>
 where
-    I: ::parserc::chars::CharsInput,
+    I: UnsynInput,
 {
     Suffixed(Box<Suffixed<I>>),
     Concat {
@@ -694,7 +710,7 @@ where
 #[derive(Debug, PartialEq, Eq, PartialOrd, Ord, Clone, :: parserc :: syntax :: Syntax)]
 pub struct Suffixed<I>
 where
-    I: ::parserc::chars::CharsInput,
+    I: UnsynInput,
 {
     pub expr_without_suffix: Box<ExprWithoutSuffix<I>>,
     pub f1: ::core::option::Option<S<I>>,
@@ -703,7 +719,7 @@ where
 #[derive(Debug, PartialEq, Eq, PartialOrd, Ord, Clone, :: parserc :: syntax :: Syntax)]
 pub enum RepeatBound<I>
 where
-    I: ::parserc::chars::CharsInput,
+    I: UnsynInput,
 {
     RangeTo(RangeTo<I>),
     RangeFrom(RangeFrom<I>),
@@ -712,7 +728,7 @@ where
 #[derive(Debug, PartialEq, Eq, PartialOrd, Ord, Clone, :: parserc :: syntax :: Syntax)]
 pub struct RangeTo<I>
 where
-    I: ::parserc::chars::CharsInput,
+    I: UnsynInput,
 {
     pub f1: ::parserc::syntax::Char<I, ','>,
     pub f2: ::core::option::Option<S<I>>,
@@ -721,7 +737,7 @@ where
 #[derive(Debug, PartialEq, Eq, PartialOrd, Ord, Clone, :: parserc :: syntax :: Syntax)]
 pub struct RangeFrom<I>
 where
-    I: ::parserc::chars::CharsInput,
+    I: UnsynInput,
 {
     pub lit_dec: LitDec<I>,
     pub f1: ::core::option::Option<S<I>>,
@@ -731,7 +747,7 @@ where
 #[derive(Debug, PartialEq, Eq, PartialOrd, Ord, Clone, :: parserc :: syntax :: Syntax)]
 pub struct Repeat<I>
 where
-    I: ::parserc::chars::CharsInput,
+    I: UnsynInput,
 {
     pub f1: ::parserc::syntax::Char<I, '{'>,
     pub f2: ::core::option::Option<S<I>>,
@@ -742,7 +758,7 @@ where
 #[derive(Debug, PartialEq, Eq, PartialOrd, Ord, Clone, :: parserc :: syntax :: Syntax)]
 pub enum Range<I>
 where
-    I: ::parserc::chars::CharsInput,
+    I: UnsynInput,
 {
     UnicodeRange(UnicodeRange<I>),
     StrRange(StrRange<I>),
@@ -750,7 +766,7 @@ where
 #[derive(Debug, PartialEq, Eq, PartialOrd, Ord, Clone, :: parserc :: syntax :: Syntax)]
 pub struct UnicodeRange<I>
 where
-    I: ::parserc::chars::CharsInput,
+    I: UnsynInput,
 {
     pub lit_unicode: LitUnicode<I>,
     pub f1: ::parserc::syntax::Char<I, '-'>,
@@ -759,7 +775,7 @@ where
 #[derive(Debug, PartialEq, Eq, PartialOrd, Ord, Clone, :: parserc :: syntax :: Syntax)]
 pub struct StrRange<I>
 where
-    I: ::parserc::chars::CharsInput,
+    I: UnsynInput,
 {
     pub lit_str: LitStr<I>,
     pub f1: ::parserc::syntax::Char<I, '-'>,
@@ -768,7 +784,7 @@ where
 #[derive(Debug, PartialEq, Eq, PartialOrd, Ord, Clone, :: parserc :: syntax :: Syntax)]
 pub enum SetItem<I>
 where
-    I: ::parserc::chars::CharsInput,
+    I: UnsynInput,
 {
     Range(Range<I>),
     LitStr(LitStr<I>),
@@ -778,7 +794,7 @@ where
 #[derive(Debug, PartialEq, Eq, PartialOrd, Ord, Clone, :: parserc :: syntax :: Syntax)]
 pub struct Stmt<I>
 where
-    I: ::parserc::chars::CharsInput,
+    I: UnsynInput,
 {
     pub leading_keywords: LeadingKeywords<I>,
     pub f1: ::core::option::Option<S<I>>,
@@ -794,7 +810,7 @@ where
 #[derive(Debug, PartialEq, Eq, PartialOrd, Ord, Clone, :: parserc :: syntax :: Syntax)]
 pub enum Item<I>
 where
-    I: ::parserc::chars::CharsInput,
+    I: UnsynInput,
 {
     OuterDoc(OuterDoc<I>),
     S(S<I>),
@@ -803,7 +819,7 @@ where
 #[derive(Debug, PartialEq, Eq, PartialOrd, Ord, Clone, :: parserc :: syntax :: Syntax)]
 pub enum OuterDoc<I>
 where
-    I: ::parserc::chars::CharsInput,
+    I: UnsynInput,
 {
     OuterBlockDoc(OuterBlockDoc<I>),
     OuterLineDoc(OuterLineDoc<I>),
@@ -811,18 +827,19 @@ where
 #[derive(Debug, PartialEq, Eq, PartialOrd, Ord, Clone, :: parserc :: syntax :: Syntax)]
 pub enum InnerDoc<I>
 where
-    I: ::parserc::chars::CharsInput,
+    I: UnsynInput,
 {
     InnerBlockDoc(InnerBlockDoc<I>),
     InnerLineDoc(InnerLineDoc<I>),
 }
 #[derive(Debug, PartialEq, Eq, PartialOrd, Ord, Clone, :: parserc :: syntax :: Syntax)]
-pub struct Crate<I>(
-    pub ::std::vec::Vec<(::core::option::Option<S<I>>, InnerDoc<I>)>,
-    pub ::std::vec::Vec<Item<I>>,
-)
+pub struct Crate<I>
 where
-    I: ::parserc::chars::CharsInput;
+    I: UnsynInput,
+{
+    pub inner_doc: ::std::vec::Vec<(::core::option::Option<S<I>>, InnerDoc<I>)>,
+    pub item: ::std::vec::Vec<Item<I>>,
+}
 #[doc = r" The visitor of the file's nodes, in the shape of `syn`'s: one"]
 #[doc = r" method per rule descending through the walk of it unless a"]
 #[doc = r" visitor says otherwise, and one method for the text that every"]
@@ -831,7 +848,7 @@ where
 #[doc = r" [`syn`]: https://docs.rs/syn/latest/syn/visit/index.html"]
 pub trait Visit<'ast, I>
 where
-    I: ::parserc::chars::CharsInput,
+    I: UnsynInput,
 {
     #[doc = r" The text of one token, which is the leaf every descent"]
     #[doc = r" hands over."]
@@ -1042,11 +1059,11 @@ where
 #[doc = r" the visitor below it."]
 #[allow(clippy::needless_borrow, clippy::possible_missing_else)]
 pub mod walk {
-    # [rustfmt :: skip] use super :: { Visit , S , LF , CR , IdentOrKeyword , RawIdent , NonKeywordIdent , Ident , Keywords , LeadingKeywords , OperatorKeywords , LitStr , QuoteEscape , AsciiEscape , AsciiHexEscape , UnicodeEscape , OctDigit , DecDigit , HexDigit , LitDec , LitUnicode , BlockComment , BlockCommentBody , InnerLineDoc , InnerBlockDoc , OuterLineDoc , OuterBlockDoc , BlockCommentOrDoc , Expr , ExprNoTopAlt , Set , ExprWithoutSuffix , NegatedSet , Call , Paren , Suffix , ExprWithSuffix , Suffixed , RepeatBound , RangeTo , RangeFrom , Repeat , Range , UnicodeRange , StrRange , SetItem , Stmt , Item , OuterDoc , InnerDoc , Crate } ;
+    # [rustfmt :: skip] use super :: { Visit , UnsynInput , S , LF , CR , IdentOrKeyword , RawIdent , NonKeywordIdent , Ident , Keywords , LeadingKeywords , OperatorKeywords , LitStr , QuoteEscape , AsciiEscape , AsciiHexEscape , UnicodeEscape , OctDigit , DecDigit , HexDigit , LitDec , LitUnicode , BlockComment , BlockCommentBody , InnerLineDoc , InnerBlockDoc , OuterLineDoc , OuterBlockDoc , BlockCommentOrDoc , Expr , ExprNoTopAlt , Set , ExprWithoutSuffix , NegatedSet , Call , Paren , Suffix , ExprWithSuffix , Suffixed , RepeatBound , RangeTo , RangeFrom , Repeat , Range , UnicodeRange , StrRange , SetItem , Stmt , Item , OuterDoc , InnerDoc , Crate } ;
     # [doc = concat ! ("Descend through the node of `" , stringify ! (S) , "`.")]
     pub fn walk_s<'ast, I, V>(v: &mut V, node: &'ast S<I>)
     where
-        I: ::parserc::chars::CharsInput,
+        I: UnsynInput,
         V: ?Sized + Visit<'ast, I>,
     {
         v.visit_text(&node.0);
@@ -1054,7 +1071,7 @@ pub mod walk {
     # [doc = concat ! ("Descend through the node of `" , stringify ! (LF) , "`.")]
     pub fn walk_lf<'ast, I, V>(v: &mut V, node: &'ast LF<I>)
     where
-        I: ::parserc::chars::CharsInput,
+        I: UnsynInput,
         V: ?Sized + Visit<'ast, I>,
     {
         v.visit_text(&node.0);
@@ -1062,7 +1079,7 @@ pub mod walk {
     # [doc = concat ! ("Descend through the node of `" , stringify ! (CR) , "`.")]
     pub fn walk_cr<'ast, I, V>(v: &mut V, node: &'ast CR<I>)
     where
-        I: ::parserc::chars::CharsInput,
+        I: UnsynInput,
         V: ?Sized + Visit<'ast, I>,
     {
         v.visit_text(&node.0);
@@ -1070,7 +1087,7 @@ pub mod walk {
     # [doc = concat ! ("Descend through the node of `" , stringify ! (IdentOrKeyword) , "`.")]
     pub fn walk_ident_or_keyword<'ast, I, V>(v: &mut V, node: &'ast IdentOrKeyword<I>)
     where
-        I: ::parserc::chars::CharsInput,
+        I: UnsynInput,
         V: ?Sized + Visit<'ast, I>,
     {
         v.visit_text(&node.0);
@@ -1078,7 +1095,7 @@ pub mod walk {
     # [doc = concat ! ("Descend through the node of `" , stringify ! (RawIdent) , "`.")]
     pub fn walk_raw_ident<'ast, I, V>(v: &mut V, node: &'ast RawIdent<I>)
     where
-        I: ::parserc::chars::CharsInput,
+        I: UnsynInput,
         V: ?Sized + Visit<'ast, I>,
     {
         v.visit_text(&node.f1);
@@ -1087,7 +1104,7 @@ pub mod walk {
     # [doc = concat ! ("Descend through the node of `" , stringify ! (NonKeywordIdent) , "`.")]
     pub fn walk_non_keyword_ident<'ast, I, V>(v: &mut V, node: &'ast NonKeywordIdent<I>)
     where
-        I: ::parserc::chars::CharsInput,
+        I: UnsynInput,
         V: ?Sized + Visit<'ast, I>,
     {
         v.visit_text(&node.0);
@@ -1095,7 +1112,7 @@ pub mod walk {
     # [doc = concat ! ("Descend through the node of `" , stringify ! (Ident) , "`.")]
     pub fn walk_ident<'ast, I, V>(v: &mut V, node: &'ast Ident<I>)
     where
-        I: ::parserc::chars::CharsInput,
+        I: UnsynInput,
         V: ?Sized + Visit<'ast, I>,
     {
         match node {
@@ -1110,7 +1127,7 @@ pub mod walk {
     # [doc = concat ! ("Descend through the node of `" , stringify ! (Keywords) , "`.")]
     pub fn walk_keywords<'ast, I, V>(v: &mut V, node: &'ast Keywords<I>)
     where
-        I: ::parserc::chars::CharsInput,
+        I: UnsynInput,
         V: ?Sized + Visit<'ast, I>,
     {
         match node {
@@ -1125,7 +1142,7 @@ pub mod walk {
     # [doc = concat ! ("Descend through the node of `" , stringify ! (LeadingKeywords) , "`.")]
     pub fn walk_leading_keywords<'ast, I, V>(v: &mut V, node: &'ast LeadingKeywords<I>)
     where
-        I: ::parserc::chars::CharsInput,
+        I: UnsynInput,
         V: ?Sized + Visit<'ast, I>,
     {
         match node {
@@ -1143,7 +1160,7 @@ pub mod walk {
     # [doc = concat ! ("Descend through the node of `" , stringify ! (OperatorKeywords) , "`.")]
     pub fn walk_operator_keywords<'ast, I, V>(v: &mut V, node: &'ast OperatorKeywords<I>)
     where
-        I: ::parserc::chars::CharsInput,
+        I: UnsynInput,
         V: ?Sized + Visit<'ast, I>,
     {
         match node {
@@ -1158,7 +1175,7 @@ pub mod walk {
     # [doc = concat ! ("Descend through the node of `" , stringify ! (LitStr) , "`.")]
     pub fn walk_lit_str<'ast, I, V>(v: &mut V, node: &'ast LitStr<I>)
     where
-        I: ::parserc::chars::CharsInput,
+        I: UnsynInput,
         V: ?Sized + Visit<'ast, I>,
     {
         v.visit_text(&node.0);
@@ -1168,7 +1185,7 @@ pub mod walk {
     # [doc = concat ! ("Descend through the node of `" , stringify ! (QuoteEscape) , "`.")]
     pub fn walk_quote_escape<'ast, I, V>(v: &mut V, node: &'ast QuoteEscape<I>)
     where
-        I: ::parserc::chars::CharsInput,
+        I: UnsynInput,
         V: ?Sized + Visit<'ast, I>,
     {
         v.visit_text(&node.0);
@@ -1176,7 +1193,7 @@ pub mod walk {
     # [doc = concat ! ("Descend through the node of `" , stringify ! (AsciiEscape) , "`.")]
     pub fn walk_ascii_escape<'ast, I, V>(v: &mut V, node: &'ast AsciiEscape<I>)
     where
-        I: ::parserc::chars::CharsInput,
+        I: UnsynInput,
         V: ?Sized + Visit<'ast, I>,
     {
         match node {
@@ -1203,7 +1220,7 @@ pub mod walk {
     # [doc = concat ! ("Descend through the node of `" , stringify ! (AsciiHexEscape) , "`.")]
     pub fn walk_ascii_hex_escape<'ast, I, V>(v: &mut V, node: &'ast AsciiHexEscape<I>)
     where
-        I: ::parserc::chars::CharsInput,
+        I: UnsynInput,
         V: ?Sized + Visit<'ast, I>,
     {
         v.visit_text(&node.f1);
@@ -1213,7 +1230,7 @@ pub mod walk {
     # [doc = concat ! ("Descend through the node of `" , stringify ! (UnicodeEscape) , "`.")]
     pub fn walk_unicode_escape<'ast, I, V>(v: &mut V, node: &'ast UnicodeEscape<I>)
     where
-        I: ::parserc::chars::CharsInput,
+        I: UnsynInput,
         V: ?Sized + Visit<'ast, I>,
     {
         v.visit_text(&node.f1);
@@ -1225,7 +1242,7 @@ pub mod walk {
     # [doc = concat ! ("Descend through the node of `" , stringify ! (OctDigit) , "`.")]
     pub fn walk_oct_digit<'ast, I, V>(v: &mut V, node: &'ast OctDigit<I>)
     where
-        I: ::parserc::chars::CharsInput,
+        I: UnsynInput,
         V: ?Sized + Visit<'ast, I>,
     {
         v.visit_text(&node.0);
@@ -1233,7 +1250,7 @@ pub mod walk {
     # [doc = concat ! ("Descend through the node of `" , stringify ! (DecDigit) , "`.")]
     pub fn walk_dec_digit<'ast, I, V>(v: &mut V, node: &'ast DecDigit<I>)
     where
-        I: ::parserc::chars::CharsInput,
+        I: UnsynInput,
         V: ?Sized + Visit<'ast, I>,
     {
         v.visit_text(&node.0);
@@ -1241,7 +1258,7 @@ pub mod walk {
     # [doc = concat ! ("Descend through the node of `" , stringify ! (HexDigit) , "`.")]
     pub fn walk_hex_digit<'ast, I, V>(v: &mut V, node: &'ast HexDigit<I>)
     where
-        I: ::parserc::chars::CharsInput,
+        I: UnsynInput,
         V: ?Sized + Visit<'ast, I>,
     {
         v.visit_text(&node.0);
@@ -1249,7 +1266,7 @@ pub mod walk {
     # [doc = concat ! ("Descend through the node of `" , stringify ! (LitDec) , "`.")]
     pub fn walk_lit_dec<'ast, I, V>(v: &mut V, node: &'ast LitDec<I>)
     where
-        I: ::parserc::chars::CharsInput,
+        I: UnsynInput,
         V: ?Sized + Visit<'ast, I>,
     {
         v.visit_dec_digit(&node.dec_digit);
@@ -1258,7 +1275,7 @@ pub mod walk {
     # [doc = concat ! ("Descend through the node of `" , stringify ! (LitUnicode) , "`.")]
     pub fn walk_lit_unicode<'ast, I, V>(v: &mut V, node: &'ast LitUnicode<I>)
     where
-        I: ::parserc::chars::CharsInput,
+        I: UnsynInput,
         V: ?Sized + Visit<'ast, I>,
     {
         v.visit_text(&node.f1);
@@ -1269,7 +1286,7 @@ pub mod walk {
     # [doc = concat ! ("Descend through the node of `" , stringify ! (BlockComment) , "`.")]
     pub fn walk_block_comment<'ast, I, V>(v: &mut V, node: &'ast BlockComment<I>)
     where
-        I: ::parserc::chars::CharsInput,
+        I: UnsynInput,
         V: ?Sized + Visit<'ast, I>,
     {
         match node {
@@ -1287,7 +1304,7 @@ pub mod walk {
     # [doc = concat ! ("Descend through the node of `" , stringify ! (BlockCommentBody) , "`.")]
     pub fn walk_block_comment_body<'ast, I, V>(v: &mut V, node: &'ast BlockCommentBody<I>)
     where
-        I: ::parserc::chars::CharsInput,
+        I: UnsynInput,
         V: ?Sized + Visit<'ast, I>,
     {
         v.visit_text(&node.0);
@@ -1298,7 +1315,7 @@ pub mod walk {
     # [doc = concat ! ("Descend through the node of `" , stringify ! (InnerLineDoc) , "`.")]
     pub fn walk_inner_line_doc<'ast, I, V>(v: &mut V, node: &'ast InnerLineDoc<I>)
     where
-        I: ::parserc::chars::CharsInput,
+        I: UnsynInput,
         V: ?Sized + Visit<'ast, I>,
     {
         v.visit_text(&node.0);
@@ -1307,7 +1324,7 @@ pub mod walk {
     # [doc = concat ! ("Descend through the node of `" , stringify ! (InnerBlockDoc) , "`.")]
     pub fn walk_inner_block_doc<'ast, I, V>(v: &mut V, node: &'ast InnerBlockDoc<I>)
     where
-        I: ::parserc::chars::CharsInput,
+        I: UnsynInput,
         V: ?Sized + Visit<'ast, I>,
     {
         v.visit_text(&node.0);
@@ -1317,7 +1334,7 @@ pub mod walk {
     # [doc = concat ! ("Descend through the node of `" , stringify ! (OuterLineDoc) , "`.")]
     pub fn walk_outer_line_doc<'ast, I, V>(v: &mut V, node: &'ast OuterLineDoc<I>)
     where
-        I: ::parserc::chars::CharsInput,
+        I: UnsynInput,
         V: ?Sized + Visit<'ast, I>,
     {
         v.visit_text(&node.0);
@@ -1326,7 +1343,7 @@ pub mod walk {
     # [doc = concat ! ("Descend through the node of `" , stringify ! (OuterBlockDoc) , "`.")]
     pub fn walk_outer_block_doc<'ast, I, V>(v: &mut V, node: &'ast OuterBlockDoc<I>)
     where
-        I: ::parserc::chars::CharsInput,
+        I: UnsynInput,
         V: ?Sized + Visit<'ast, I>,
     {
         v.visit_text(&node.0);
@@ -1337,7 +1354,7 @@ pub mod walk {
     # [doc = concat ! ("Descend through the node of `" , stringify ! (BlockCommentOrDoc) , "`.")]
     pub fn walk_block_comment_or_doc<'ast, I, V>(v: &mut V, node: &'ast BlockCommentOrDoc<I>)
     where
-        I: ::parserc::chars::CharsInput,
+        I: UnsynInput,
         V: ?Sized + Visit<'ast, I>,
     {
         match node {
@@ -1355,17 +1372,17 @@ pub mod walk {
     # [doc = concat ! ("Descend through the node of `" , stringify ! (Expr) , "`.")]
     pub fn walk_expr<'ast, I, V>(v: &mut V, node: &'ast Expr<I>)
     where
-        I: ::parserc::chars::CharsInput,
+        I: UnsynInput,
         V: ?Sized + Visit<'ast, I>,
     {
-        v.visit_expr_no_top_alt(&(&node.0).0);
-        for inner in &(&node.0).1 {
+        v.visit_expr_no_top_alt(&(&node.expr_no_top_alt).0);
+        for inner in &(&node.expr_no_top_alt).1 {
             if let Some(inner) = &(inner).0 {
                 v.visit_s(inner);
             }
             v.visit_expr_no_top_alt(&(inner).1);
         }
-        for inner in &node.1 {
+        for inner in &node.f1 {
             if let Some(inner) = &(inner).0 {
                 v.visit_s(inner);
             }
@@ -1385,7 +1402,7 @@ pub mod walk {
     # [doc = concat ! ("Descend through the node of `" , stringify ! (ExprNoTopAlt) , "`.")]
     pub fn walk_expr_no_top_alt<'ast, I, V>(v: &mut V, node: &'ast ExprNoTopAlt<I>)
     where
-        I: ::parserc::chars::CharsInput,
+        I: UnsynInput,
         V: ?Sized + Visit<'ast, I>,
     {
         match node {
@@ -1400,7 +1417,7 @@ pub mod walk {
     # [doc = concat ! ("Descend through the node of `" , stringify ! (Set) , "`.")]
     pub fn walk_set<'ast, I, V>(v: &mut V, node: &'ast Set<I>)
     where
-        I: ::parserc::chars::CharsInput,
+        I: UnsynInput,
         V: ?Sized + Visit<'ast, I>,
     {
         v.visit_text(&(&node.0).0);
@@ -1428,7 +1445,7 @@ pub mod walk {
     # [doc = concat ! ("Descend through the node of `" , stringify ! (ExprWithoutSuffix) , "`.")]
     pub fn walk_expr_without_suffix<'ast, I, V>(v: &mut V, node: &'ast ExprWithoutSuffix<I>)
     where
-        I: ::parserc::chars::CharsInput,
+        I: UnsynInput,
         V: ?Sized + Visit<'ast, I>,
     {
         match node {
@@ -1458,7 +1475,7 @@ pub mod walk {
     # [doc = concat ! ("Descend through the node of `" , stringify ! (NegatedSet) , "`.")]
     pub fn walk_negated_set<'ast, I, V>(v: &mut V, node: &'ast NegatedSet<I>)
     where
-        I: ::parserc::chars::CharsInput,
+        I: UnsynInput,
         V: ?Sized + Visit<'ast, I>,
     {
         v.visit_text(&(&node.f1).0);
@@ -1470,7 +1487,7 @@ pub mod walk {
     # [doc = concat ! ("Descend through the node of `" , stringify ! (Call) , "`.")]
     pub fn walk_call<'ast, I, V>(v: &mut V, node: &'ast Call<I>)
     where
-        I: ::parserc::chars::CharsInput,
+        I: UnsynInput,
         V: ?Sized + Visit<'ast, I>,
     {
         v.visit_text(&(&node.f1).0);
@@ -1486,7 +1503,7 @@ pub mod walk {
     # [doc = concat ! ("Descend through the node of `" , stringify ! (Paren) , "`.")]
     pub fn walk_paren<'ast, I, V>(v: &mut V, node: &'ast Paren<I>)
     where
-        I: ::parserc::chars::CharsInput,
+        I: UnsynInput,
         V: ?Sized + Visit<'ast, I>,
     {
         v.visit_text(&(&node.f1).0);
@@ -1502,7 +1519,7 @@ pub mod walk {
     # [doc = concat ! ("Descend through the node of `" , stringify ! (Suffix) , "`.")]
     pub fn walk_suffix<'ast, I, V>(v: &mut V, node: &'ast Suffix<I>)
     where
-        I: ::parserc::chars::CharsInput,
+        I: UnsynInput,
         V: ?Sized + Visit<'ast, I>,
     {
         match node {
@@ -1523,7 +1540,7 @@ pub mod walk {
     # [doc = concat ! ("Descend through the node of `" , stringify ! (ExprWithSuffix) , "`.")]
     pub fn walk_expr_with_suffix<'ast, I, V>(v: &mut V, node: &'ast ExprWithSuffix<I>)
     where
-        I: ::parserc::chars::CharsInput,
+        I: UnsynInput,
         V: ?Sized + Visit<'ast, I>,
     {
         match node {
@@ -1571,7 +1588,7 @@ pub mod walk {
     # [doc = concat ! ("Descend through the node of `" , stringify ! (Suffixed) , "`.")]
     pub fn walk_suffixed<'ast, I, V>(v: &mut V, node: &'ast Suffixed<I>)
     where
-        I: ::parserc::chars::CharsInput,
+        I: UnsynInput,
         V: ?Sized + Visit<'ast, I>,
     {
         v.visit_expr_without_suffix(&node.expr_without_suffix);
@@ -1583,7 +1600,7 @@ pub mod walk {
     # [doc = concat ! ("Descend through the node of `" , stringify ! (RepeatBound) , "`.")]
     pub fn walk_repeat_bound<'ast, I, V>(v: &mut V, node: &'ast RepeatBound<I>)
     where
-        I: ::parserc::chars::CharsInput,
+        I: UnsynInput,
         V: ?Sized + Visit<'ast, I>,
     {
         match node {
@@ -1601,7 +1618,7 @@ pub mod walk {
     # [doc = concat ! ("Descend through the node of `" , stringify ! (RangeTo) , "`.")]
     pub fn walk_range_to<'ast, I, V>(v: &mut V, node: &'ast RangeTo<I>)
     where
-        I: ::parserc::chars::CharsInput,
+        I: UnsynInput,
         V: ?Sized + Visit<'ast, I>,
     {
         v.visit_text(&(&node.f1).0);
@@ -1613,7 +1630,7 @@ pub mod walk {
     # [doc = concat ! ("Descend through the node of `" , stringify ! (RangeFrom) , "`.")]
     pub fn walk_range_from<'ast, I, V>(v: &mut V, node: &'ast RangeFrom<I>)
     where
-        I: ::parserc::chars::CharsInput,
+        I: UnsynInput,
         V: ?Sized + Visit<'ast, I>,
     {
         v.visit_lit_dec(&node.lit_dec);
@@ -1631,7 +1648,7 @@ pub mod walk {
     # [doc = concat ! ("Descend through the node of `" , stringify ! (Repeat) , "`.")]
     pub fn walk_repeat<'ast, I, V>(v: &mut V, node: &'ast Repeat<I>)
     where
-        I: ::parserc::chars::CharsInput,
+        I: UnsynInput,
         V: ?Sized + Visit<'ast, I>,
     {
         v.visit_text(&(&node.f1).0);
@@ -1647,7 +1664,7 @@ pub mod walk {
     # [doc = concat ! ("Descend through the node of `" , stringify ! (Range) , "`.")]
     pub fn walk_range<'ast, I, V>(v: &mut V, node: &'ast Range<I>)
     where
-        I: ::parserc::chars::CharsInput,
+        I: UnsynInput,
         V: ?Sized + Visit<'ast, I>,
     {
         match node {
@@ -1662,7 +1679,7 @@ pub mod walk {
     # [doc = concat ! ("Descend through the node of `" , stringify ! (UnicodeRange) , "`.")]
     pub fn walk_unicode_range<'ast, I, V>(v: &mut V, node: &'ast UnicodeRange<I>)
     where
-        I: ::parserc::chars::CharsInput,
+        I: UnsynInput,
         V: ?Sized + Visit<'ast, I>,
     {
         v.visit_lit_unicode(&node.lit_unicode);
@@ -1672,7 +1689,7 @@ pub mod walk {
     # [doc = concat ! ("Descend through the node of `" , stringify ! (StrRange) , "`.")]
     pub fn walk_str_range<'ast, I, V>(v: &mut V, node: &'ast StrRange<I>)
     where
-        I: ::parserc::chars::CharsInput,
+        I: UnsynInput,
         V: ?Sized + Visit<'ast, I>,
     {
         v.visit_lit_str(&node.lit_str);
@@ -1682,7 +1699,7 @@ pub mod walk {
     # [doc = concat ! ("Descend through the node of `" , stringify ! (SetItem) , "`.")]
     pub fn walk_set_item<'ast, I, V>(v: &mut V, node: &'ast SetItem<I>)
     where
-        I: ::parserc::chars::CharsInput,
+        I: UnsynInput,
         V: ?Sized + Visit<'ast, I>,
     {
         match node {
@@ -1703,7 +1720,7 @@ pub mod walk {
     # [doc = concat ! ("Descend through the node of `" , stringify ! (Stmt) , "`.")]
     pub fn walk_stmt<'ast, I, V>(v: &mut V, node: &'ast Stmt<I>)
     where
-        I: ::parserc::chars::CharsInput,
+        I: UnsynInput,
         V: ?Sized + Visit<'ast, I>,
     {
         v.visit_leading_keywords(&node.leading_keywords);
@@ -1727,7 +1744,7 @@ pub mod walk {
     # [doc = concat ! ("Descend through the node of `" , stringify ! (Item) , "`.")]
     pub fn walk_item<'ast, I, V>(v: &mut V, node: &'ast Item<I>)
     where
-        I: ::parserc::chars::CharsInput,
+        I: UnsynInput,
         V: ?Sized + Visit<'ast, I>,
     {
         match node {
@@ -1745,7 +1762,7 @@ pub mod walk {
     # [doc = concat ! ("Descend through the node of `" , stringify ! (OuterDoc) , "`.")]
     pub fn walk_outer_doc<'ast, I, V>(v: &mut V, node: &'ast OuterDoc<I>)
     where
-        I: ::parserc::chars::CharsInput,
+        I: UnsynInput,
         V: ?Sized + Visit<'ast, I>,
     {
         match node {
@@ -1760,7 +1777,7 @@ pub mod walk {
     # [doc = concat ! ("Descend through the node of `" , stringify ! (InnerDoc) , "`.")]
     pub fn walk_inner_doc<'ast, I, V>(v: &mut V, node: &'ast InnerDoc<I>)
     where
-        I: ::parserc::chars::CharsInput,
+        I: UnsynInput,
         V: ?Sized + Visit<'ast, I>,
     {
         match node {
@@ -1775,16 +1792,16 @@ pub mod walk {
     # [doc = concat ! ("Descend through the node of `" , stringify ! (Crate) , "`.")]
     pub fn walk_crate<'ast, I, V>(v: &mut V, node: &'ast Crate<I>)
     where
-        I: ::parserc::chars::CharsInput,
+        I: UnsynInput,
         V: ?Sized + Visit<'ast, I>,
     {
-        for inner in &node.0 {
+        for inner in &node.inner_doc {
             if let Some(inner) = &(inner).0 {
                 v.visit_s(inner);
             }
             v.visit_inner_doc(&(inner).1);
         }
-        for inner in &node.1 {
+        for inner in &node.item {
             v.visit_item(inner);
         }
     }
