@@ -66,18 +66,22 @@
 //! a text rule folds arms that reach names of its own, so the question is asked
 //! again of what the first answers settle, until the two sets hold still. A
 //! name read *beside* others inside a fold is not forced: it keeps the shape
-//! its own production writes, and the fold wraps the reading of it in `text_of`
-//! rather than flattening it. So `Ident` and `BlockCommentOrDoc` are both enums
-//! of the names they choose between, while the group of `BlockCommentBody` that
-//! reads `BlockCommentOrDoc` among its parts answers with one run of text.
+//! its own production writes, and the fold reads that shape for its text with
+//! [`text_of`](parserc::text_of) rather than flattening it. So `Ident` and
+//! `BlockCommentOrDoc` are both enums of the names they choose between, while
+//! the group of `BlockCommentBody` that reads `BlockCommentOrDoc` among its
+//! parts answers with one run of text.
 //!
-//! Three of the combinators of [`parserc`] are worth knowing about, since the
+//! Four of the combinators of [`parserc`] are worth knowing about, since the
 //! generator reaches for them whenever a rule fits: a set of single characters
 //! becomes one [`next_if`](parserc::next_if) rather than a choice of one member
 //! apiece, and a repetition of such a set becomes
 //! [`take_while`](parserc::take_while_with), which counts items and needs no loop
-//! of its own. What they cannot do is bound a repetition of anything wider than a
-//! character, so `{n, m}` over a name is a `read_` of its own.
+//! of its own. [`text_of`](parserc::text_of) answers with the run a parser of
+//! another rule's node read, which is what a fold among other parts asks of
+//! such a name. What the combinators cannot do is bound a repetition of
+//! anything wider than a character, so `{n, m}` over a name is a `read_` of its
+//! own.
 //!
 //! # The nodes of a `syntax` rule
 //!
@@ -364,7 +368,6 @@ where
             input: item_name(&self.input_name, Span::None)?.to_token_stream(),
             taken: HashSet::new(),
             helpers: Vec::new(),
-            prelude: Vec::new(),
             seq: 0,
             field_no: 0,
             field_names: HashSet::new(),
@@ -373,24 +376,20 @@ where
             descriptors: Vec::new(),
         };
 
-        // The one import the file needs: the bound every type it writes is
-        // this name, and a name a file does not import is no name at all. It
-        // goes in only once the file has been written, because a build keeps an
-        // empty prelude to mean that no helper has been asked for yet.
+        // The stream trait, the alias of the file's own name for a stream, and
+        // the error the rules are written against all go before them: every
+        // type a build writes is generic over a name those definitions give,
+        // and a name a file neither defines nor imports is no name at all.
         let input_path = self.input_path.clone();
         let input = generator.input.clone();
         let error = item_name(&self.error_name, Span::None)?.to_token_stream();
         let errors_at = self.errors_at.clone();
         let bounds = self.input_bounds.clone();
+        let defs = input_defs(&input, &input_path, &errors_at, &error, &bounds)?;
         let items = generator.crate_of()?;
         let visit = generator.visit_items();
-        let mut prelude = std::mem::take(&mut generator.prelude);
-        prelude.splice(
-            0..0,
-            input_defs(&input, &input_path, &errors_at, &error, &bounds)?,
-        );
 
-        Ok(quote! { #(#prelude)* #items #visit })
+        Ok(quote! { #(#defs)* #items #visit })
     }
 }
 
@@ -1506,11 +1505,6 @@ where
     taken: HashSet<String>,
     /// The functions the rule being written has asked for, in the order asked.
     helpers: Vec<TokenStream>,
-    /// The functions the whole file has asked for, written before its rules.
-    ///
-    /// A helper a single rule needs stands beside that rule; one every fold may
-    /// reach is not any rule's, so it goes above all of them.
-    prelude: Vec<TokenStream>,
     /// How many functions the rule being written has asked for.
     seq: usize,
     /// How many fields of the rule being written have been named by their
@@ -2954,81 +2948,39 @@ where
         // clone of the input per character of the hottest loop in a lexer for
         // nothing at all.
         let mut choice = branches.into_iter();
-        let mut answers = answer_kinds.iter();
+        let mut answers = answer_kinds.into_iter();
         let first = self.expr_of(choice.next().expect("a pattern has a branch"))?;
-        let mut left_is_closure = answers.next().copied().unwrap_or(false);
-        let mut parser = self.as_text(first, left_is_closure);
+        let mut parser = self.as_text(first, answers.next().unwrap_or(false));
 
         for branch in choice {
-            let node = answers.next().copied().unwrap_or(false);
+            let node = answers.next().unwrap_or(false);
             let other = self.expr_of(branch)?;
             let other = self.as_text(other, node);
 
-            parser = if left_is_closure {
-                quote! { (#parser).or(#other) }
-            } else {
-                quote! { #parser.or(#other) }
-            };
-
-            left_is_closure = false;
+            parser = quote! { #parser.or(#other) };
         }
 
         Ok(Code::Expr(parser))
     }
 
-    /// The parser `parser` read for the text it took, whatever else it answers
-    /// with.
-    ///
-    /// The helper this reaches for is written once, at the top of the file, the
-    /// first time a fold needs it.
     /// The parser of one alternative of a fold, answering with the text it took.
     ///
     /// `yields_node` says whether the alternative answers with the node of a
     /// rule; only then is the reading of its text wrapped around it, since
     /// every other alternative is text already and wrapping it again would cost
     /// a clone of the input on every character a lexer's hottest loop reads.
-    fn as_text(&mut self, parser: TokenStream, yields_node: bool) -> TokenStream {
-        let input = self.input.clone();
-        if !yields_node {
-            return parser;
+    ///
+    /// The wrapping reaches for nothing of the file's own: `text_of` is a
+    /// combinator of the framework the code is written against, asked for by
+    /// path like every other combinator here. A rule writes no helper,
+    /// because the shape of one is no more a fact of the file than the shape of
+    /// `keyword` is.
+    fn as_text(&self, parser: TokenStream, yields_node: bool) -> TokenStream {
+        if yields_node {
+            quote! { ::parserc::text_of(#parser) }
+        } else {
+            parser
         }
-
-        if self.prelude.is_empty() {
-            // No document on the helper: `rustfmt` rewrites a document of more
-            // than one line into one attribute per line, and the file this code
-            // is kept in is a file `rustfmt` has been over, so the tokens kept
-            // would not be the tokens a build writes. What the helper is for is
-            // said here, beside the code that asks for it.
-            self.prelude.push(quote! {
-                fn text_of<P, I>(
-                    parser: P,
-                    input: &mut I,
-                ) -> ::core::result::Result<I, <I as ::parserc::Input>::Error>
-                where
-                    I: #input,
-                    P: ::parserc::Parser<I>,
-                {
-                    let mut whole = input.clone();
-                    let before = input.len();
-
-                    parser.parse(input)?;
-
-                    Ok(whole.split_to(before - input.len()))
-                }
-            });
-        }
-
-        // The closure is written bare here and parenthesised only where it is
-        // the left operand of a fold: `.or()` binds tighter than the closure
-        // body, so a bare closure on the left would take the `.or()` into its
-        // own body. As an argument it needs no parens, and writing them would
-        // be a lint.
-        //
-        // The body is a block already, because that is what `rustfmt` rewrites a
-        // body of any length into, and the file this code is kept in is a file
-        // `rustfmt` has been over: tokens that formatting changes would make
-        // the kept file say something other than what a build writes.
-        quote! { |input: &mut I| { text_of(#parser, input) } }
     }
 
     /// Whether one alternative of a fold answers with the node of a rule rather
@@ -4187,6 +4139,12 @@ fn one_argument(args: &TokenStream) -> Option<TokenStream> {
 }
 
 /// The function that reads `stmts` and keeps the text they took.
+///
+/// The keeping is [`text_of`](parserc::text_of) of the framework and nothing of
+/// the generator's own: what the function adds is only the order the production
+/// wrote, which is all a rule has to say about a run of text. A fold of a rule
+/// reaches for the same combinator, so the one way the code takes a run of text
+/// is the one the framework gives.
 fn reader(read: &Ident, stmts: &[TokenStream], input: &TokenStream) -> TokenStream {
     quote! {
         fn #read<I>(input: &mut I) -> ::core::result::Result<I, <I as ::parserc::Input>::Error>
@@ -4195,12 +4153,12 @@ fn reader(read: &Ident, stmts: &[TokenStream], input: &TokenStream) -> TokenStre
         {
             use ::parserc::Parser as _;
 
-            let mut whole = input.clone();
-            let before = input.len();
+            ::parserc::text_of(|input: &mut I| {
+                #(#stmts)*
 
-            #(#stmts)*
-
-            Ok(whole.split_to(before - input.len()))
+                Ok(())
+            })
+            .parse(input)
         }
     }
 }
@@ -4691,7 +4649,7 @@ mod tests {
         assert!(soup.contains("pub enum C"), "{soup}");
         assert!(has(
             &soup,
-            quote! { (|input: &mut I| { text_of(<C<I> as ::parserc::syntax::Syntax<I>>::into_parser(), input) }).or(::parserc::next('z')) }
+            quote! { ::parserc::text_of(<C<I> as ::parserc::syntax::Syntax<I>>::into_parser()).or(::parserc::next('z')) }
         ));
         assert!(
             !soup.contains("text_of (:: parserc :: next ('z')"),

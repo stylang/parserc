@@ -1,9 +1,10 @@
-//! Combinators for tokenizer/lexer parsers: match single items, keywords and
-//! runs of items.
+//! Combinators for tokenizer/lexer parsers: match single items, keywords,
+//! runs of items, and the run another parser read.
 //!
 //! All combinators fail without consuming input: a [`ControlFlow::Recovable`]
 //! error means "no match, try something else", while [`ControlFlow::Incomplete`]
-//! means "the input ended too early".
+//! means "the input ended too early". [`text_of`] is the one exception, and says
+//! so where it stands.
 
 use std::{
     fmt::Debug,
@@ -194,6 +195,39 @@ where
     F: FnMut(I::Item) -> bool,
 {
     take_while(move |c: I::Item| !cond(c))
+}
+
+/// Returns the run of items `parser` read, whatever the parser answers with.
+///
+/// The parser is run and its output dropped: the answer is the text it took,
+/// cut from the position it began at. A rule that holds no fields of its own
+/// still has text, and this is how that text is taken when the position around
+/// the rule asks for text rather than for the rule's node — which is what lets
+/// one rule be read as a node in one place and as one run of text in another.
+///
+/// # Errors
+///
+/// Whatever `parser` reports, unchanged, and the input is left where the
+/// failure left it: this is the one combinator here that does not restore the
+/// input, since what it does is hand the parser's own error back. A
+/// backtracking combinator around it — [`ok`](Parser::ok) or
+/// [`or`](Parser::or) — rewinds the input on its own.
+#[inline]
+pub fn text_of<I, P>(parser: P) -> impl Parser<I, Output = I>
+where
+    I: Input + Clone,
+    P: Parser<I>,
+{
+    move |input: &mut I| {
+        // The whole stream as it stands before the run, so that the prefix the
+        // run took can be cut from it once `input` has been advanced past it.
+        let mut whole = input.clone();
+        let before = input.len();
+
+        parser.parse(input)?;
+
+        Ok(whole.split_to(before - input.len()))
+    }
 }
 
 // The combinators are exercised through the `TokenStream` input types,
@@ -469,5 +503,66 @@ mod tests {
 
         assert_eq!(taken.as_str(), "abc");
         assert!(input.is_empty());
+    }
+
+    #[test]
+    fn text_of_answers_with_the_run_another_parser_read() {
+        let mut input = Chars::from("/** body */ rest");
+
+        let taken = text_of(take_while::<Chars, _>(|c| c != ' '))
+            .parse(&mut input)
+            .unwrap();
+
+        assert_eq!(taken.as_str(), "/**");
+        assert_eq!(input.as_str(), " body */ rest");
+    }
+
+    #[test]
+    fn text_of_keeps_a_multibyte_run_whole() {
+        let mut input = Chars::from("éé|");
+
+        let taken = text_of(take_while::<Chars, _>(|c| c != '|'))
+            .parse(&mut input)
+            .unwrap();
+
+        assert_eq!(taken.as_str(), "éé");
+        // The count `split_to` takes is in bytes, as `Input::len` reports them.
+        assert_eq!(taken.to_span(), Span::Range(0..4));
+        assert_eq!(input.as_str(), "|");
+    }
+
+    #[test]
+    fn text_of_a_parser_that_reads_nothing_is_empty() {
+        let mut input = Bytes::from("abc");
+
+        let taken = text_of(take_while::<Bytes, _>(|c| c == b'x'))
+            .parse(&mut input)
+            .unwrap();
+
+        assert!(taken.is_empty());
+        assert_eq!(input.as_str(), "abc");
+    }
+
+    #[test]
+    fn text_of_reports_the_inner_error_unchanged() {
+        let mut input = Bytes::from("abc");
+
+        let err = text_of(next::<Bytes>(b'x')).parse(&mut input).unwrap_err();
+
+        assert_eq!(err, Kind::Next(ControlFlow::Recovable, Span::Range(0..1)));
+    }
+
+    #[test]
+    fn text_of_answers_with_the_text_of_a_fold_of_parsers() {
+        let mut input = Chars::from("ab-c");
+
+        // One branch reaches for `a`, the other for `b`; either way the answer
+        // of the fold is the one character it took, not a branch's own output.
+        let taken = text_of(next::<Chars>('a').or(next::<Chars>('b')))
+            .parse(&mut input)
+            .unwrap();
+
+        assert_eq!(taken.as_str(), "a");
+        assert_eq!(input.as_str(), "b-c");
     }
 }

@@ -40,7 +40,9 @@
 //! which is what keeps `r#lexer` from falling through to be read as anything.
 
 use parserc::syntax::Syntax;
-use parserc::{ControlFlow, Input, Kind, Parser, ToSpan, keyword, next, next_if, take_while};
+use parserc::{
+    ControlFlow, Input, Kind, Parser, ToSpan, keyword, next, next_if, take_while, text_of,
+};
 use unicode_ident::{is_xid_continue, is_xid_start};
 
 use crate::errors::{KeywordKind, PunctKind, SemanticsKind, SyntaxKind, UnsynError};
@@ -775,46 +777,23 @@ where
     plain_refusing(input, &[], &["/*", "*/"])
 }
 
-/// The text one parser read, cut from where it began.
-///
-/// A rule that holds no field of its own still has text, and a run of it is what
-/// a sequence of the enclosing rule keeps: the parser is asked to read, and what
-/// it took is the node, not whatever shape it wore the taking.
-fn text_of<P, I>(parser: P, input: &mut I) -> Result<I, <I as Input>::Error>
-where
-    I: UnsynInput,
-    P: Parser<I>,
-{
-    let mut whole = input.clone();
-    let before = input.len();
-
-    parser.parse(input)?;
-
-    Ok(whole.split_to(before - input.len()))
-}
-
 /// Reads the third operand of [`BlockCommentBody`]: as many groups and further
 /// runs as the comment takes, until the pair that closes it begins.
 fn read_block_comment_body_3<I>(input: &mut I) -> Result<I, <I as Input>::Error>
 where
     I: UnsynInput,
 {
-    let mut whole = input.clone();
-    let before = input.len();
+    text_of(|input: &mut I| {
+        while text_of(<BlockCommentOrDoc<I> as Syntax<I>>::into_parser())
+            .or(tail_plain)
+            .ok()
+            .parse(input)?
+            .is_some()
+        {}
 
-    loop {
-        let part =
-            (|input: &mut I| text_of(<BlockCommentOrDoc<I> as Syntax<I>>::into_parser(), input))
-                .or(tail_plain)
-                .ok()
-                .parse(input)?;
-
-        if part.is_none() {
-            break;
-        }
-    }
-
-    Ok(whole.split_to(before - input.len()))
+        Ok(())
+    })
+    .parse(input)
 }
 
 /// Reads the second operand of [`InnerBlockDoc`]: the groups and text the body
@@ -823,22 +802,17 @@ fn read_inner_block_doc_2<I>(input: &mut I) -> Result<I, <I as Input>::Error>
 where
     I: UnsynInput,
 {
-    let mut whole = input.clone();
-    let before = input.len();
+    text_of(|input: &mut I| {
+        while text_of(<BlockCommentOrDoc<I> as Syntax<I>>::into_parser())
+            .or(tail_plain)
+            .ok()
+            .parse(input)?
+            .is_some()
+        {}
 
-    loop {
-        let part =
-            (|input: &mut I| text_of(<BlockCommentOrDoc<I> as Syntax<I>>::into_parser(), input))
-                .or(tail_plain)
-                .ok()
-                .parse(input)?;
-
-        if part.is_none() {
-            break;
-        }
-    }
-
-    Ok(whole.split_to(before - input.len()))
+        Ok(())
+    })
+    .parse(input)
 }
 
 /// Reads the third operand of [`OuterBlockDoc`]: as many groups and further runs
@@ -847,22 +821,17 @@ fn read_outer_block_doc_3<I>(input: &mut I) -> Result<I, <I as Input>::Error>
 where
     I: UnsynInput,
 {
-    let mut whole = input.clone();
-    let before = input.len();
+    text_of(|input: &mut I| {
+        while text_of(<BlockCommentOrDoc<I> as Syntax<I>>::into_parser())
+            .or(tail_plain)
+            .ok()
+            .parse(input)?
+            .is_some()
+        {}
 
-    loop {
-        let part =
-            (|input: &mut I| text_of(<BlockCommentOrDoc<I> as Syntax<I>>::into_parser(), input))
-                .or(tail_plain)
-                .ok()
-                .parse(input)?;
-
-        if part.is_none() {
-            break;
-        }
-    }
-
-    Ok(whole.split_to(before - input.len()))
+        Ok(())
+    })
+    .parse(input)
 }
 
 /// A block comment, which nests and is closed by the `*/` of its own opening.
@@ -915,9 +884,7 @@ pub struct BlockCommentBody<I>(
     #[parserc(
         parser = head_plain
             .or(keyword("**").map_err(SyntaxKind::BlockComment.map()))
-            .or(|input: &mut I| {
-                text_of(<BlockCommentOrDoc<I> as Syntax<I>>::into_parser(), input)
-            })
+            .or(text_of(<BlockCommentOrDoc<I> as Syntax<I>>::into_parser()))
     )]
     pub I,
     /// As many groups and further runs as the comment takes, until the pair that
@@ -965,9 +932,7 @@ pub struct OuterBlockDoc<I>(
     /// its own.
     #[parserc(
         parser = outer_head_plain
-            .or(|input: &mut I| {
-                text_of(<BlockCommentOrDoc<I> as Syntax<I>>::into_parser(), input)
-            })
+            .or(text_of(<BlockCommentOrDoc<I> as Syntax<I>>::into_parser()))
     )]
     pub I,
     /// As many groups and further runs as the document takes.

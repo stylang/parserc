@@ -23,19 +23,6 @@ pub trait UnsynInput:
 }
 pub type TokenStream<'a> = ::parserc::chars::TokenStream<'a, ::unsyn::errors::UnsynError>;
 impl<'a> UnsynInput for TokenStream<'a> {}
-fn text_of<P, I>(
-    parser: P,
-    input: &mut I,
-) -> ::core::result::Result<I, <I as ::parserc::Input>::Error>
-where
-    I: UnsynInput,
-    P: ::parserc::Parser<I>,
-{
-    let mut whole = input.clone();
-    let before = input.len();
-    parser.parse(input)?;
-    Ok(whole.split_to(before - input.len()))
-}
 #[inline]
 fn is_s(c: char) -> bool {
     matches ! (c , '\t' ..= '\r' | ' ' | '\u{85}' | '\u{a0}' | '\u{1680}' | '\u{2000}' ..= '\u{200a}' | '\u{2028}' | '\u{2029}' | '\u{202f}' | '\u{205f}' | '\u{3000}')
@@ -76,28 +63,29 @@ where
     I: UnsynInput,
 {
     use ::parserc::Parser as _;
-    let mut whole = input.clone();
-    let before = input.len();
-    let taken = <IdentOrKeyword<I> as ::parserc::syntax::Syntax<I>>::into_parser()
-        .map(|node| node.0)
-        .parse(input)?;
-    {
-        let mut rest = taken.clone();
-        if <Keywords<I> as ::parserc::syntax::Syntax<I>>::into_parser()
-            .ok()
-            .parse(&mut rest)?
-            .is_some()
-            && rest.is_empty()
+    ::parserc::text_of(|input: &mut I| {
+        let taken = <IdentOrKeyword<I> as ::parserc::syntax::Syntax<I>>::into_parser()
+            .map(|node| node.0)
+            .parse(input)?;
         {
-            return Err(::parserc::Kind::Syntax(
-                "NonKeywordIdent",
-                ::parserc::ControlFlow::Fatal,
-                taken.to_span(),
-            )
-            .into());
+            let mut rest = taken.clone();
+            if <Keywords<I> as ::parserc::syntax::Syntax<I>>::into_parser()
+                .ok()
+                .parse(&mut rest)?
+                .is_some()
+                && rest.is_empty()
+            {
+                return Err(::parserc::Kind::Syntax(
+                    "NonKeywordIdent",
+                    ::parserc::ControlFlow::Fatal,
+                    taken.to_span(),
+                )
+                .into());
+            }
         }
-    }
-    Ok(whole.split_to(before - input.len()))
+        Ok(())
+    })
+    .parse(input)
 }
 #[derive(Debug, PartialEq, Eq, PartialOrd, Ord, Clone, :: parserc :: syntax :: Syntax)]
 #[parserc(read_non_keyword_ident)]
@@ -142,27 +130,22 @@ where
     I: UnsynInput,
 {
     use ::parserc::Parser as _;
-    let mut whole = input.clone();
-    let before = input.len();
-    while ::parserc::next_if(|c: char| !(matches!(c, '\'' | '\\' | '\r')))
-        .or(<QuoteEscape<I> as ::parserc::syntax::Syntax<I>>::into_parser().map(|node| node.0))
-        .or(|input: &mut I| {
-            text_of(
+    ::parserc::text_of(|input: &mut I| {
+        while ::parserc::next_if(|c: char| !(matches!(c, '\'' | '\\' | '\r')))
+            .or(<QuoteEscape<I> as ::parserc::syntax::Syntax<I>>::into_parser().map(|node| node.0))
+            .or(::parserc::text_of(
                 <AsciiEscape<I> as ::parserc::syntax::Syntax<I>>::into_parser(),
-                input,
-            )
-        })
-        .or(|input: &mut I| {
-            text_of(
+            ))
+            .or(::parserc::text_of(
                 <UnicodeEscape<I> as ::parserc::syntax::Syntax<I>>::into_parser(),
-                input,
-            )
-        })
-        .ok()
-        .parse(input)?
-        .is_some()
-    {}
-    Ok(whole.split_to(before - input.len()))
+            ))
+            .ok()
+            .parse(input)?
+            .is_some()
+        {}
+        Ok(())
+    })
+    .parse(input)
 }
 #[derive(Debug, PartialEq, Eq, PartialOrd, Ord, Clone, :: parserc :: syntax :: Syntax)]
 pub struct LitStr<I>(
@@ -350,26 +333,27 @@ where
     I: UnsynInput,
 {
     use ::parserc::Parser as _;
-    let mut whole = input.clone();
-    let before = input.len();
-    {
-        let mut rest = input.clone();
-        if ::parserc::next('*')
-            .or(::parserc::next('!'))
-            .or(::parserc::keyword("/*"))
-            .ok()
-            .parse(&mut rest)?
-            .is_some()
+    ::parserc::text_of(|input: &mut I| {
         {
-            return Err(::parserc::Kind::NextIf(
-                ::parserc::ControlFlow::Recovable,
-                input.to_span_at(1),
-            )
-            .into());
+            let mut rest = input.clone();
+            if ::parserc::next('*')
+                .or(::parserc::next('!'))
+                .or(::parserc::keyword("/*"))
+                .ok()
+                .parse(&mut rest)?
+                .is_some()
+            {
+                return Err(::parserc::Kind::NextIf(
+                    ::parserc::ControlFlow::Recovable,
+                    input.to_span_at(1),
+                )
+                .into());
+            }
         }
-    }
-    ::parserc::next_if(|_c: char| true).parse(input)?;
-    Ok(whole.split_to(before - input.len()))
+        ::parserc::next_if(|_c: char| true).parse(input)?;
+        Ok(())
+    })
+    .parse(input)
 }
 fn read_block_comment_body_2<I>(
     input: &mut I,
@@ -378,25 +362,26 @@ where
     I: UnsynInput,
 {
     use ::parserc::Parser as _;
-    let mut whole = input.clone();
-    let before = input.len();
-    {
-        let mut rest = input.clone();
-        if ::parserc::keyword("/*")
-            .or(::parserc::keyword("*/"))
-            .ok()
-            .parse(&mut rest)?
-            .is_some()
+    ::parserc::text_of(|input: &mut I| {
         {
-            return Err(::parserc::Kind::NextIf(
-                ::parserc::ControlFlow::Recovable,
-                input.to_span_at(1),
-            )
-            .into());
+            let mut rest = input.clone();
+            if ::parserc::keyword("/*")
+                .or(::parserc::keyword("*/"))
+                .ok()
+                .parse(&mut rest)?
+                .is_some()
+            {
+                return Err(::parserc::Kind::NextIf(
+                    ::parserc::ControlFlow::Recovable,
+                    input.to_span_at(1),
+                )
+                .into());
+            }
         }
-    }
-    ::parserc::next_if(|_c: char| true).parse(input)?;
-    Ok(whole.split_to(before - input.len()))
+        ::parserc::next_if(|_c: char| true).parse(input)?;
+        Ok(())
+    })
+    .parse(input)
 }
 fn read_block_comment_body_3<I>(
     input: &mut I,
@@ -405,25 +390,23 @@ where
     I: UnsynInput,
 {
     use ::parserc::Parser as _;
-    let mut whole = input.clone();
-    let before = input.len();
-    while (|input: &mut I| {
-        text_of(
+    ::parserc::text_of(|input: &mut I| {
+        while ::parserc::text_of(
             <BlockCommentOrDoc<I> as ::parserc::syntax::Syntax<I>>::into_parser(),
-            input,
         )
+        .or(read_block_comment_body_2)
+        .ok()
+        .parse(input)?
+        .is_some()
+        {}
+        Ok(())
     })
-    .or(read_block_comment_body_2)
-    .ok()
-    .parse(input)?
-    .is_some()
-    {}
-    Ok(whole.split_to(before - input.len()))
+    .parse(input)
 }
 #[derive(Debug, PartialEq, Eq, PartialOrd, Ord, Clone, :: parserc :: syntax :: Syntax)]
 pub struct BlockCommentBody<I>(
     #[parserc(keyword = "/*")] pub I,
-    # [parserc (parser = read_block_comment_body_1 . or (:: parserc :: keyword ("**")) . or (| input : & mut I | { text_of (< BlockCommentOrDoc < I > as :: parserc :: syntax :: Syntax < I >> :: into_parser () , input) }))]
+    # [parserc (parser = read_block_comment_body_1 . or (:: parserc :: keyword ("**")) . or (:: parserc :: text_of (< BlockCommentOrDoc < I > as :: parserc :: syntax :: Syntax < I >> :: into_parser ())))]
     pub I,
     #[parserc(read_block_comment_body_3)] pub I,
     #[parserc(keyword = "*/")] pub I,
@@ -445,25 +428,26 @@ where
     I: UnsynInput,
 {
     use ::parserc::Parser as _;
-    let mut whole = input.clone();
-    let before = input.len();
-    {
-        let mut rest = input.clone();
-        if ::parserc::keyword("/*")
-            .or(::parserc::keyword("*/"))
-            .ok()
-            .parse(&mut rest)?
-            .is_some()
+    ::parserc::text_of(|input: &mut I| {
         {
-            return Err(::parserc::Kind::NextIf(
-                ::parserc::ControlFlow::Recovable,
-                input.to_span_at(1),
-            )
-            .into());
+            let mut rest = input.clone();
+            if ::parserc::keyword("/*")
+                .or(::parserc::keyword("*/"))
+                .ok()
+                .parse(&mut rest)?
+                .is_some()
+            {
+                return Err(::parserc::Kind::NextIf(
+                    ::parserc::ControlFlow::Recovable,
+                    input.to_span_at(1),
+                )
+                .into());
+            }
         }
-    }
-    ::parserc::next_if(|_c: char| true).parse(input)?;
-    Ok(whole.split_to(before - input.len()))
+        ::parserc::next_if(|_c: char| true).parse(input)?;
+        Ok(())
+    })
+    .parse(input)
 }
 fn read_inner_block_doc_2<I>(
     input: &mut I,
@@ -472,20 +456,18 @@ where
     I: UnsynInput,
 {
     use ::parserc::Parser as _;
-    let mut whole = input.clone();
-    let before = input.len();
-    while (|input: &mut I| {
-        text_of(
+    ::parserc::text_of(|input: &mut I| {
+        while ::parserc::text_of(
             <BlockCommentOrDoc<I> as ::parserc::syntax::Syntax<I>>::into_parser(),
-            input,
         )
+        .or(read_inner_block_doc_1)
+        .ok()
+        .parse(input)?
+        .is_some()
+        {}
+        Ok(())
     })
-    .or(read_inner_block_doc_1)
-    .ok()
-    .parse(input)?
-    .is_some()
-    {}
-    Ok(whole.split_to(before - input.len()))
+    .parse(input)
 }
 #[derive(Debug, PartialEq, Eq, PartialOrd, Ord, Clone, :: parserc :: syntax :: Syntax)]
 pub struct InnerBlockDoc<I>(
@@ -502,11 +484,12 @@ where
     I: UnsynInput,
 {
     use ::parserc::Parser as _;
-    let mut whole = input.clone();
-    let before = input.len();
-    ::parserc::next_if(|c: char| !(matches!(c, '/'))).parse(input)?;
-    ::parserc::take_while(|c: char| !(matches!(c, '\n' | '\r'))).parse(input)?;
-    Ok(whole.split_to(before - input.len()))
+    ::parserc::text_of(|input: &mut I| {
+        ::parserc::next_if(|c: char| !(matches!(c, '/'))).parse(input)?;
+        ::parserc::take_while(|c: char| !(matches!(c, '\n' | '\r'))).parse(input)?;
+        Ok(())
+    })
+    .parse(input)
 }
 fn read_outer_line_doc_2<I>(
     input: &mut I,
@@ -515,10 +498,11 @@ where
     I: UnsynInput,
 {
     use ::parserc::Parser as _;
-    let mut whole = input.clone();
-    let before = input.len();
-    let _ = read_outer_line_doc_1.ok().parse(input)?;
-    Ok(whole.split_to(before - input.len()))
+    ::parserc::text_of(|input: &mut I| {
+        let _ = read_outer_line_doc_1.ok().parse(input)?;
+        Ok(())
+    })
+    .parse(input)
 }
 #[derive(Debug, PartialEq, Eq, PartialOrd, Ord, Clone, :: parserc :: syntax :: Syntax)]
 pub struct OuterLineDoc<I>(
@@ -535,25 +519,26 @@ where
     I: UnsynInput,
 {
     use ::parserc::Parser as _;
-    let mut whole = input.clone();
-    let before = input.len();
-    {
-        let mut rest = input.clone();
-        if ::parserc::next('*')
-            .or(::parserc::keyword("/*"))
-            .ok()
-            .parse(&mut rest)?
-            .is_some()
+    ::parserc::text_of(|input: &mut I| {
         {
-            return Err(::parserc::Kind::NextIf(
-                ::parserc::ControlFlow::Recovable,
-                input.to_span_at(1),
-            )
-            .into());
+            let mut rest = input.clone();
+            if ::parserc::next('*')
+                .or(::parserc::keyword("/*"))
+                .ok()
+                .parse(&mut rest)?
+                .is_some()
+            {
+                return Err(::parserc::Kind::NextIf(
+                    ::parserc::ControlFlow::Recovable,
+                    input.to_span_at(1),
+                )
+                .into());
+            }
         }
-    }
-    ::parserc::next_if(|_c: char| true).parse(input)?;
-    Ok(whole.split_to(before - input.len()))
+        ::parserc::next_if(|_c: char| true).parse(input)?;
+        Ok(())
+    })
+    .parse(input)
 }
 fn read_outer_block_doc_2<I>(
     input: &mut I,
@@ -562,25 +547,26 @@ where
     I: UnsynInput,
 {
     use ::parserc::Parser as _;
-    let mut whole = input.clone();
-    let before = input.len();
-    {
-        let mut rest = input.clone();
-        if ::parserc::keyword("/*")
-            .or(::parserc::keyword("*/"))
-            .ok()
-            .parse(&mut rest)?
-            .is_some()
+    ::parserc::text_of(|input: &mut I| {
         {
-            return Err(::parserc::Kind::NextIf(
-                ::parserc::ControlFlow::Recovable,
-                input.to_span_at(1),
-            )
-            .into());
+            let mut rest = input.clone();
+            if ::parserc::keyword("/*")
+                .or(::parserc::keyword("*/"))
+                .ok()
+                .parse(&mut rest)?
+                .is_some()
+            {
+                return Err(::parserc::Kind::NextIf(
+                    ::parserc::ControlFlow::Recovable,
+                    input.to_span_at(1),
+                )
+                .into());
+            }
         }
-    }
-    ::parserc::next_if(|_c: char| true).parse(input)?;
-    Ok(whole.split_to(before - input.len()))
+        ::parserc::next_if(|_c: char| true).parse(input)?;
+        Ok(())
+    })
+    .parse(input)
 }
 fn read_outer_block_doc_3<I>(
     input: &mut I,
@@ -589,25 +575,23 @@ where
     I: UnsynInput,
 {
     use ::parserc::Parser as _;
-    let mut whole = input.clone();
-    let before = input.len();
-    while (|input: &mut I| {
-        text_of(
+    ::parserc::text_of(|input: &mut I| {
+        while ::parserc::text_of(
             <BlockCommentOrDoc<I> as ::parserc::syntax::Syntax<I>>::into_parser(),
-            input,
         )
+        .or(read_outer_block_doc_2)
+        .ok()
+        .parse(input)?
+        .is_some()
+        {}
+        Ok(())
     })
-    .or(read_outer_block_doc_2)
-    .ok()
-    .parse(input)?
-    .is_some()
-    {}
-    Ok(whole.split_to(before - input.len()))
+    .parse(input)
 }
 #[derive(Debug, PartialEq, Eq, PartialOrd, Ord, Clone, :: parserc :: syntax :: Syntax)]
 pub struct OuterBlockDoc<I>(
     #[parserc(keyword = "/**")] pub I,
-    # [parserc (parser = read_outer_block_doc_1 . or (| input : & mut I | { text_of (< BlockCommentOrDoc < I > as :: parserc :: syntax :: Syntax < I >> :: into_parser () , input) }))]
+    # [parserc (parser = read_outer_block_doc_1 . or (:: parserc :: text_of (< BlockCommentOrDoc < I > as :: parserc :: syntax :: Syntax < I >> :: into_parser ())))]
     pub I,
     #[parserc(read_outer_block_doc_3)] pub I,
     #[parserc(keyword = "*/")] pub I,

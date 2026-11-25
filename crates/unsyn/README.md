@@ -523,9 +523,16 @@ Two things this does **not** do, both easy to assume and both wrong:
 
 - it does not flatten a rule reached **beside** others inside a fold. A name in
   that position keeps whichever shape its own production writes, and the fold
-  wraps the *reading* of it in `text_of`. So `BlockCommentOrDoc`, reached from
-  `BlockCommentBody`'s group, is still an enum of its three rules — it is the
-  **group** that answers as one run of text, not the rule.
+  reads that shape for its text with `parserc`'s `text_of`. So
+  `BlockCommentOrDoc`, reached from `BlockCommentBody`'s group, is still an enum
+  of its three rules — it is the **group** that answers as one run of text, not
+  the rule.
+
+  Taking a run of text is the framework's act and not the generator's: the same
+  combinator answers wherever the code needs it, the fold of a group above and
+  the `read_` function of a sequence or a repetition alike. The code a build
+  writes holds no helper of its own, because the shape of one is no more a fact
+  of the file than the shape of `parserc`'s `keyword` is.
 - it does not reach `syntax` rules at all. `node_rules` walks only the `lexer`
   ones, because a node's field may be a node; only a terminal is at risk of
   being asked to hold one inside its own text.
