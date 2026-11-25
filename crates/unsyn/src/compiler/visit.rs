@@ -447,7 +447,7 @@ pub mod walk {
         v: &mut V,
         node: &'ast syntax::Crate<I>,
     ) {
-        for (s, inner_doc) in &node.inner_docs {
+        for (s, inner_doc) in &node.inner_doc {
             if let Some(s) = s {
                 v.visit_s(s);
             }
@@ -455,7 +455,7 @@ pub mod walk {
             v.visit_inner_doc(inner_doc);
         }
 
-        for item in &node.items {
+        for item in &node.item {
             v.visit_item(item);
         }
     }
@@ -475,7 +475,7 @@ pub mod walk {
         v: &mut V,
         node: &'ast syntax::Stmt<I>,
     ) {
-        v.visit_leading_keywords(&node.keyword);
+        v.visit_leading_keywords(&node.leading_keywords);
 
         if let Some(s) = &node.s {
             v.visit_s(s);
@@ -507,8 +507,8 @@ pub mod walk {
         node: &'ast syntax::OuterDoc<I>,
     ) {
         match node {
-            syntax::OuterDoc::Block(doc) => v.visit_outer_block_doc(doc),
-            syntax::OuterDoc::Line(doc) => v.visit_outer_line_doc(doc),
+            syntax::OuterDoc::OuterBlockDoc(doc) => v.visit_outer_block_doc(doc),
+            syntax::OuterDoc::OuterLineDoc(doc) => v.visit_outer_line_doc(doc),
         }
     }
 
@@ -517,8 +517,8 @@ pub mod walk {
         node: &'ast syntax::InnerDoc<I>,
     ) {
         match node {
-            syntax::InnerDoc::Block(doc) => v.visit_inner_block_doc(doc),
-            syntax::InnerDoc::Line(doc) => v.visit_inner_line_doc(doc),
+            syntax::InnerDoc::InnerBlockDoc(doc) => v.visit_inner_block_doc(doc),
+            syntax::InnerDoc::InnerLineDoc(doc) => v.visit_inner_line_doc(doc),
         }
     }
 
@@ -548,8 +548,10 @@ pub mod walk {
         node: &'ast syntax::ExprNoTopAlt<I>,
     ) {
         match node {
-            syntax::ExprNoTopAlt::WithSuffix(suffix) => v.visit_expr_with_suffix(suffix),
-            syntax::ExprNoTopAlt::WithoutSuffix(operand) => v.visit_expr_without_suffix(operand),
+            syntax::ExprNoTopAlt::ExprWithSuffix(suffix) => v.visit_expr_with_suffix(suffix),
+            syntax::ExprNoTopAlt::ExprWithoutSuffix(operand) => {
+                v.visit_expr_without_suffix(operand)
+            }
         }
     }
 
@@ -558,7 +560,7 @@ pub mod walk {
         node: &'ast syntax::ExprWithoutSuffix<I>,
     ) {
         match node {
-            syntax::ExprWithoutSuffix::Tilde { tilde, s, operand } => {
+            syntax::ExprWithoutSuffix::NegatedSet { tilde, s, operand } => {
                 v.visit_tilde(tilde);
 
                 if let Some(s) = s {
@@ -610,9 +612,9 @@ pub mod walk {
                 v.visit_paren_end(close);
             }
             syntax::ExprWithoutSuffix::Set(set) => v.visit_set(set),
-            syntax::ExprWithoutSuffix::Str(lit) => v.visit_lit_str(lit),
-            syntax::ExprWithoutSuffix::Unicode(lit) => v.visit_lit_unicode(lit),
-            syntax::ExprWithoutSuffix::Reference(ident) => v.visit_ident(ident),
+            syntax::ExprWithoutSuffix::LitStr(lit) => v.visit_lit_str(lit),
+            syntax::ExprWithoutSuffix::LitUnicode(lit) => v.visit_lit_unicode(lit),
+            syntax::ExprWithoutSuffix::Ident(ident) => v.visit_ident(ident),
         }
     }
 
@@ -621,7 +623,7 @@ pub mod walk {
         node: &'ast syntax::ExprWithSuffix<I>,
     ) {
         match node {
-            syntax::ExprWithSuffix::Grouped { target, s, suffix } => {
+            syntax::ExprWithSuffix::Suffixed { target, s, suffix } => {
                 v.visit_expr_without_suffix(target);
 
                 if let Some(s) = s {
@@ -685,7 +687,7 @@ pub mod walk {
             v.visit_s(s);
         }
 
-        v.visit_repeat_bound(&node.bound);
+        v.visit_repeat_bound(&node.repeat_bound);
 
         if let Some(s) = &node.s2 {
             v.visit_s(s);
@@ -729,7 +731,7 @@ pub mod walk {
                     v.visit_lit_dec(end);
                 }
             }
-            syntax::RepeatBound::Count(count) => v.visit_lit_dec(count),
+            syntax::RepeatBound::LitDec(count) => v.visit_lit_dec(count),
         }
     }
 
@@ -742,12 +744,12 @@ pub mod walk {
             // `concat` the rule asks for, so it is the text of the node rather
             // than a terminal of it, and reaches the visitor as text — as it
             // does for the form of two strings.
-            syntax::Range::Unicode(start, dash, end) => {
+            syntax::Range::UnicodeRange(start, dash, end) => {
                 v.visit_lit_unicode(start);
                 v.visit_text(dash);
                 v.visit_lit_unicode(end);
             }
-            syntax::Range::Str(start, dash, end) => {
+            syntax::Range::StrRange(start, dash, end) => {
                 v.visit_lit_str(start);
                 v.visit_text(dash);
                 v.visit_lit_str(end);
@@ -761,9 +763,9 @@ pub mod walk {
     ) {
         match node {
             syntax::SetItem::Range(range) => v.visit_range(range),
-            syntax::SetItem::Str(lit) => v.visit_lit_str(lit),
-            syntax::SetItem::Unicode(lit) => v.visit_lit_unicode(lit),
-            syntax::SetItem::Reference(ident) => v.visit_ident(ident),
+            syntax::SetItem::LitStr(lit) => v.visit_lit_str(lit),
+            syntax::SetItem::LitUnicode(lit) => v.visit_lit_unicode(lit),
+            syntax::SetItem::Ident(ident) => v.visit_ident(ident),
         }
     }
 
@@ -1071,8 +1073,8 @@ pub mod walk {
         node: &'ast lexer::Ident<I>,
     ) {
         match node {
-            lexer::Ident::Raw(raw) => v.visit_raw_ident(raw),
-            lexer::Ident::NonKeyword(ident) => v.visit_non_keyword_ident(ident),
+            lexer::Ident::RawIdent(raw) => v.visit_raw_ident(raw),
+            lexer::Ident::NonKeywordIdent(ident) => v.visit_non_keyword_ident(ident),
         }
     }
 
@@ -1081,7 +1083,7 @@ pub mod walk {
         node: &'ast lexer::Keywords<I>,
     ) {
         match node {
-            lexer::Keywords::Leading(keywords) => v.visit_leading_keywords(keywords),
+            lexer::Keywords::LeadingKeywords(keywords) => v.visit_leading_keywords(keywords),
             lexer::Keywords::OperatorKeywords(keywords) => v.visit_operator_keywords(keywords),
         }
     }
@@ -1173,7 +1175,7 @@ mod tests {
                 // Which word a definition opened with is the variant it landed
                 // on; the tree keeps no word of its own, since a build writes
                 // types and no method beside them.
-                self.keywords.push(match node.keyword {
+                self.keywords.push(match node.leading_keywords {
                     lexer::LeadingKeywords::Lexer(_) => "lexer",
                     lexer::LeadingKeywords::Syntax(_) => "syntax",
                     lexer::LeadingKeywords::Whitespace(_) => "whitespace",

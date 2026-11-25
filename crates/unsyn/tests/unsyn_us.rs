@@ -418,7 +418,7 @@ fn the_generated_parser_reads_the_spec_it_was_generated_from() {
     let defined = |name: &unsyn::compiler::lexer::Ident<UnsynStream<'_>>| name.to_span();
 
     let hand_names: Vec<_> = hand
-        .items
+        .item
         .iter()
         .filter_map(|item| match item {
             Item::Stmt(stmt) => Some(defined(&stmt.ident)),

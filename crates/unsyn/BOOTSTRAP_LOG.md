@@ -88,6 +88,11 @@ clean, `cargo test --workspace` 15 results green.
 
 ## Stage 2b — the file emits its own stream ✅
 
+*(Placed before Stage 2 for reading order because it **supersedes** part of that
+stage's conclusion: Stage 2 imported the stream trait, 2b emits it. Stage 2 is
+kept below because its measurement of the 338, and the harness lesson in it, are
+what made the count move.)*
+
 D6 said a build emits the trait and the alias. It now does.
 
 - [x] `input_defs` writes `pub trait #input: ::parserc::Input<Item = char,
@@ -136,13 +141,34 @@ whatever the types are named.
       holding `(kind, Span)`, `Kind` passed through, and the `ParseError` impl
       that answers `to_span`/`control_flow`/`into_fatal` per family
 - [ ] replace the four hard-coded `::parserc::Kind::…` emissions
-      (`codegen.rs` 1827, 2343, 2866, 2977) with the generated families — these
+      (`codegen.rs` 1909, 2427, 2951, 3062) with the generated families — these
       are where a build today flattens a phase distinction it should keep
-- [ ] `Builder::error_name(..)` / `Builder::errors_at(..)`: default `Unsyn…`, so
-      an unconfigured build reproduces the hand names exactly
+- [x] `Builder::error_at(name, path)`: default `UnsynError` at
+      `::unsyn::compiler::errors`, so an unconfigured build names the error the
+      crate ships — and the stream trait it emits now refers to that type, which
+      is why the error name is a builder decision rather than a constant
 - [ ] gates: shipped set green; scoreboard moves only where an error *was* the
-      hard-coded `Kind`, which is not most of the 543 — S1 is measured by the
+      hard-coded `Kind`, which is not most of it — S1 is measured by the
       generated file containing the six families, not by the count
+
+**Held after S4, on two naming blockers (D6).** Both are measured, not guessed:
+
+- `PunctKind`: `'('` → `ParenStart`, `'<'` → `Lt`, `'->'` → `ArrowRight`,
+  `';'` → `Semi`. No rule, literal or shape yields an English name for a sign,
+  so a generator-held sign table is required — about punctuation rather than
+  about unsyn, hence defensible, but still a table, and D5 says the spec
+  decides. Wants a ruling, not an inference.
+- `SyntaxKind` contradicts D2 in the hand file: it holds `Unicode`, `Dec` and
+  `StrContent` where D2 and the type names say `LitUnicode`, `LitDec`, and
+  `LitStr`'s body. D2 has the better rule; the hand file is the inconsistent
+  side.
+
+The bound lesson, which is why the builder owns it even though it is about the
+stream: the emitted parser code uses only `Input<Item=char>` + `Clone` +
+`Debug` + `PartialEq` (`split_to`, `len`, `to_span_at`, `is_empty`), while
+`read`/`semantic`/`codegen` additionally use `as_str`, `starts_with` and `find`.
+A bound derived from the rules alone is too weak for the loop, so the
+supertraits are `Builder::input_bound(..)`, defaulting to this crate's set.
 
 ## Stage 2 — generated `Input` ✅
 
@@ -218,9 +244,165 @@ deliberately does not show.
 - [ ] serde derives behind the same `cfg_attr` the hand file uses
 - [ ] gates: suite green
 
+**What aligning them costs — the reason this was not done as a rename sweep.**
+The hand tree has **none** of the eight types: `NegatedSet`, `Call`, `Paren`,
+`Suffixed`, `RangeTo`, `RangeFrom`, `UnicodeRange`, `StrRange` are all absent
+from `syntax.rs`/`lexer.rs` (checked by name against both files). The hand tree
+instead inlines each production's parts into the variant, e.g.:
+
+```rust
+// hand
+pub enum Range<I> { UnicodeRange(Box<LitUnicode<I>>, I, Box<LitUnicode<I>>), … }
+// generated
+pub enum Range<I> { UnicodeRange(UnicodeRange<I>), StrRange(StrRange<I>), … }
+```
+
+So closing E0026/E0023/E0308 is not renaming but **growing the hand tree by eight
+node types**: each wants a struct, a hand-written parse, a visitor method, and
+its ~47 consumer sites in `read.rs`/`semantic.rs`/`codegen.rs`/`visit.rs` rewired
+from the inlined parts to one held node. That is a stage on its own — bigger than
+S2 — and it is exactly what S5's "the hand tree gets the ten rules as rules"
+line was pointing at. It was deliberately **not** started in a nearly-full
+context rather than left half-applied with the gates red.
+
+**The box rule, restated because it is easy to get wrong here:** of the four
+variants that change shape, `NegatedSet`/`Paren`/`Suffixed` hold a boxed node
+(they are on a containment cycle) and **`Call` holds a bare `Call<I>`** — it
+reaches only `Ident`, a lexer rule, so it is on no cycle. The generator already
+gets all of this right and `cyclic_syntax_refs` was not touched by any of this
+work; an alignment must copy that result, never widen it.
+
 ## Stage 4 — one tree: node names, fields, types
 
 The remaining 179 errors, and the real work. Ordered by blast radius.
+
+### The mapping table, read off both trees (the precondition S4 lacked)
+
+Generated names checked against `unsyn.us`: every one below marked *rule* is
+the left side of a production the spec genuinely states, so the hand name is
+the one that is wrong and the hand moves (D5). Marked *fallback*, the spec
+states no rule and the generator substituted a place — those are P5's
+naming-hygiene debt, and moving the hand tree onto them **fixes a defect by
+forgetting a good name**, so they are held out of this stage.
+
+| enum | hand → generated | kind |
+|---|---|---|
+| `ExprNoTopAlt` | `WithSuffix`→`ExprWithSuffix`, `WithoutSuffix`→`ExprWithoutSuffix` | rule |
+| `ExprWithoutSuffix` | `Tilde`→`NegatedSet`, `Str`→`LitStr`, `Unicode`→`LitUnicode`, `Reference`→`Ident` (`Call`/`Paren`/`Set` already match) | rule |
+| `ExprWithSuffix` | `Grouped`→`Suffixed` (`Concat`/`Except` match) | rule |
+| `SetItem` | `Str`→`LitStr`, `Unicode`→`LitUnicode`, `Reference`→`Ident` (`Range` matches) | rule |
+| `Range` | `Unicode`→`UnicodeRange`, `Str`→`StrRange` | rule |
+| `RepeatBound` | `Count`→`LitDec` (`RangeTo`/`RangeFrom` match) | rule |
+| `OuterDoc`/`InnerDoc` | `Block`→`OuterBlockDoc`/`InnerBlockDoc`, `Line`→`OuterLineDoc`/`InnerLineDoc` | rule |
+| `Ident` (lexer) | `Raw`→`RawIdent`, `NonKeyword`→`NonKeywordIdent` | rule |
+| `Keywords` | `Leading`→`LeadingKeywords` (`OperatorKeywords` matches) | rule |
+| `Suffix` | `Star`/`Question`/`Plus`→`F1`/`F2`/F`3` | **fallback — P5** |
+| `AsciiEscape` | `Hex`→`AsciiHexEscape`, `N`/`R`/`T`/`Backslash`/`Zero`→`F2`..`F6` | **mixed — P5** |
+| `Crate` fields | `inner_docs`/`items` → `inner_doc`/`item` | rule-name, **singular** — style |
+| `Expr` fields | `first`/`rest` → the generated element/tail names | **style — P5** |
+| `Repeat.bound`, `Stmt.keyword`, `LitDec.head/tail`, `LitUnicode.digits` | rule-derived | rule |
+
+`OneOrMore` (11 errors) is separate: the hand tree keeps a `OneOrMore<I, X>`
+container for `X+`; the generator emits a `Vec` plus a first element instead.
+Either the type is generated or the hand container is dropped — a shape
+decision, not a rename.
+
+### The split that decides what to do first
+
+Renames whose generated name is a *rule* are unambiguous and do not freeze any
+P5 defect: they are ~135 of the 179 and go first, hand side moving to the
+generated spelling. `Suffix`/`AsciiEscape` place-names and the `Crate`
+singular/`Expr` `first`/`rest` style points are **not** renames to make blindly
+onto the hand tree — settling them is P5, and is left to the user.
+
+### What was actually done, and a correction to this table
+
+- [x] **all the *rule* variant renames above applied** to `syntax.rs`/`lexer.rs`
+      and their references in `read.rs`/`semantic.rs`/`codegen.rs`/`visit.rs`
+      + `unsyn_us.rs`, family by family. 179 → **149**.
+- [x] `Crate.inner_docs`/`items` → `inner_doc`/`item`. This was **mis-shelved in
+      this table as "singular style"** and is not: README §11 rule 1 says a
+      reference to a rule names its field in `to_snake_case`, and `Crate ->
+      InnerDoc* Item*` references the rules — so the singular name is
+      rule-derived and the plural hand name is the wrong side. 149 → **134**.
+      (`Stmt.keyword`→`leading_keywords`, `Repeat.bound`→`repeat_bound` are the
+      same rule and went with it.)
+- [ ] `Set.items`/`tail` are **not** in the rename set at all: the hand `Set`
+      carries named fields where README §11 and the generated file both write
+      `Set` as a *tuple*. That is a shape change, and `Expr` (README shows
+      `pub struct Expr<I>(pub …, pub Vec<(…)>)`) is the same. The hand tree is
+      the deviant side; moving it to tuples is legitimate S4, not P5.
+- [ ] the variant shape: generated makes a single-reference alternative
+      `Box<X<I>>` (one field), hand inlines the parts as named fields —
+      "expected 1 field, found 4" (E0026/E0023) and the `&generated::LitStr` vs
+      `&lexer::LitStr` E0308 all trace here. Stage-sized, `edit_file` only (the
+      mass sed/python edits have corrupted this repo twice).
+
+**Box is cycle-only, and the generated tree already gets it right — verified, not
+assumed.** `cyclic_syntax_refs` keeps only edges whose tail `reaches` back to
+the head, and the 16 emitted `Box`es land on exactly `Expr`, `ExprNoTopAlt`,
+`ExprWithSuffix`, `ExprWithoutSuffix`, `NegatedSet`, `Paren`, `Suffixed` — the
+mutual-containment core. The sibling alternatives of the very same enum carry
+**no** box: `Call(Call<I>)`, `Set(Set<I>)`, `LitStr(LitStr<I>)`,
+`LitUnicode(LitUnicode<I>)`, `Ident(Ident<I>)`. So box is not a convention
+applied to tuple variants and must not be added while aligning shapes — the
+only place it belongs is a pair the cycle analysis names. An earlier draft of
+this table attributed E0026/E0023 to "generated boxes single-reference
+alternatives"; that was the wrong diagnosis and is corrected here.
+
+**What the E0026/E0023 shape gap actually is.** The spec now gives `NegatedSet`,
+`Call`, `Paren`, `Suffixed`, `RangeTo`, `RangeFrom`, `UnicodeRange`, `StrRange`,
+`AsciiHexEscape`, `BlockCommentBody` productions of their own (D5). So a variant
+that *references* one of those is one field holding that node —
+`NegatedSet(Box<NegatedSet<I>>)` — while the hand tree still **inlines** the
+parts of that production as named fields of the variant (`NegatedSet { tilde,
+s, operand }`). Aligning means the hand variant drops its inlined parts and
+holds the node, boxed **only** for the three on the cycle. The inline-sequence
+alternatives (`Concat`, `Except`) are the opposite case and stay named-field in
+both trees.
+
+**The shape direction is settled by the README, not open.** README §11 (lines
+745–759) *literally prints* `pub struct LitStr<I>(…)`, `pub struct Expr<I>(pub
+(…), pub Vec<(…)>)` and `pub struct Set<I>(…)` as tuples, and "a struct whose
+fields are all nameless is written as a tuple". The generator already follows
+that; the hand tree's named `Set { open, items, tail, … }`, named `Expr {
+first, rest }` and named `OneOrMore<I,X>` are the deviation. So `Set`/`Expr`/
+`LitStr` → tuple and `OneOrMore` → the generated `(X, Vec<Led<I,X>>)` are
+**hand-tree moves the README mandates**, the same class as the renames — not a
+decision to defer. What remains genuinely deferred is only the `Suffix`/
+`AsciiEscape` place-names (P5) and the serde key change.
+
+### The remaining 134, by kind (measured, not estimated)
+
+| kind | count | is it S4-rename? |
+|---|---|---|
+| `Suffix::Star/Question/Plus` fallback names | 26 | no — P5, contested |
+| `Box<X>` vs inline-named variant shape | ~86 | no — shape refactor |
+| `Expr`/`Set` named-vs-tuple | ~9 | no — shape refactor |
+| `OneOrMore` container absent in generated | 11 | open decision (below) |
+
+So **no further *renames* are safe to make without a decision** — the naming
+that is unambiguously right is done. What is left is two shape refactors, one
+P5 hold, and one open decision:
+
+- [ ] **`OneOrMore` (11 errors, needs your call):** the hand tree has
+      `OneOrMore<I, X>` for `X+`; the generator emits a `Vec` plus a separate
+      first element and writes no such type. Either the generator emits
+      `OneOrMore` as its own type, or the hand container is dropped and `X+`
+      is modelled the generated way. This is a shape choice, not a rename.
+- [ ] `Set`/`Expr` → tuple; variants → `Box<X<I>>`: a stage-sized, `edit_file`
+      -only shape refactor of the hand tree.
+- [ ] `Suffix`/`AsciiEscape` place-names: P5, held out deliberately.
+
+Serde note: `Crate` derives `Serialize`/`Deserialize`, so the JSON keys became
+`inner_doc`/`item`. No snapshot in the repo depends on it (suite green), but it
+is an external format change.
+
+- [ ] apply the *rule* renames above to the hand `syntax.rs`/`lexer.rs` and
+      their references in `read.rs`/`semantic.rs`/`codegen.rs`/`visit.rs` +
+      `two_trees.rs`/`unsyn_us.rs`, family by family, `cargo check` each
+- [ ] re-measure; what is left is exactly the P5 fallback/style set
+- [ ] `OneOrMore`: generate the type or drop the hand container (decide)
 
 **What S4 actually is, measured before any of it was written.** Grouping the
 179 by message says they are not 179 decisions but a handful of causes:
@@ -280,16 +462,6 @@ because its generated half is now settled.
 - [ ] gates: `cargo check -p unsyn --features bootstrap --example bootstrap` —
       the count, staged down to **0**
 
-## Stage 1 — generated `Error`, split by phase — **moved after S4** (D6)
-
-Kept as a stage, reordered by D6. Its in-loop half (`errors_at` carrying the
-three analysis families, and the four hard-coded `::parserc::Kind::…` emissions
-at codegen.rs 1909, 2427, 2951, 3062 routed through it instead) is what the
-bootstrap can exercise. Emitting `PunctKind`/`KeywordKind`/`SyntaxKind` fresh
-into a file whose bound pins `I::Error = UnsynError` is only meaningful for a
-build aimed at a foreign crate, and is judged there — `a_build_aimed_at_another_crate_names_that_crate`
-is the seed of that judgement.
-
 ## Stage 5 — close the loop
 
 - [ ] the example asserts rather than prints: two generations equal, the spec
@@ -299,52 +471,6 @@ is the seed of that judgement.
 - [ ] `two_trees.rs` retired or reduced to what it can still see (D5 said the
       hand tree gets the ten rules as rules — this is where that is finally paid)
 - [ ] gates: full suite + the fixed point
-
-## Stage 1+2b — emitting `Input`, and the bound that is not in the grammar
-
-D6 corrected: a build emits `UnsynInput` and the `TokenStream` alias; the error
-families are carried from `errors_at` until their naming is settled (the
-measured blockers below).
-
-**Deriving the supertraits from the emitted code does not suffice, measured.**
-`CharsInput` was never what a build needed; the trait's bound has to cover what
-the *consumers* of the tree ask of the stream, and those asks are a fact about
-the DSL's own analysis, not about any target grammar:
-
-| capability | used by the emitted parser | used by `read`/`semantic`/`codegen` |
-|---|---|---|
-| `AsStr` | no | **yes** (`as_str`) |
-| `StartWith` | no | **yes** |
-| `Find` | no | **yes** |
-| `AsBytes` | no | no |
-
-The emitted code asks only `Input<Item=char>` + `Clone` + `Debug` + `PartialEq`
-(`split_to`, `len`, `to_span_at`, `is_empty`). A trait derived from the emitted
-combinators alone is therefore **missing the three bounds the analysis needs**,
-and the loop would not compile against it. So the supertraits are a
-builder-supplied set, not a derived one: the Builder knows what it is about to
-hand the tree to, which the target grammar cannot.
-
-**Not started, deliberately.** Implementing this means adding
-`Builder::input_requires(..)` (the extra bounds), emitting the trait and the
-alias, and making the harness's `input` slot point at the generated module
-rather than re-exporting the crate's — at which point the re-export that took
-543 → 179 is *replaced*, not kept, so the scoreboard must be re-measured after
-it. That is a stage-sized edit and this round ran out of room; the tree is
-green and the finding is recorded, which is the state to start from.
-
-**The two naming blockers, recorded so they are not re-derived.** Neither is
-answerable from the CST, which is why fresh `Error` emission is deferred:
-
-- `PunctKind`: `'('` → `ParenStart`, `'<'` → `Lt`, `'->'` → `ArrowRight`,
-  `';'` → `Semi`. No rule, literal or shape yields an English name for a sign.
-  A generator-held sign table is about punctuation rather than about unsyn, so
-  it is *defensible* — but it is still a table, and D5 says the spec decides,
-  so this wants a ruling rather than an inference.
-- `SyntaxKind` contradicts D2 in the hand file: it holds `Unicode`, `Dec` and
-  `StrContent` where D2 and the type names say `LitUnicode`, `LitDec`, and
-  `LitStr`'s body. D2 has the more defensible rule; the hand file is the side
-  that is inconsistent with it.
 
 ## Stage 6 — clean up
 

@@ -73,7 +73,7 @@ where
     // file defined, which the mention check alone speaks for.
     let char_rules = codegen::denotations(source, file).into_keys().collect();
     let skeletons: Vec<Skeleton> = file
-        .items
+        .item
         .iter()
         .filter_map(|item| match item {
             syntax::Item::Stmt(stmt) => Some(Skeleton {
@@ -185,9 +185,9 @@ fn writes_nothing<I: UnsynInput>(expr: &syntax::Expr<I>) -> bool {
 /// whole of a sequence once more.
 fn alt_writes_nothing<I: UnsynInput>(alt: &syntax::ExprNoTopAlt<I>) -> bool {
     match alt {
-        syntax::ExprNoTopAlt::WithoutSuffix(_) => false,
-        syntax::ExprNoTopAlt::WithSuffix(with_suffix) => match with_suffix {
-            syntax::ExprWithSuffix::Grouped { suffix, .. } => suffix_may_be_zero(suffix),
+        syntax::ExprNoTopAlt::ExprWithoutSuffix(_) => false,
+        syntax::ExprNoTopAlt::ExprWithSuffix(with_suffix) => match with_suffix {
+            syntax::ExprWithSuffix::Suffixed { suffix, .. } => suffix_may_be_zero(suffix),
             syntax::ExprWithSuffix::Concat { .. } | syntax::ExprWithSuffix::Except { .. } => false,
         },
     }
@@ -198,7 +198,7 @@ fn suffix_may_be_zero<I: UnsynInput>(suffix: &syntax::Suffix<I>) -> bool {
     match suffix {
         syntax::Suffix::Star(_) | syntax::Suffix::Question(_) => true,
         syntax::Suffix::Plus(_) => false,
-        syntax::Suffix::Repeat(repeat) => bound_may_be_zero(&repeat.bound),
+        syntax::Suffix::Repeat(repeat) => bound_may_be_zero(&repeat.repeat_bound),
     }
 }
 
@@ -212,7 +212,7 @@ fn bound_may_be_zero<I: UnsynInput>(bound: &syntax::RepeatBound<I>) -> bool {
         syntax::RepeatBound::RangeFrom(from, ..) => {
             matches!(decode::decimal(from), Some(0))
         }
-        syntax::RepeatBound::Count(count) => matches!(decode::decimal(count), Some(0)),
+        syntax::RepeatBound::LitDec(count) => matches!(decode::decimal(count), Some(0)),
     }
 }
 
@@ -226,7 +226,7 @@ fn bare_name<'s, I: UnsynInput>(expr: &'s syntax::Expr<I>, source: &'s I) -> Opt
         return None;
     }
 
-    let syntax::ExprNoTopAlt::WithoutSuffix(syntax::ExprWithoutSuffix::Reference(ident)) =
+    let syntax::ExprNoTopAlt::ExprWithoutSuffix(syntax::ExprWithoutSuffix::Ident(ident)) =
         &expr.first.first
     else {
         return None;
@@ -1136,7 +1136,7 @@ impl<'ast, I: UnsynInput> Visit<'ast, I> for Checker<'ast, I> {
             // written beside `~` stands on the refusal and not under it, so
             // `~X*` repeats the refusal and no operand of a `~` is ever one to
             // carry a quantity — which is what keeps this part plain.
-            syntax::ExprWithoutSuffix::Tilde { .. } => {
+            syntax::ExprWithoutSuffix::NegatedSet { .. } => {
                 let refused = self.take_one();
 
                 debug_assert!(
@@ -1169,17 +1169,17 @@ impl<'ast, I: UnsynInput> Visit<'ast, I> for Checker<'ast, I> {
             // A group is one operand, so what it can do is what the expression
             // written inside it can do, the name it holds bare and all.
             syntax::ExprWithoutSuffix::Paren { .. } => self.take_one(),
-            syntax::ExprWithoutSuffix::Str(lit) => {
+            syntax::ExprWithoutSuffix::LitStr(lit) => {
                 _ = self.chars_of(lit);
 
                 Pattern::terminal()
             }
-            syntax::ExprWithoutSuffix::Unicode(lit) => {
+            syntax::ExprWithoutSuffix::LitUnicode(lit) => {
                 _ = self.code_of(lit);
 
                 Pattern::terminal()
             }
-            syntax::ExprWithoutSuffix::Reference(ident) => {
+            syntax::ExprWithoutSuffix::Ident(ident) => {
                 Pattern::bare(as_str(self.source, ident).to_owned(), ident.to_span())
             }
         };
@@ -1191,7 +1191,7 @@ impl<'ast, I: UnsynInput> Visit<'ast, I> for Checker<'ast, I> {
         walk::walk_expr_with_suffix(self, node);
 
         let pattern = match node {
-            syntax::ExprWithSuffix::Grouped { suffix, .. } => {
+            syntax::ExprWithSuffix::Suffixed { suffix, .. } => {
                 let mut target = self.take_one();
 
                 match suffix {
@@ -1267,7 +1267,7 @@ impl<'ast, I: UnsynInput> Visit<'ast, I> for Checker<'ast, I> {
                 from: self.count_of(from),
                 to: to.as_ref().map(|(_, to)| self.count_of(to)),
             },
-            syntax::RepeatBound::Count(count) => {
+            syntax::RepeatBound::LitDec(count) => {
                 let count = self.count_of(count);
 
                 Bound {
@@ -1284,8 +1284,10 @@ impl<'ast, I: UnsynInput> Visit<'ast, I> for Checker<'ast, I> {
         walk::walk_range(self, node);
 
         let ends = match node {
-            syntax::Range::Unicode(from, _, to) => [self.code_of(from), self.code_of(to)],
-            syntax::Range::Str(from, _, to) => [self.end_of_range(from), self.end_of_range(to)],
+            syntax::Range::UnicodeRange(from, _, to) => [self.code_of(from), self.code_of(to)],
+            syntax::Range::StrRange(from, _, to) => {
+                [self.end_of_range(from), self.end_of_range(to)]
+            }
         };
 
         let interval = match ends {
@@ -1326,7 +1328,7 @@ impl<'ast, I: UnsynInput> Visit<'ast, I> for Checker<'ast, I> {
             // A literal of one character is a character of the set; a longer one
             // is a string, which no character is ever the same value as, and which
             // is only the same as another member when the two are the same string.
-            syntax::SetItem::Str(lit) => {
+            syntax::SetItem::LitStr(lit) => {
                 let chars = self.chars_of(lit);
 
                 let value = match chars.len() {
@@ -1337,14 +1339,14 @@ impl<'ast, I: UnsynInput> Visit<'ast, I> for Checker<'ast, I> {
 
                 Member { span, value }
             }
-            syntax::SetItem::Unicode(lit) => Member {
+            syntax::SetItem::LitUnicode(lit) => Member {
                 span,
                 value: match self.code_of(lit) {
                     Some(code) => Value::Chars(vec![(code, code)]),
                     None => Value::Unknown,
                 },
             },
-            syntax::SetItem::Reference(ident) => {
+            syntax::SetItem::Ident(ident) => {
                 let name = as_str(self.source, ident).to_owned();
 
                 Member {

@@ -484,7 +484,7 @@ fn trivia_rule<I>(source: &I, file: &syntax::Crate<I>) -> Option<String>
 where
     I: UnsynInput,
 {
-    file.items.iter().find_map(|item| {
+    file.item.iter().find_map(|item| {
         let syntax::Item::Stmt(stmt) = item else {
             return None;
         };
@@ -498,7 +498,7 @@ fn syntax_rules<I>(source: &I, file: &syntax::Crate<I>) -> HashSet<String>
 where
     I: UnsynInput,
 {
-    file.items
+    file.item
         .iter()
         .filter_map(|item| {
             let syntax::Item::Stmt(stmt) = item else {
@@ -531,7 +531,7 @@ where
     let syntaxes = syntax_rules(source, file);
     let mut edges: HashSet<(String, String)> = HashSet::new();
 
-    for item in &file.items {
+    for item in &file.item {
         if let syntax::Item::Stmt(stmt) = item
             && matches!(read::decl(stmt), Decl::Syntax)
         {
@@ -612,11 +612,11 @@ fn operand_refs<I>(
     I: UnsynInput,
 {
     match operand {
-        syntax::ExprNoTopAlt::WithoutSuffix(atom) => {
+        syntax::ExprNoTopAlt::ExprWithoutSuffix(atom) => {
             atom_refs(source, atom, direct, src, syntaxes, edges)
         }
-        syntax::ExprNoTopAlt::WithSuffix(suffix) => match suffix {
-            syntax::ExprWithSuffix::Grouped { target, suffix, .. } => {
+        syntax::ExprNoTopAlt::ExprWithSuffix(suffix) => match suffix {
+            syntax::ExprWithSuffix::Suffixed { target, suffix, .. } => {
                 let repeated = match suffix {
                     syntax::Suffix::Question(_) | syntax::Suffix::Plus(_) => direct,
                     syntax::Suffix::Star(_) | syntax::Suffix::Repeat(_) => false,
@@ -652,7 +652,7 @@ fn atom_refs<I>(
     I: UnsynInput,
 {
     match atom {
-        syntax::ExprWithoutSuffix::Reference(ident) => {
+        syntax::ExprWithoutSuffix::Ident(ident) => {
             if direct {
                 let dst = external_key(as_str(source, ident));
 
@@ -666,7 +666,7 @@ fn atom_refs<I>(
         }
         // A refusal holds its operand in a field, as directly as a group of
         // one name hands its answer back.
-        syntax::ExprWithoutSuffix::Tilde { operand, .. } => {
+        syntax::ExprWithoutSuffix::NegatedSet { operand, .. } => {
             atom_refs(source, operand, direct, src, syntaxes, edges);
         }
         _ => {}
@@ -707,10 +707,10 @@ where
     I: UnsynInput,
 {
     read::elements(branch).find_map(|element| match element {
-        syntax::ExprNoTopAlt::WithSuffix(suffix) => match suffix {
+        syntax::ExprNoTopAlt::ExprWithSuffix(suffix) => match suffix {
             syntax::ExprWithSuffix::Concat { keyword, .. } => Some(keyword.0.as_str().to_owned()),
             syntax::ExprWithSuffix::Except { keyword, .. } => Some(keyword.0.as_str().to_owned()),
-            syntax::ExprWithSuffix::Grouped { suffix, .. } => match suffix {
+            syntax::ExprWithSuffix::Suffixed { suffix, .. } => match suffix {
                 // A brace opens a bound and is punctuation, not a word: like
                 // the two operators beside it, it offers no name, and
                 // offering one would be offering a name no item can wear.
@@ -720,7 +720,7 @@ where
                 | syntax::Suffix::Repeat(_) => None,
             },
         },
-        syntax::ExprNoTopAlt::WithoutSuffix(syntax::ExprWithoutSuffix::Str(lit)) => {
+        syntax::ExprNoTopAlt::ExprWithoutSuffix(syntax::ExprWithoutSuffix::LitStr(lit)) => {
             // The value the literal spells names the variant, not the quotes
             // it was written between.
             let text: String = decode::literal_chars(lit).into_iter().collect();
@@ -870,7 +870,7 @@ where
 
     let mut shapes: HashMap<String, Shape> = HashMap::new();
 
-    for item in &file.items {
+    for item in &file.item {
         let syntax::Item::Stmt(stmt) = item else {
             continue;
         };
@@ -905,7 +905,7 @@ where
                 continue;
             }
 
-            let Some(stmt) = file.items.iter().find_map(|item| match item {
+            let Some(stmt) = file.item.iter().find_map(|item| match item {
                 syntax::Item::Stmt(stmt) => {
                     (&external_key(as_str(source, &stmt.ident)) == key).then_some(stmt)
                 }
@@ -981,7 +981,7 @@ where
     I: UnsynInput,
 {
     match operand {
-        syntax::ExprNoTopAlt::WithSuffix(syntax::ExprWithSuffix::Concat { suffix, .. }) => {
+        syntax::ExprNoTopAlt::ExprWithSuffix(syntax::ExprWithSuffix::Concat { suffix, .. }) => {
             1 + operands_of(suffix)
         }
         _ => 1,
@@ -1012,9 +1012,9 @@ where
     I: UnsynInput,
 {
     match operand {
-        syntax::ExprNoTopAlt::WithoutSuffix(atom) => atom_forced(source, atom, forced),
-        syntax::ExprNoTopAlt::WithSuffix(suffix) => match suffix {
-            syntax::ExprWithSuffix::Grouped { target, .. } => atom_forced(source, target, forced),
+        syntax::ExprNoTopAlt::ExprWithoutSuffix(atom) => atom_forced(source, atom, forced),
+        syntax::ExprNoTopAlt::ExprWithSuffix(suffix) => match suffix {
+            syntax::ExprWithSuffix::Suffixed { target, .. } => atom_forced(source, target, forced),
             syntax::ExprWithSuffix::Concat {
                 target,
                 suffix: next,
@@ -1024,7 +1024,7 @@ where
                 operand_forced(source, next, forced);
             }
             syntax::ExprWithSuffix::Except { target, tokens, .. } => {
-                if let syntax::ExprWithoutSuffix::Reference(ident) = target {
+                if let syntax::ExprWithoutSuffix::Ident(ident) = target {
                     forced.insert(external_key(as_str(source, ident)));
                 }
 
@@ -1045,7 +1045,7 @@ where
         // production writes — one field per sub-expression of it — rather than
         // being flattened into one run of text to suit the fold it is read
         // among.
-        syntax::ExprWithoutSuffix::Reference(_) => {}
+        syntax::ExprWithoutSuffix::Ident(_) => {}
         // A group whose whole answer is one name hands that name's answer back,
         // and a group is read back as text wherever it stands: a field of `I`,
         // an operand the code of a rule folds. What a group reads besides — a
@@ -1061,8 +1061,8 @@ where
                 .next()
                 .is_some_and(|branch| read::elements(branch).count() == 1)
                 && read::is_single(group)
-                && let Some(syntax::ExprNoTopAlt::WithoutSuffix(
-                    syntax::ExprWithoutSuffix::Reference(ident),
+                && let Some(syntax::ExprNoTopAlt::ExprWithoutSuffix(
+                    syntax::ExprWithoutSuffix::Ident(ident),
                 )) = read::elements(read::branches(group).next().expect("one element")).next()
             {
                 forced.insert(external_key(as_str(source, ident)));
@@ -1074,7 +1074,7 @@ where
         // choice answers with one thing however wide the members are.
         syntax::ExprWithoutSuffix::Set(set) if set_items(set).len() > 1 => {
             for item in set_items(set) {
-                if let syntax::SetItem::Reference(ident) = item {
+                if let syntax::SetItem::Ident(ident) = item {
                     forced.insert(external_key(as_str(source, ident)));
                 }
             }
@@ -1083,7 +1083,7 @@ where
         // operand answers with its shape to the probe, and with its text
         // where the probe is a class of characters — which is what the arm
         // below settles when the operand is just that class.
-        syntax::ExprWithoutSuffix::Tilde { operand, .. } => {
+        syntax::ExprWithoutSuffix::NegatedSet { operand, .. } => {
             atom_forced(source, operand, forced);
         }
         _ => {}
@@ -1142,7 +1142,7 @@ where
 {
     let mut bodies: Vec<(String, &syntax::Expr<I>)> = Vec::new();
 
-    for item in &file.items {
+    for item in &file.item {
         if let syntax::Item::Stmt(stmt) = item {
             // A `syntax` rule is no character to be a member of a set of one, and
             // is only ever asked of a file that is refused before it is read.
@@ -1192,7 +1192,7 @@ where
             return None;
         }
 
-        let syntax::ExprNoTopAlt::WithoutSuffix(operand) = operand else {
+        let syntax::ExprNoTopAlt::ExprWithoutSuffix(operand) = operand else {
             return None;
         };
 
@@ -1214,17 +1214,19 @@ where
     match atom {
         // What a `'…'` spells is one character here and a token of several there,
         // and only one character is a value a class can hold.
-        syntax::ExprWithoutSuffix::Str(lit) => match decode::literal_chars(lit)[..] {
+        syntax::ExprWithoutSuffix::LitStr(lit) => match decode::literal_chars(lit)[..] {
             [c] => Some(vec![Arm::Char(c)]),
             _ => None,
         },
-        syntax::ExprWithoutSuffix::Unicode(lit) => Some(vec![Arm::Char(decode::code_point(lit)?)]),
+        syntax::ExprWithoutSuffix::LitUnicode(lit) => {
+            Some(vec![Arm::Char(decode::code_point(lit)?)])
+        }
         syntax::ExprWithoutSuffix::Set(set) => set_arms(source, set, known),
         syntax::ExprWithoutSuffix::Paren { expr: group, .. } => expr_arms(source, group, known),
-        syntax::ExprWithoutSuffix::Reference(ident) => known.get(as_str(source, ident)).cloned(),
+        syntax::ExprWithoutSuffix::Ident(ident) => known.get(as_str(source, ident)).cloned(),
         // A refusal of a set is every character the universe holds besides it,
         // which is no set to list, whatever the set itself denotes.
-        syntax::ExprWithoutSuffix::Tilde { .. } => None,
+        syntax::ExprWithoutSuffix::NegatedSet { .. } => None,
         // An external is whatever the caller binds, and nothing here may say more
         // of it than that.
         syntax::ExprWithoutSuffix::Call { .. } => None,
@@ -1246,12 +1248,12 @@ where
     for item in set_items(set) {
         match item {
             syntax::SetItem::Range(range) => arms.push(range_arm(range)?),
-            syntax::SetItem::Str(lit) => match decode::literal_chars(lit)[..] {
+            syntax::SetItem::LitStr(lit) => match decode::literal_chars(lit)[..] {
                 [c] => arms.push(Arm::Char(c)),
                 _ => return None,
             },
-            syntax::SetItem::Unicode(lit) => arms.push(Arm::Char(decode::code_point(lit)?)),
-            syntax::SetItem::Reference(ident) => {
+            syntax::SetItem::LitUnicode(lit) => arms.push(Arm::Char(decode::code_point(lit)?)),
+            syntax::SetItem::Ident(ident) => {
                 arms.extend(known.get(as_str(source, ident))?.iter().copied());
             }
         }
@@ -1266,8 +1268,10 @@ where
     I: UnsynInput,
 {
     let (from, to) = match range {
-        syntax::Range::Unicode(from, _, to) => (decode::code_point(from)?, decode::code_point(to)?),
-        syntax::Range::Str(from, _, to) => (
+        syntax::Range::UnicodeRange(from, _, to) => {
+            (decode::code_point(from)?, decode::code_point(to)?)
+        }
+        syntax::Range::StrRange(from, _, to) => (
             one_char(decode::literal_chars(from))?,
             one_char(decode::literal_chars(to))?,
         ),
@@ -1477,7 +1481,7 @@ where
         let file = self.file;
         let mut items = Vec::new();
 
-        for item in &file.items {
+        for item in &file.item {
             let syntax::Item::Stmt(stmt) = item else {
                 continue;
             };
@@ -1805,14 +1809,14 @@ where
     /// which at this level is what a sequence of them already is.
     fn field_of(&mut self, operand: &syntax::ExprNoTopAlt<I>) -> Result<Vec<Field>, UnsynError> {
         match operand {
-            syntax::ExprNoTopAlt::WithoutSuffix(atom) => Ok(vec![self.atom_field(atom, None)?]),
-            syntax::ExprNoTopAlt::WithSuffix(suffix) => match suffix {
-                syntax::ExprWithSuffix::Grouped { target, suffix, .. } => {
+            syntax::ExprNoTopAlt::ExprWithoutSuffix(atom) => Ok(vec![self.atom_field(atom, None)?]),
+            syntax::ExprNoTopAlt::ExprWithSuffix(suffix) => match suffix {
+                syntax::ExprWithSuffix::Suffixed { target, suffix, .. } => {
                     let bounds = match suffix {
                         syntax::Suffix::Star(_) => (0, None),
                         syntax::Suffix::Question(_) => (0, Some(1)),
                         syntax::Suffix::Plus(_) => (1, None),
-                        syntax::Suffix::Repeat(repeat) => self.bounds(&repeat.bound)?,
+                        syntax::Suffix::Repeat(repeat) => self.bounds(&repeat.repeat_bound)?,
                     };
 
                     Ok(vec![self.atom_field(target, Some(bounds))?])
@@ -1854,7 +1858,7 @@ where
         atom: &syntax::ExprWithoutSuffix<I>,
         bounds: Option<(usize, Option<usize>)>,
     ) -> Result<Field, UnsynError> {
-        if let syntax::ExprWithoutSuffix::Reference(ident) = atom {
+        if let syntax::ExprWithoutSuffix::Ident(ident) = atom {
             let name = as_str(self.source, ident);
             let span = ident.to_span();
             let ty = item_name(name, span)?;
@@ -1931,7 +1935,7 @@ where
     /// count, counted here for the field it will be written into.
     fn class_of(&self, atom: &syntax::ExprWithoutSuffix<I>) -> Option<TokenStream> {
         match atom {
-            syntax::ExprWithoutSuffix::Tilde { operand, .. } => self.refused_class(operand),
+            syntax::ExprWithoutSuffix::NegatedSet { operand, .. } => self.refused_class(operand),
             atom => atom_arms(self.source, atom, self.denotations)
                 .as_deref()
                 .map(class_pred),
@@ -2276,7 +2280,7 @@ where
             return false;
         }
 
-        let Some(body) = self.file.items.iter().find_map(|item| match item {
+        let Some(body) = self.file.item.iter().find_map(|item| match item {
             syntax::Item::Stmt(stmt) => {
                 (external_key(as_str(self.source, &stmt.ident)) == *key).then_some(&stmt.expr)
             }
@@ -2292,8 +2296,8 @@ where
 
             match (elements.next(), elements.next()) {
                 (
-                    Some(syntax::ExprNoTopAlt::WithoutSuffix(
-                        syntax::ExprWithoutSuffix::Reference(ident),
+                    Some(syntax::ExprNoTopAlt::ExprWithoutSuffix(
+                        syntax::ExprWithoutSuffix::Ident(ident),
                     )),
                     None,
                 ) => self.eats_trivia(&external_key(as_str(self.source, ident)), seen),
@@ -2306,7 +2310,7 @@ where
     /// the trivia: every one but a repetition of a rule that reads the trivia
     /// itself.
     fn repetition_leads(&self, target: &syntax::ExprWithoutSuffix<I>) -> bool {
-        let syntax::ExprWithoutSuffix::Reference(ident) = target else {
+        let syntax::ExprWithoutSuffix::Ident(ident) = target else {
             return true;
         };
 
@@ -2444,12 +2448,12 @@ where
         operand: &syntax::ExprNoTopAlt<I>,
     ) -> Result<Vec<Field>, UnsynError> {
         let suffix = match operand {
-            syntax::ExprNoTopAlt::WithoutSuffix(atom) => return self.atom_fields(atom),
-            syntax::ExprNoTopAlt::WithSuffix(suffix) => suffix,
+            syntax::ExprNoTopAlt::ExprWithoutSuffix(atom) => return self.atom_fields(atom),
+            syntax::ExprNoTopAlt::ExprWithSuffix(suffix) => suffix,
         };
 
         match suffix {
-            syntax::ExprWithSuffix::Grouped { target, suffix, .. } => {
+            syntax::ExprWithSuffix::Suffixed { target, suffix, .. } => {
                 // A repetition repeats what its operand reads: the field of
                 // the operand wrapped in the shape that reads it the bound
                 // over. The mark itself is not data — unlike the three
@@ -2615,7 +2619,7 @@ where
         atom: &syntax::ExprWithoutSuffix<I>,
     ) -> Result<Field, UnsynError> {
         match atom {
-            syntax::ExprWithoutSuffix::Reference(ident) => {
+            syntax::ExprWithoutSuffix::Ident(ident) => {
                 let ty = self.reference_type(ident)?;
                 let name = as_str(self.source, ident);
 
@@ -2625,7 +2629,7 @@ where
                     attr: None,
                 })
             }
-            syntax::ExprWithoutSuffix::Str(lit) => {
+            syntax::ExprWithoutSuffix::LitStr(lit) => {
                 let chars = decode::literal_chars(lit);
 
                 match chars[..] {
@@ -2646,7 +2650,7 @@ where
                     }
                 }
             }
-            syntax::ExprWithoutSuffix::Unicode(lit) => {
+            syntax::ExprWithoutSuffix::LitUnicode(lit) => {
                 let c = self.code_of(lit)?;
 
                 Ok(Field {
@@ -2684,7 +2688,7 @@ where
                     attr: Some(field_combinator("next_if", &quote! { (#pred) })),
                 })
             }
-            syntax::ExprWithoutSuffix::Tilde { operand, .. } => {
+            syntax::ExprWithoutSuffix::NegatedSet { operand, .. } => {
                 // A field reads a refusal only where the refusal is one test
                 // of a character; what refuses an expression is statements.
                 let pred = self
@@ -2777,12 +2781,12 @@ where
         operand: &syntax::ExprNoTopAlt<I>,
     ) -> Result<Vec<TokenStream>, UnsynError> {
         let atom = match operand {
-            syntax::ExprNoTopAlt::WithoutSuffix(atom) => return self.atom_types(atom),
-            syntax::ExprNoTopAlt::WithSuffix(suffix) => suffix,
+            syntax::ExprNoTopAlt::ExprWithoutSuffix(atom) => return self.atom_types(atom),
+            syntax::ExprNoTopAlt::ExprWithSuffix(suffix) => suffix,
         };
 
         match atom {
-            syntax::ExprWithSuffix::Grouped { target, suffix, .. } => {
+            syntax::ExprWithSuffix::Suffixed { target, suffix, .. } => {
                 let bounds = match suffix {
                     syntax::Suffix::Star(_) => (0, None),
                     syntax::Suffix::Question(_) => (0, Some(1)),
@@ -2813,12 +2817,12 @@ where
         atom: &syntax::ExprWithoutSuffix<I>,
     ) -> Result<Vec<TokenStream>, UnsynError> {
         match atom {
-            syntax::ExprWithoutSuffix::Reference(ident) => Ok(vec![self.reference_type(ident)?]),
-            syntax::ExprWithoutSuffix::Str(lit) => match decode::literal_chars(lit)[..] {
+            syntax::ExprWithoutSuffix::Ident(ident) => Ok(vec![self.reference_type(ident)?]),
+            syntax::ExprWithoutSuffix::LitStr(lit) => match decode::literal_chars(lit)[..] {
                 [c] => Ok(vec![quote! { ::parserc::syntax::Char<I, #c> }]),
                 _ => Err(self.unsupported(lit.to_span())),
             },
-            syntax::ExprWithoutSuffix::Unicode(lit) => {
+            syntax::ExprWithoutSuffix::LitUnicode(lit) => {
                 let c = self.code_of(lit)?;
 
                 Ok(vec![quote! { ::parserc::syntax::Char<I, #c> }])
@@ -2972,15 +2976,15 @@ where
         }
 
         match first {
-            syntax::ExprNoTopAlt::WithoutSuffix(atom) => self.atom_yields_node(atom),
-            syntax::ExprNoTopAlt::WithSuffix(_) => false,
+            syntax::ExprNoTopAlt::ExprWithoutSuffix(atom) => self.atom_yields_node(atom),
+            syntax::ExprNoTopAlt::ExprWithSuffix(_) => false,
         }
     }
 
     /// Whether one operand answers with the node of a rule.
     fn atom_yields_node(&self, atom: &syntax::ExprWithoutSuffix<I>) -> bool {
         match atom {
-            syntax::ExprWithoutSuffix::Reference(ident) => self
+            syntax::ExprWithoutSuffix::Ident(ident) => self
                 .nodes
                 .contains(&external_key(as_str(self.source, ident))),
             // A group around one operand adds nothing to what that operand
@@ -3023,16 +3027,16 @@ where
     /// The code of one operand, with whatever the operand carries after it.
     fn code_of_operand(&mut self, operand: &syntax::ExprNoTopAlt<I>) -> Result<Code, UnsynError> {
         match operand {
-            syntax::ExprNoTopAlt::WithoutSuffix(atom) => self.code_of_atom(atom),
-            syntax::ExprNoTopAlt::WithSuffix(suffix) => self.code_of_suffix(suffix),
+            syntax::ExprNoTopAlt::ExprWithoutSuffix(atom) => self.code_of_atom(atom),
+            syntax::ExprNoTopAlt::ExprWithSuffix(suffix) => self.code_of_suffix(suffix),
         }
     }
 
     /// The code of an operand that stands alone.
     fn code_of_atom(&mut self, atom: &syntax::ExprWithoutSuffix<I>) -> Result<Code, UnsynError> {
         match atom {
-            syntax::ExprWithoutSuffix::Str(lit) => self.code_of_str(lit),
-            syntax::ExprWithoutSuffix::Unicode(lit) => {
+            syntax::ExprWithoutSuffix::LitStr(lit) => self.code_of_str(lit),
+            syntax::ExprWithoutSuffix::LitUnicode(lit) => {
                 // A code point is one item of the input, the same read a
                 // one-character string literal asks for.
                 let c = self.code_of(lit)?;
@@ -3042,7 +3046,7 @@ where
                     args: quote! { (#c) },
                 })
             }
-            syntax::ExprWithoutSuffix::Reference(ident) => Ok(Code::Expr(self.reference(ident)?)),
+            syntax::ExprWithoutSuffix::Ident(ident) => Ok(Code::Expr(self.reference(ident)?)),
             syntax::ExprWithoutSuffix::Call { ident: call, .. } => {
                 let name = as_str(self.source, call).to_owned();
 
@@ -3054,7 +3058,7 @@ where
             }
             syntax::ExprWithoutSuffix::Set(set) => self.code_of_set(set),
             syntax::ExprWithoutSuffix::Paren { expr: group, .. } => self.code_of_expr(group),
-            syntax::ExprWithoutSuffix::Tilde { operand, .. } => {
+            syntax::ExprWithoutSuffix::NegatedSet { operand, .. } => {
                 // What `~` asks is answered by the character here, and takes
                 // it: the refused operand is probed and must not begin what
                 // it matches, and the character after the refusal is taken
@@ -3153,12 +3157,12 @@ where
     /// The code of an operand that carries one of the suffixes.
     fn code_of_suffix(&mut self, suffix: &syntax::ExprWithSuffix<I>) -> Result<Code, UnsynError> {
         match suffix {
-            syntax::ExprWithSuffix::Grouped { target, suffix, .. } => {
+            syntax::ExprWithSuffix::Suffixed { target, suffix, .. } => {
                 let (at_least, at_most) = match suffix {
                     syntax::Suffix::Star(_) => (0, None),
                     syntax::Suffix::Question(_) => (0, Some(1)),
                     syntax::Suffix::Plus(_) => (1, None),
-                    syntax::Suffix::Repeat(repeat) => self.bounds(&repeat.bound)?,
+                    syntax::Suffix::Repeat(repeat) => self.bounds(&repeat.repeat_bound)?,
                 };
 
                 self.code_of_repetition(target, at_least, at_most)
@@ -3213,7 +3217,7 @@ where
         let class = match target {
             // A refusal is a class when what it refuses is one, and the class of
             // the refusal is the other half of the characters.
-            syntax::ExprWithoutSuffix::Tilde { operand, .. } => self.refused_class(operand),
+            syntax::ExprWithoutSuffix::NegatedSet { operand, .. } => self.refused_class(operand),
             atom => atom_arms(self.source, atom, self.denotations)
                 .as_deref()
                 .map(class_pred),
@@ -3283,7 +3287,7 @@ where
                 self.count_of(from)?,
                 to.as_ref().map(|(_, to)| self.count_of(to)).transpose()?,
             ),
-            syntax::RepeatBound::Count(count) => {
+            syntax::RepeatBound::LitDec(count) => {
                 let count = self.count_of(count)?;
                 (count, Some(count))
             }
@@ -3504,7 +3508,9 @@ where
     I: UnsynInput,
 {
     match operand {
-        syntax::ExprNoTopAlt::WithSuffix(syntax::ExprWithSuffix::Grouped { suffix, .. }) => {
+        syntax::ExprNoTopAlt::ExprWithSuffix(syntax::ExprWithSuffix::Suffixed {
+            suffix, ..
+        }) => {
             matches!(
                 suffix,
                 syntax::Suffix::Star(_) | syntax::Suffix::Question(_)
@@ -3867,7 +3873,7 @@ where
     let mut elements = read::elements(branch);
 
     let (
-        Some(syntax::ExprNoTopAlt::WithoutSuffix(syntax::ExprWithoutSuffix::Reference(ident))),
+        Some(syntax::ExprNoTopAlt::ExprWithoutSuffix(syntax::ExprWithoutSuffix::Ident(ident))),
         None,
     ) = (elements.next(), elements.next())
     else {
@@ -4356,9 +4362,9 @@ mod tests {
         let file = parse(source);
 
         let terminals = syntax::Crate {
-            inner_docs: Vec::new(),
-            items: file
-                .items
+            inner_doc: Vec::new(),
+            item: file
+                .item
                 .iter()
                 .filter(|item| matches!(item, syntax::Item::Stmt(stmt) if !matches!(read::decl(stmt), Decl::Syntax)))
                 .cloned()

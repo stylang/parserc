@@ -186,7 +186,7 @@ syntax_terminal!(
     /// `-`, which divides the two ends of a range.
     ///
     /// The form of a range written between two strings asks for this word by
-    /// `concat`, which is why [`Range::Str`] holds the bare text of a `-` rather
+    /// `concat`, which is why [`Range::StrRange`] holds the bare text of a `-` rather
     /// than a terminal of this shape: nothing may stand between a string, this
     /// `-` and the string after it.
     Minus, "-", PunctKind::Minus
@@ -268,9 +268,9 @@ where
     I: UnsynInput,
 {
     /// An operand carrying a suffix.
-    WithSuffix(ExprWithSuffix<I>),
+    ExprWithSuffix(ExprWithSuffix<I>),
     /// An operand that stands alone.
-    WithoutSuffix(ExprWithoutSuffix<I>),
+    ExprWithoutSuffix(ExprWithoutSuffix<I>),
 }
 
 // ---------------------------------------------------------------------------
@@ -334,7 +334,7 @@ where
     /// The punct and the operand are two operands of one sequence, so the run
     /// between them is the variant's own field: `'~' ( 'a' | 'b' )` is written
     /// with the space, and the tree has to keep it.
-    Tilde {
+    NegatedSet {
         /// The `~` punct.
         tilde: Tilde<I>,
         /// The run between the punct and the operand.
@@ -376,11 +376,11 @@ where
     /// values they denote rather than by how they are written.
     Set(Set<I>),
     /// A literal string, as in `'a'`.
-    Str(LitStr<I>),
+    LitStr(LitStr<I>),
     /// A literal code point, as in `U+0009`.
-    Unicode(LitUnicode<I>),
+    LitUnicode(LitUnicode<I>),
     /// A reference to another rule by name.
-    Reference(Ident<I>),
+    Ident(Ident<I>),
 }
 
 // ---------------------------------------------------------------------------
@@ -423,7 +423,7 @@ where
     I: UnsynInput,
 {
     /// The operand carries one of `*`, `?`, `+` or `{…}`.
-    Grouped {
+    Suffixed {
         /// The operand the operator applies to.
         target: ExprWithoutSuffix<I>,
         /// The run between the operand and its operator.
@@ -488,7 +488,7 @@ where
     /// The run the repetition reads after the `{`.
     pub s: Option<S<I>>,
     /// The bounds the braces hold.
-    pub bound: RepeatBound<I>,
+    pub repeat_bound: RepeatBound<I>,
     /// The run before the `}`.
     pub s2: Option<S<I>>,
     /// The `}` that closes the bound.
@@ -531,7 +531,7 @@ where
         Option<Led<I, Box<LitDec<I>>>>,
     ),
     /// `n`, exactly `n` times.
-    Count(
+    LitDec(
         /// The count.
         LitDec<I>,
     ),
@@ -554,7 +554,7 @@ where
     /// The rule asks for the dash of this form by `concat`, as it does for the
     /// form of two strings, so neither end of the dash holds trivia and the two
     /// variants are written the same way.
-    Unicode(
+    UnicodeRange(
         Box<LitUnicode<I>>,
         /// The `-` that divides the two ends, joined to both of them.
         #[parserc(crucial, keyword = "-", map_err = PunctKind::Minus.map())]
@@ -565,7 +565,7 @@ where
     ///
     /// The rule asks for the dash of this form by `concat`, so it holds no trivia
     /// and stands with nothing on either side of it.
-    Str(
+    StrRange(
         LitStr<I>,
         /// The `-` that divides the two ends, joined to both of them.
         #[parserc(crucial, keyword = "-", map_err = PunctKind::Minus.map())]
@@ -592,11 +592,11 @@ where
     /// The values between two ends.
     Range(Range<I>),
     /// A literal string, which denotes the characters it holds.
-    Str(LitStr<I>),
+    LitStr(LitStr<I>),
     /// A literal code point.
-    Unicode(LitUnicode<I>),
+    LitUnicode(LitUnicode<I>),
     /// A reference to a rule whose values are members here.
-    Reference(Ident<I>),
+    Ident(Ident<I>),
 }
 
 // ---------------------------------------------------------------------------
@@ -621,7 +621,7 @@ where
 {
     /// The word that says what kind of node is defined.
     #[parserc(crucial)]
-    pub keyword: LeadingKeywords<I>,
+    pub leading_keywords: LeadingKeywords<I>,
     /// The run between the word and the name, which neither of the two owns.
     pub s: Option<S<I>>,
     /// The name of the node.
@@ -658,9 +658,9 @@ where
     I: UnsynInput,
 {
     /// A `/**` form.
-    Block(super::lexer::OuterBlockDoc<I>),
+    OuterBlockDoc(super::lexer::OuterBlockDoc<I>),
     /// A `///` form.
-    Line(super::lexer::OuterLineDoc<I>),
+    OuterLineDoc(super::lexer::OuterLineDoc<I>),
 }
 
 /// A document that describes the file it is written in.
@@ -673,9 +673,9 @@ where
     I: UnsynInput,
 {
     /// A `/*!` form.
-    Block(super::lexer::InnerBlockDoc<I>),
+    InnerBlockDoc(super::lexer::InnerBlockDoc<I>),
     /// A `//!` form.
-    Line(super::lexer::InnerLineDoc<I>),
+    InnerLineDoc(super::lexer::InnerLineDoc<I>),
 }
 
 /// One item of a file: a document, a run of the trivia, or a definition.
@@ -713,13 +713,13 @@ where
     I: UnsynInput,
 {
     /// The documents that describe the file, each with the run before it.
-    pub inner_docs: Vec<Led<I, Box<InnerDoc<I>>>>,
+    pub inner_doc: Vec<Led<I, Box<InnerDoc<I>>>>,
     /// The items of the file, in the order they were written.
     ///
     /// The run between two definitions is itself an item — the `S` the rule
     /// `Item` lists — so the repetition carries no run of its own: a run
     /// laid before an item would starve the item meant to keep it.
-    pub items: Vec<Item<I>>,
+    pub item: Vec<Item<I>>,
 }
 
 #[cfg(test)]
@@ -786,19 +786,19 @@ mod tests {
     fn an_operand_is_read_with_or_without_its_suffix() {
         assert!(matches!(
             whole::<ExprNoTopAlt<_>>("'a'").unwrap(),
-            ExprNoTopAlt::WithoutSuffix(_)
+            ExprNoTopAlt::ExprWithoutSuffix(_)
         ));
         assert!(matches!(
             whole::<ExprNoTopAlt<_>>("'a'*").unwrap(),
-            ExprNoTopAlt::WithSuffix(ExprWithSuffix::Grouped { .. })
+            ExprNoTopAlt::ExprWithSuffix(ExprWithSuffix::Suffixed { .. })
         ));
         assert!(matches!(
             whole::<ExprNoTopAlt<_>>("A{1, 2}").unwrap(),
-            ExprNoTopAlt::WithSuffix(ExprWithSuffix::Grouped { .. })
+            ExprNoTopAlt::ExprWithSuffix(ExprWithSuffix::Suffixed { .. })
         ));
         assert!(matches!(
             whole::<ExprNoTopAlt<_>>("<XID_Start>").unwrap(),
-            ExprNoTopAlt::WithoutSuffix(ExprWithoutSuffix::Call { .. })
+            ExprNoTopAlt::ExprWithoutSuffix(ExprWithoutSuffix::Call { .. })
         ));
 
         // Only one suffix is allowed, so `A*?` is not a repetition of an option.
@@ -876,11 +876,11 @@ mod tests {
     fn the_two_operator_keywords_tell_their_forms_apart() {
         assert!(matches!(
             whole::<ExprNoTopAlt<_>>("'a' concat 'b'").unwrap(),
-            ExprNoTopAlt::WithSuffix(ExprWithSuffix::Concat { .. })
+            ExprNoTopAlt::ExprWithSuffix(ExprWithSuffix::Concat { .. })
         ));
         assert!(matches!(
             whole::<ExprNoTopAlt<_>>("A except Keywords").unwrap(),
-            ExprNoTopAlt::WithSuffix(ExprWithSuffix::Except { .. })
+            ExprNoTopAlt::ExprWithSuffix(ExprWithSuffix::Except { .. })
         ));
 
         // A suffix takes a single operand, so `A except B | C` is the alternative
@@ -891,13 +891,13 @@ mod tests {
 
     #[test]
     fn the_bounds_of_a_repetition_have_three_forms() {
-        use RepeatBound::{Count, RangeFrom, RangeTo};
+        use RepeatBound::{LitDec, RangeFrom, RangeTo};
 
         fn bounds(src: &str) -> RepeatBound<TokenStream<'_>> {
-            whole::<Repeat<_>>(src).unwrap().bound
+            whole::<Repeat<_>>(src).unwrap().repeat_bound
         }
 
-        assert!(matches!(bounds("{3}"), Count(_)));
+        assert!(matches!(bounds("{3}"), LitDec(_)));
         assert!(matches!(bounds("{1, 6}"), RangeFrom(_, _, _, Some((_, _)))));
         assert!(matches!(bounds("{1,}"), RangeFrom(_, _, _, None)));
         assert!(matches!(bounds("{,4}"), RangeTo(_, _, _, _)));
@@ -910,11 +910,11 @@ mod tests {
     fn a_range_holds_its_two_ends() {
         assert!(matches!(
             whole::<SetItem<_>>("U+0009-U+000D").unwrap(),
-            SetItem::Range(Range::Unicode(..))
+            SetItem::Range(Range::UnicodeRange(..))
         ));
         assert!(matches!(
             whole::<SetItem<_>>("'0'-'7'").unwrap(),
-            SetItem::Range(Range::Str(..))
+            SetItem::Range(Range::StrRange(..))
         ));
 
         // The `concat` of the rule leaves nothing between a string and its dash.
@@ -924,7 +924,7 @@ mod tests {
         // end of a range is on its own.
         assert!(matches!(
             whole::<SetItem<_>>("'a'").unwrap(),
-            SetItem::Str(_)
+            SetItem::LitStr(_)
         ));
     }
 
@@ -951,15 +951,15 @@ mod tests {
         // operand must not begin.
         assert!(matches!(
             whole::<ExprWithoutSuffix<_>>("~['a', 'b']"),
-            Ok(ExprWithoutSuffix::Tilde { .. })
+            Ok(ExprWithoutSuffix::NegatedSet { .. })
         ));
         assert!(matches!(
             whole::<ExprWithoutSuffix<_>>("~'a'"),
-            Ok(ExprWithoutSuffix::Tilde { .. })
+            Ok(ExprWithoutSuffix::NegatedSet { .. })
         ));
         assert!(matches!(
             whole::<ExprWithoutSuffix<_>>("~( 'a' | 'b' )"),
-            Ok(ExprWithoutSuffix::Tilde { .. })
+            Ok(ExprWithoutSuffix::NegatedSet { .. })
         ));
     }
 
@@ -969,7 +969,7 @@ mod tests {
         // written between them is a field of the variant and not a character
         // any terminal hides — the same shape the generated tree gives the rule.
         let negated = whole::<ExprWithoutSuffix<_>>("~  ['a']").unwrap();
-        let ExprWithoutSuffix::Tilde { tilde, s, operand } = negated else {
+        let ExprWithoutSuffix::NegatedSet { tilde, s, operand } = negated else {
             panic!("not a negation");
         };
 
@@ -979,7 +979,7 @@ mod tests {
 
         // Nothing between them leaves the field empty rather than misplaced.
         let tight = whole::<ExprWithoutSuffix<_>>("~['a']").unwrap();
-        let ExprWithoutSuffix::Tilde { s, .. } = tight else {
+        let ExprWithoutSuffix::NegatedSet { s, .. } = tight else {
             panic!("not a negation");
         };
         assert!(s.is_none());
@@ -990,7 +990,7 @@ mod tests {
         let source = "syntax Expr -> ExprNoTopAlt+ ( '|' ExprNoTopAlt+ )*;";
         let stmt = whole::<Stmt<_>>(source).unwrap();
 
-        assert_eq!(keyword_word(&stmt.keyword), "syntax");
+        assert_eq!(keyword_word(&stmt.leading_keywords), "syntax");
         assert_eq!(as_str(&TokenStream::from(source), &stmt.ident), "Expr");
         assert_eq!(stmt.to_span(), Span::Range(0..source.len()));
 
@@ -1047,16 +1047,16 @@ mod tests {
         let file =
             whole::<Crate<_>>(source).expect("a file of two definitions and the text around them");
 
-        assert_eq!(file.inner_docs.len(), 1);
+        assert_eq!(file.inner_doc.len(), 1);
         assert_eq!(
-            file.items
+            file.item
                 .iter()
                 .filter(|item| matches!(item, Item::Stmt(_)))
                 .count(),
             2
         );
         assert_eq!(
-            file.items
+            file.item
                 .iter()
                 .filter(|item| matches!(item, Item::S(_)))
                 .count(),
@@ -1075,14 +1075,14 @@ mod tests {
             covered = range.end;
         };
 
-        for (run, doc) in &file.inner_docs {
+        for (run, doc) in &file.inner_doc {
             if let Some(run) = run {
                 hold(run.to_span());
             }
             hold(doc.to_span());
         }
 
-        for item in &file.items {
+        for item in &file.item {
             match item {
                 Item::Stmt(stmt) => hold(stmt.to_span()),
                 Item::OuterDoc(doc) => hold(doc.to_span()),
@@ -1106,7 +1106,7 @@ mod tests {
         // the character itself stands where it was written: the rule for a
         // file lists items and nothing else, so whoever asks for the file
         // whole is the one that reports what is left.
-        assert_eq!(file.items.len(), 2);
+        assert_eq!(file.item.len(), 2);
         assert_eq!(input.to_span(), Span::Range(16..17));
 
         // Reading the same text whole is what refuses it.
@@ -1130,7 +1130,7 @@ mod tests {
             whole::<Crate<_>>(source).expect("unsyn.us should be a file of its own language");
 
         let statements = file
-            .items
+            .item
             .iter()
             .filter_map(|item| match item {
                 // Which word a definition opened with is the variant it landed
@@ -1169,7 +1169,7 @@ mod tests {
         // and a type of this crate are the same thing under the same name.
         let stream = TokenStream::from(source);
         let names = file
-            .items
+            .item
             .iter()
             .filter_map(|item| match item {
                 Item::Stmt(stmt) => Some(as_str(&stream, &stmt.ident).to_owned()),
@@ -1202,9 +1202,9 @@ mod tests {
         }
 
         // The file describes itself, so its own documents are inner ones.
-        assert_eq!(file.inner_docs.len(), 1);
+        assert_eq!(file.inner_doc.len(), 1);
         assert_eq!(
-            file.inner_docs[0].1.to_span(),
+            file.inner_doc[0].1.to_span(),
             Span::Range(0..21),
             "the document that opens the spec"
         );

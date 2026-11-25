@@ -229,9 +229,9 @@ where
     I: UnsynInput,
 {
     /// A name written raw, as `r#where`.
-    Raw(RawIdent<I>),
+    RawIdent(RawIdent<I>),
     /// A name that is no word of the language.
-    NonKeyword(NonKeywordIdent<I>),
+    NonKeywordIdent(NonKeywordIdent<I>),
 }
 
 // ---------------------------------------------------------------------------
@@ -248,7 +248,7 @@ where
     I: UnsynInput,
 {
     /// A word that opens a definition.
-    Leading(LeadingKeywords<I>),
+    LeadingKeywords(LeadingKeywords<I>),
     /// A word that joins two operands of a pattern.
     OperatorKeywords(OperatorKeywords<I>),
 }
@@ -1061,7 +1061,10 @@ mod tests {
         // the `r` of `r#type` and leave `#type` behind, and because the refusal
         // of `r#lexer` is fatal: read in the other order it would be the name
         // `r` that stands, and `r` is a name.
-        assert!(matches!(parse::<Ident<_>>("r#type"), Ok(Ident::Raw(_))));
+        assert!(matches!(
+            parse::<Ident<_>>("r#type"),
+            Ok(Ident::RawIdent(_))
+        ));
         assert!(
             matches!(
                 parse::<Ident<_>>("r#lexer"),
@@ -1071,7 +1074,7 @@ mod tests {
         );
         assert!(matches!(
             parse::<Ident<_>>("lexer2"),
-            Ok(Ident::NonKeyword(_))
+            Ok(Ident::NonKeywordIdent(_))
         ));
     }
 

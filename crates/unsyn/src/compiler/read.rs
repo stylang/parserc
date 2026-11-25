@@ -96,7 +96,7 @@ pub enum Decl {
 /// are the three alternatives of that rule.
 #[inline]
 pub fn decl<I: UnsynInput>(stmt: &Stmt<I>) -> Decl {
-    match stmt.keyword {
+    match stmt.leading_keywords {
         LeadingKeywords::Lexer(_) => Decl::Lexer,
         LeadingKeywords::Syntax(_) => Decl::Syntax,
         LeadingKeywords::Whitespace(_) => Decl::Whitespace,
