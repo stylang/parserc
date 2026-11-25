@@ -19,17 +19,13 @@ quote = { version = "^1", optional = true }
 walkdir = "2"
 syn = { version = "^2", features = ["full"] }
 
-# The crate has two phases, and they are the two features that say so:
-# `runtimes` is the side a generated grammar belongs to, `compiler` is the
-# DSL front end and the generator that writes one. Neither builds on the other:
-# the generator only writes the names of parserc items into the text it emits,
-# so a proc macro that produces a grammar leaves the runtime out of its own
-# tree, and a crate that only keeps a generated file needs no unsyn at all.
-# The defaults carry both because a test here compiles a generated file, which
-# needs a runtime to compile it against.
+# The crate holds one thing: the DSL front end and the generator that writes a
+# grammar for it. There is no runtime half to switch on, because a generated
+# file needs no unsyn at all — it names `parserc` items and nothing else, which
+# is what lets a proc macro emit a grammar without dragging this crate into the
+# build of whatever compiles the result.
 [features]
-default = ["serde", "compiler", "runtimes"]
-runtimes = []
+default = ["serde", "compiler"]
 # The bootstrap comparison: the crate's own analysis, compiled a second time
 # over the front end a build wrote. Kept off by default so that a plain
 # `cargo test` does not pay for it and so that the wiring stays visible as a

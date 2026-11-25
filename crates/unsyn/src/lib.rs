@@ -53,25 +53,26 @@
 //! crate's sources. The `compiler` module's documents go on from there to how
 //! each is implemented.
 //!
-//! # Two phases, two features
+//! # One job, one feature
 //!
-//! The crate does two jobs that have nothing to do with each other, and the
-//! features of `Cargo.toml` say so:
+//! The crate does one job, and the `compiler` feature says so: the DSL itself —
+//! the reader, the analyzer and the generator, in the stages its own module
+//! document lays out, over `quote` and `proc_macro2`.
 //!
-//! - `runtimes`, the [`runtimes`] module, is the side a grammar the generator
-//!   writes belongs to: what a generated file is *compiled against*, and
-//!   nothing else. It is deliberately not what a generated file calls: what a
-//!   `<NAME>` in a pattern reaches is the caller's link, and unsyn ships no
-//!   answer to it; where a word of the described language ends is the spec's
-//!   business, and unsyn assumes no boundary for it. A generated file today
-//!   asks only [`parserc`] — the character stream it reads, the combinators it
-//!   runs, and the [`Syntax`](parserc::syntax::Syntax) its nodes derive — so
-//!   this module holds no item that a generated file needs, and stays a place
-//!   for the answers a later phase of the language will want to ship without
-//!   the generator having to reach into `compiler` for them.
-//! - `compiler`, the same-named feature, is the DSL itself: the reader, the
-//!   analyzer and the generator, in the stages its own module document lays
-//!   out, over `quote` and `proc_macro2`.
+//! There is no second feature for a runtime, because there is no runtime to
+//! ship. Two facts about a generated file make that plain:
+//!
+//! - what a `<NAME>` in a pattern reaches is the caller's link, and unsyn ships
+//!   no answer to it; where a word of the described language ends is the spec's
+//!   business, and unsyn assumes no boundary for it.
+//! - a generated file today asks only [`parserc`] — the character stream it
+//!   reads, the combinators it runs, and the
+//!   [`Syntax`](parserc::syntax::Syntax) its nodes derive.
+//!
+//! A placeholder module for answers a later phase might want would hold nothing
+//! a generated file needs, and the generator must not reach into it either: what
+//! it emits is decided by the tree a spec compiles to and by what the caller
+//! configured, not by items unsyn happens to keep.
 //!
 //! The spec of the language, written in the language itself, lives in
 //! `unsyn.us` at the root of this crate, and `tests/unsyn_us.rs` runs the
@@ -97,6 +98,3 @@
 
 #[cfg(feature = "compiler")]
 pub mod compiler;
-
-#[cfg(feature = "runtimes")]
-pub mod runtimes;
