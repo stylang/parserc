@@ -476,6 +476,7 @@ where
 pub mod walk {
     use super::{lexer, syntax};
     use crate::compiler::input::UnsynInput;
+    use crate::compiler::read;
     use crate::compiler::visit::Visit;
 
     // -----------------------------------------------------------------------
@@ -567,9 +568,9 @@ pub mod walk {
         v: &mut V,
         node: &'ast syntax::Expr<I>,
     ) {
-        walk_one_or_more(v, &node.first);
+        walk_branch(v, &node.expr_no_top_alt);
 
-        for (s, or, s2, alternative) in &node.rest {
+        for (s, or, s2, alternative) in &node.f1 {
             if let Some(s) = s {
                 v.visit_s(s);
             }
@@ -580,7 +581,7 @@ pub mod walk {
                 v.visit_s(s);
             }
 
-            walk_one_or_more(v, alternative);
+            walk_branch(v, alternative);
         }
     }
 
@@ -722,19 +723,19 @@ pub mod walk {
         v: &mut V,
         node: &'ast syntax::Repeat<I>,
     ) {
-        v.visit_brace_start(&node.open);
+        v.visit_brace_start(&node.f1);
 
-        if let Some(s) = &node.s {
+        if let Some(s) = &node.f2 {
             v.visit_s(s);
         }
 
         v.visit_repeat_bound(&node.repeat_bound);
 
-        if let Some(s) = &node.s2 {
+        if let Some(s) = &node.f3 {
             v.visit_s(s);
         }
 
-        v.visit_brace_end(&node.close);
+        v.visit_brace_end(&node.f4);
     }
 
     pub fn walk_repeat_bound<'ast, I: UnsynInput, V: ?Sized + Visit<'ast, I>>(
@@ -838,18 +839,19 @@ pub mod walk {
     // The groups no production names
     // -----------------------------------------------------------------------
 
-    /// `X+` over the trivia of the language: the operand, then every operand the
-    /// text offers after it, each with the run that separates it.
+    /// `ExprNoTopAlt+`, the sequence one alternative is made of: the operand,
+    /// then every operand the text offers after it, each with the run that
+    /// separates it.
     ///
     /// The grammar repeats one kind of operand only, so this is the one helper for
     /// the shape rather than a helper per rule that uses it.
-    fn walk_one_or_more<'ast, I: UnsynInput, V: ?Sized + Visit<'ast, I>>(
+    fn walk_branch<'ast, I: UnsynInput, V: ?Sized + Visit<'ast, I>>(
         v: &mut V,
-        node: &'ast syntax::OneOrMore<I, syntax::ExprNoTopAlt<I>>,
+        node: &'ast read::Branch<I>,
     ) {
-        v.visit_expr_no_top_alt(&node.first);
+        v.visit_expr_no_top_alt(&node.0);
 
-        for (s, operand) in &node.rest {
+        for (s, operand) in &node.1 {
             if let Some(s) = s {
                 v.visit_s(s);
             }
@@ -863,9 +865,9 @@ pub mod walk {
         v: &mut V,
         node: &'ast syntax::Set<I>,
     ) {
-        v.visit_bracket_start(&node.open);
+        v.visit_bracket_start(&node.0);
 
-        for (s, item, s2, comma) in &node.items {
+        for (s, item, s2, comma) in &node.1 {
             if let Some(s) = s {
                 v.visit_s(s);
             }
@@ -879,7 +881,7 @@ pub mod walk {
             v.visit_comma(comma);
         }
 
-        if let Some((s, item)) = &node.tail {
+        if let Some((s, item)) = &node.2 {
             if let Some(s) = s {
                 v.visit_s(s);
             }
@@ -887,11 +889,11 @@ pub mod walk {
             v.visit_set_item(item);
         }
 
-        if let Some(s) = &node.s {
+        if let Some(s) = &node.3 {
             v.visit_s(s);
         }
 
-        v.visit_bracket_end(&node.close);
+        v.visit_bracket_end(&node.4);
     }
 
     /// `('*' | '?' | '+' | Repeat)`, the four quantity operators the production
@@ -1029,16 +1031,16 @@ pub mod walk {
         v: &mut V,
         node: &'ast lexer::InnerLineDoc<I>,
     ) {
-        v.visit_text(&node.open);
-        v.visit_text(&node.body);
+        v.visit_text(&node.0);
+        v.visit_text(&node.1);
     }
 
     pub fn walk_outer_line_doc<'ast, I: UnsynInput, V: ?Sized + Visit<'ast, I>>(
         v: &mut V,
         node: &'ast lexer::OuterLineDoc<I>,
     ) {
-        v.visit_text(&node.open);
-        v.visit_text(&node.body);
+        v.visit_text(&node.0);
+        v.visit_text(&node.1);
     }
 
     // The rules that are modelled as the shapes their right sides write are
@@ -1088,9 +1090,9 @@ pub mod walk {
         v: &mut V,
         node: &'ast lexer::LitStr<I>,
     ) {
-        v.visit_text(&node.open);
-        v.visit_text(&node.body);
-        v.visit_text(&node.close);
+        v.visit_text(&node.0);
+        v.visit_text(&node.1);
+        v.visit_text(&node.2);
     }
 
     pub fn walk_ascii_escape<'ast, I: UnsynInput, V: ?Sized + Visit<'ast, I>>(
@@ -1115,30 +1117,30 @@ pub mod walk {
         v: &mut V,
         node: &'ast lexer::UnicodeEscape<I>,
     ) {
-        v.visit_text(&node.marker);
+        v.visit_text(&node.f1);
 
-        for digit in &node.digits {
+        for digit in &node.hex_digit {
             v.visit_hex_digit(digit);
         }
 
-        v.visit_text(&node.close);
+        v.visit_text(&node.f2);
     }
 
     pub fn walk_lit_dec<'ast, I: UnsynInput, V: ?Sized + Visit<'ast, I>>(
         v: &mut V,
         node: &'ast lexer::LitDec<I>,
     ) {
-        v.visit_dec_digit(&node.head);
-        v.visit_text(&node.tail);
+        v.visit_dec_digit(&node.dec_digit);
+        v.visit_text(&node.f1);
     }
 
     pub fn walk_lit_unicode<'ast, I: UnsynInput, V: ?Sized + Visit<'ast, I>>(
         v: &mut V,
         node: &'ast lexer::LitUnicode<I>,
     ) {
-        v.visit_text(&node.prefix);
+        v.visit_text(&node.f1);
 
-        for digit in &node.digits {
+        for digit in &node.hex_digit {
             v.visit_hex_digit(digit);
         }
     }

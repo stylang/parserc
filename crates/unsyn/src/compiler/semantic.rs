@@ -186,7 +186,7 @@ fn writes_nothing<I: UnsynInput>(expr: &syntax::Expr<I>) -> bool {
 fn alt_writes_nothing<I: UnsynInput>(alt: &syntax::ExprNoTopAlt<I>) -> bool {
     match alt {
         syntax::ExprNoTopAlt::ExprWithoutSuffix(_) => false,
-        syntax::ExprNoTopAlt::ExprWithSuffix(with_suffix) => match with_suffix {
+        syntax::ExprNoTopAlt::ExprWithSuffix(with_suffix) => match &**with_suffix {
             syntax::ExprWithSuffix::Suffixed(part) => suffix_may_be_zero(&part.suffix),
             syntax::ExprWithSuffix::Concat { .. } | syntax::ExprWithSuffix::Except { .. } => false,
         },
@@ -222,13 +222,17 @@ fn bound_may_be_zero<I: UnsynInput>(bound: &syntax::RepeatBound<I>) -> bool {
 /// it names is, which is what lets the nothing a file writes travel from a
 /// definition to the names that stand for it.
 fn bare_name<'s, I: UnsynInput>(expr: &'s syntax::Expr<I>, source: &'s I) -> Option<&'s str> {
-    if !read::is_single(expr) || read::elements(&expr.first).nth(1).is_some() {
+    if !read::is_single(expr) || read::elements(&expr.expr_no_top_alt).nth(1).is_some() {
         return None;
     }
 
-    let syntax::ExprNoTopAlt::ExprWithoutSuffix(syntax::ExprWithoutSuffix::Ident(ident)) =
-        &expr.first.first
+    let Some(syntax::ExprNoTopAlt::ExprWithoutSuffix(operand)) =
+        read::elements(&expr.expr_no_top_alt).next()
     else {
+        return None;
+    };
+
+    let syntax::ExprWithoutSuffix::Ident(ident) = operand.as_ref() else {
         return None;
     };
 

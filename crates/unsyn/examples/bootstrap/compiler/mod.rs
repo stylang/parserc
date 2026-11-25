@@ -45,12 +45,21 @@ pub mod visit {
     pub use super::generated::*;
 }
 
-// The error and the decoding say nothing about which tree they were handed:
-// one compilation in the crate, the same types here and in the generated
-// file. The *stream* is different — the file writes the trait itself now, so
-// this slot names what it wrote, and the analysis recompiled here is written
-// against that same one trait. Copying `input` would have made a second.
-pub use ::unsyn::compiler::{decode, errors};
+// The reports say nothing about which tree they were handed, and must be
+// compiled exactly once: the stream the generated file names carries
+// `Error = ::unsyn::compiler::errors::UnsynError` written into it in absolute
+// path, so a second copy here would be a different enum that the generated
+// `UnsynInput` refuses to accept. `errors` therefore stays a re-export.
+//
+// The decoding is the other case. It names nodes of the front end — the literal
+// whose digits it reads — so a single compilation pins it to the hand tree and
+// every call the recompiled analysis and generation make of it mismatches, same
+// name and different owner. It is reached by path so it follows the slot, and it
+// names no error type at all, so no second enum comes of it.
+pub use ::unsyn::compiler::errors;
+
+#[path = "../../../src/compiler/decode.rs"]
+pub mod decode;
 
 /// The stream the generated file names: the trait it emitted, and its alias.
 pub mod input {

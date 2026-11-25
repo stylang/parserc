@@ -8,7 +8,7 @@
 //! is what lets a diagnostic point at the text it talks about.
 //!
 //! A group on the right side of a production is usually no node of its own, since
-//! nothing names it: `X+` is [`OneOrMore`], `X*` is a [`Vec`], `('a' 'b')` is a
+//! nothing names it: `X+` is [`Branch`], `X*` is a [`Vec`], `('a' 'b')` is a
 //! tuple, and `('a' ',')*` is [`SetMember`]. What earns a type is a name on the
 //! *left* side, and the code that reads a tree reads the names. The two
 //! exceptions are [`Set`] and [`RepeatBound`], which name a group only because a
@@ -192,33 +192,29 @@ syntax_terminal!(
     Minus, "-", PunctKind::Minus
 );
 
-/// `X+`, over the trivia of the language: one `X`, then every `X` the text offers
-/// after it, each with the run that separates it from the operand before.
+// ---------------------------------------------------------------------------
+// `syntax Expr -> ExprNoTopAlt+ ( '|' ExprNoTopAlt+ )*;`
+// ---------------------------------------------------------------------------
+
+/// The shape `ExprNoTopAlt+` writes: the operand every sequence must have, since
+/// `+` asks for at least one, then every operand the text offers after it, each
+/// with the run that separates it from the operand before.
 ///
 /// A sequence has no operator of its own, which is why the run between two of its
 /// operands is part of the tree: it is what tells them apart. The run before an
 /// operand that begins with one of its own — the match of a repetition, the
 /// element of an optional group — is that operand's field and not this one's,
-/// which is what leaves a field of `rest` `None`.
+/// which is what leaves a run `None`.
 ///
-/// This is the shape of a repetition and not a node of the grammar, which is why
-/// it is generic over the operand it repeats.
-#[derive(Debug, PartialEq, Eq, PartialOrd, Ord, Clone, Syntax)]
-#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
-pub struct OneOrMore<I, X>
-where
-    I: UnsynInput,
-    X: Syntax<I>,
-{
-    /// The operand every sequence must have, since `+` asks for at least one.
-    pub first: X,
-    /// The operands that follow it, each with the run before it.
-    pub rest: Vec<Led<I, X>>,
-}
-
-// ---------------------------------------------------------------------------
-// `syntax Expr -> ExprNoTopAlt+ ( '|' ExprNoTopAlt+ )*;`
-// ---------------------------------------------------------------------------
+/// This is a shape no production names, so the tuple the pattern is written as
+/// stands for it as it is, exactly as the generated code spells the same group.
+/// [`read::Branch`](super::read::Branch) names the same pair for the passes that
+/// read a tree, which is where the spelling has to be written out again: a build
+/// ships no name for a shape no rule named.
+pub type Branch<I> = (
+    Box<ExprNoTopAlt<I>>,
+    Vec<(Option<S<I>>, Box<ExprNoTopAlt<I>>)>,
+);
 
 /// The pattern a definition gives its node: alternatives joined by `|`, each of
 /// them a sequence of operands.
@@ -233,9 +229,9 @@ where
 {
     /// The first alternative, which is also the whole expression when no `|`
     /// follows it.
-    pub first: OneOrMore<I, ExprNoTopAlt<I>>,
+    pub expr_no_top_alt: Branch<I>,
     /// Every alternative after the first, with the `|` that introduced it.
-    pub rest: Vec<Alternative<I>>,
+    pub f1: Vec<Alternative<I>>,
 }
 
 /// The group `('|' ExprNoTopAlt+)` of the [`Expr`] rule, in the shape the
@@ -244,15 +240,9 @@ where
 ///
 /// A group of a right side names no node of the tree, so the tuple it is written
 /// as stands for it as it is.
-///
 /// The runs of trivia the sequence holds between its operands are fields of the
-/// tuple, as [`Led`] says for the one case a repetition has to name.
-pub type Alternative<I> = (
-    Option<S<I>>,
-    Or<I>,
-    Option<S<I>>,
-    OneOrMore<I, ExprNoTopAlt<I>>,
-);
+/// tuple, and the sequence itself is the pair [`Branch`] writes.
+pub type Alternative<I> = (Option<S<I>>, Or<I>, Option<S<I>>, Branch<I>);
 
 // ---------------------------------------------------------------------------
 // `syntax ExprNoTopAlt -> ExprWithSuffix | ExprWithoutSuffix;`
@@ -268,9 +258,16 @@ where
     I: UnsynInput,
 {
     /// An operand carrying a suffix.
-    ExprWithSuffix(ExprWithSuffix<I>),
+    ///
+    /// Boxed because the rule is on a containment cycle: `ExprNoTopAlt` reaches
+    /// `ExprWithSuffix`, which reaches `Suffixed`, `ExprWithoutSuffix`, `Paren`,
+    /// `Expr` and back here.
+    ExprWithSuffix(Box<ExprWithSuffix<I>>),
     /// An operand that stands alone.
-    ExprWithoutSuffix(ExprWithoutSuffix<I>),
+    ///
+    /// Boxed on the same cycle, and on one of its own besides: `NegatedSet` holds
+    /// an `ExprWithoutSuffix`.
+    ExprWithoutSuffix(Box<ExprWithoutSuffix<I>>),
 }
 
 // ---------------------------------------------------------------------------
@@ -299,21 +296,21 @@ pub type SetMember<I> = (Option<S<I>>, SetItem<I>, Option<S<I>>, Comma<I>);
 /// ways, as the values it denotes and as the one character `~` refuses.
 #[derive(Debug, PartialEq, Eq, PartialOrd, Ord, Clone, Syntax)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
-pub struct Set<I>
-where
-    I: UnsynInput,
-{
+pub struct Set<I>(
     /// The `[` that opens the set.
-    pub open: BracketStart<I>,
+    pub BracketStart<I>,
     /// The members each followed by a comma, with the runs about them.
-    pub items: Vec<SetMember<I>>,
-    /// The member after the last comma, when one is written.
-    pub tail: Option<Led<I, SetItem<I>>>,
+    pub Vec<SetMember<I>>,
+    /// The member after the last comma, when one is written — the pair the
+    /// production writes, kept bare as it writes it.
+    pub Option<(Option<S<I>>, SetItem<I>)>,
     /// The run before the closing bracket.
-    pub s: Option<S<I>>,
+    pub Option<S<I>>,
     /// The `]` that closes the set.
-    pub close: BracketEnd<I>,
-}
+    pub BracketEnd<I>,
+)
+where
+    I: UnsynInput;
 
 /// An operand that stands alone, with no suffix on it.
 #[derive(Debug, PartialEq, Eq, PartialOrd, Ord, Clone, Syntax)]
@@ -543,15 +540,15 @@ where
     I: UnsynInput,
 {
     /// The `{` that opens the bound.
-    pub open: BraceStart<I>,
+    pub f1: BraceStart<I>,
     /// The run the repetition reads after the `{`.
-    pub s: Option<S<I>>,
+    pub f2: Option<S<I>>,
     /// The bounds the braces hold.
     pub repeat_bound: RepeatBound<I>,
     /// The run before the `}`.
-    pub s2: Option<S<I>>,
+    pub f3: Option<S<I>>,
     /// The `}` that closes the bound.
-    pub close: BraceEnd<I>,
+    pub f4: BraceEnd<I>,
 }
 
 /// The bounds a [`Repeat`] is written with: `syntax RepeatBound -> ',' LitDec
@@ -812,7 +809,10 @@ where
     I: UnsynInput,
 {
     /// The documents that describe the file, each with the run before it.
-    pub inner_doc: Vec<Led<I, Box<InnerDoc<I>>>>,
+    ///
+    /// No box: `InnerDoc` reaches only its own documents, which never lead back
+    /// to a file, so the rule is off every containment cycle.
+    pub inner_doc: Vec<Led<I, InnerDoc<I>>>,
     /// The items of the file, in the order they were written.
     ///
     /// The run between two definitions is itself an item — the `S` the rule
@@ -889,15 +889,15 @@ mod tests {
         ));
         assert!(matches!(
             whole::<ExprNoTopAlt<_>>("'a'*").unwrap(),
-            ExprNoTopAlt::ExprWithSuffix(ExprWithSuffix::Suffixed(..))
+            ExprNoTopAlt::ExprWithSuffix(each) if matches!(&*each, ExprWithSuffix::Suffixed(..))
         ));
         assert!(matches!(
             whole::<ExprNoTopAlt<_>>("A{1, 2}").unwrap(),
-            ExprNoTopAlt::ExprWithSuffix(ExprWithSuffix::Suffixed(..))
+            ExprNoTopAlt::ExprWithSuffix(each) if matches!(&*each, ExprWithSuffix::Suffixed(..))
         ));
         assert!(matches!(
             whole::<ExprNoTopAlt<_>>("<XID_Start>").unwrap(),
-            ExprNoTopAlt::ExprWithoutSuffix(ExprWithoutSuffix::Call(..))
+            ExprNoTopAlt::ExprWithoutSuffix(each) if matches!(&*each, ExprWithoutSuffix::Call(..))
         ));
 
         // Only one suffix is allowed, so `A*?` is not a repetition of an option.
@@ -909,7 +909,7 @@ mod tests {
         let expr = whole::<Expr<_>>("'a' 'b'").unwrap();
 
         assert_eq!(read::branches(&expr).count(), 1);
-        let (gap, operand) = &expr.first.rest.first().unwrap();
+        let (gap, operand) = &expr.expr_no_top_alt.1.first().unwrap();
         // No operand owns a run, so the space between the two is the
         // sequence's own field.
         assert_eq!(gap.as_ref().unwrap().0.as_str(), " ");
@@ -917,8 +917,8 @@ mod tests {
 
         // Two runs between three operands, each where the sequence says.
         let expr = whole::<Expr<_>>("'a' 'b' 'c'").unwrap();
-        assert_eq!(expr.first.rest.len(), 2);
-        assert!(expr.first.rest.iter().all(|(gap, _)| gap.is_some()));
+        assert_eq!(expr.expr_no_top_alt.1.len(), 2);
+        assert!(expr.expr_no_top_alt.1.iter().all(|(gap, _)| gap.is_some()));
     }
 
     #[test]
@@ -926,7 +926,7 @@ mod tests {
         let expr = whole::<Expr<_>>("'a' | 'b' | 'c'").unwrap();
 
         assert_eq!(read::branches(&expr).count(), 3);
-        assert_eq!(read::elements(&expr.rest[0].3).count(), 1);
+        assert_eq!(read::elements(&expr.f1[0].3).count(), 1);
         assert!(!read::is_single(&expr));
 
         // A bar with nothing after it is not an alternative.
@@ -975,11 +975,13 @@ mod tests {
     fn the_two_operator_keywords_tell_their_forms_apart() {
         assert!(matches!(
             whole::<ExprNoTopAlt<_>>("'a' concat 'b'").unwrap(),
-            ExprNoTopAlt::ExprWithSuffix(ExprWithSuffix::Concat { .. })
+            ExprNoTopAlt::ExprWithSuffix(each)
+                if matches!(&*each, ExprWithSuffix::Concat { .. })
         ));
         assert!(matches!(
             whole::<ExprNoTopAlt<_>>("A except Keywords").unwrap(),
-            ExprNoTopAlt::ExprWithSuffix(ExprWithSuffix::Except { .. })
+            ExprNoTopAlt::ExprWithSuffix(each)
+                if matches!(&*each, ExprWithSuffix::Except { .. })
         ));
 
         // A suffix takes a single operand, so `A except B | C` is the alternative

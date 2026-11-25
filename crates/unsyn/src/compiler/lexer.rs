@@ -337,10 +337,10 @@ where
     I: UnsynInput,
 {
     /// The digit the number begins with.
-    pub head: DecDigit<I>,
+    pub dec_digit: DecDigit<I>,
     /// Every digit and separator after it, as one run.
     #[parserc(take_while = |c: char| matches!(c, '0'..='9' | '_'))]
-    pub tail: I,
+    pub f1: I,
 }
 
 // ---------------------------------------------------------------------------
@@ -363,10 +363,10 @@ where
 {
     /// The `U+` that opens the literal.
     #[parserc(keyword = "U+", map_err = SyntaxKind::Unicode.map())]
-    pub prefix: I,
+    pub f1: I,
     /// The four digits that spell the code point.
     #[parserc(read_lit_unicode_digits)]
-    pub digits: Vec<HexDigit<I>>,
+    pub hex_digit: Vec<HexDigit<I>>,
 }
 
 /// Reads the `HexDigit{4}` of [`LitUnicode`].
@@ -469,13 +469,13 @@ where
 {
     /// The `\u{` that opens the escape.
     #[parserc(keyword = "\\u{", map_err = SyntaxKind::UnicodeEscape.map())]
-    pub marker: I,
+    pub f1: I,
     /// The one to six digits the braces hold.
     #[parserc(read_escape_digits)]
-    pub digits: Vec<HexDigit<I>>,
+    pub hex_digit: Vec<HexDigit<I>>,
     /// The `}` that closes the escape.
     #[parserc(keyword = "}", map_err = PunctKind::BraceEnd.map())]
-    pub close: I,
+    pub f2: I,
 }
 
 /// Reads the `HexDigit{1, 6}` of [`UnicodeEscape`].
@@ -527,24 +527,23 @@ where
 /// [`decode`]: super::decode
 #[derive(Debug, PartialEq, Eq, PartialOrd, Ord, Clone, Syntax)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
-pub struct LitStr<I>
-where
-    I: UnsynInput,
-{
+pub struct LitStr<I>(
     /// The quote that opens the literal.
     #[parserc(keyword = "'", map_err = PunctKind::SingleQuote.map())]
-    pub open: I,
+    pub I,
     /// The body of the literal, pieces of plain text and escapes together.
     ///
     /// The repetition ends where no piece begins, which is the closing quote
     /// wherever one stands and whatever the text after the pieces otherwise
     /// is; the quote that has to come next says what was expected there.
     #[parserc(read_lit_str_body)]
-    pub body: I,
+    pub I,
     /// The quote that closes the literal.
     #[parserc(keyword = "'", map_err = PunctKind::SingleQuote.map())]
-    pub close: I,
-}
+    pub I,
+)
+where
+    I: UnsynInput;
 
 /// Reads the body of a string literal as one run of text.
 ///
@@ -594,19 +593,18 @@ fn stays_on_the_line(c: char) -> bool {
 /// A line document that describes the file it is written in.
 #[derive(Debug, PartialEq, Eq, PartialOrd, Ord, Clone, Syntax)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
-pub struct InnerLineDoc<I>
-where
-    I: UnsynInput,
-{
+pub struct InnerLineDoc<I>(
     /// The `//!` that opens the document.
     #[parserc(keyword = "//!", map_err = SyntaxKind::InnerLineDoc.map())]
-    pub open: I,
+    pub I,
     /// The text to the end of the line, which the set of the rule refuses to
     /// cross. The run is taken in one piece: that is what a repetition of one
     /// refused character arrives at, and nothing below it says more.
     #[parserc(take_while = stays_on_the_line)]
-    pub body: I,
-}
+    pub I,
+)
+where
+    I: UnsynInput;
 
 /// A line document that describes the definition after it.
 ///
@@ -616,20 +614,19 @@ where
 /// document is trivia and nothing asks it for its pieces.
 #[derive(Debug, PartialEq, Eq, PartialOrd, Ord, Clone, Syntax)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
-pub struct OuterLineDoc<I>
-where
-    I: UnsynInput,
-{
+pub struct OuterLineDoc<I>(
     /// The `///` that opens the document.
     #[parserc(keyword = "///", map_err = SyntaxKind::OuterLineDoc.map())]
-    pub open: I,
+    pub I,
     /// The body, empty when the rule's one optional group is not filled: the
     /// fourth `/` is refused by what the group asks first, which leaves the
     /// body unfilled, and what stands after the document is for the file to
     /// say.
     #[parserc(read_outer_line_doc_body)]
-    pub body: I,
-}
+    pub I,
+)
+where
+    I: UnsynInput;
 
 /// Reads the one optional group of [`OuterLineDoc`] as a run of text.
 ///

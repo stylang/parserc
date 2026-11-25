@@ -45,9 +45,9 @@ pub struct Body {
 /// `None` says the number is past what a count of repetitions can be kept to,
 /// which no reading of the digits can turn into a count.
 pub fn decimal<I: UnsynInput>(lit: &LitDec<I>) -> Option<u32> {
-    let mut digits = String::from(lit.head.0.as_str());
+    let mut digits = String::from(lit.dec_digit.0.as_str());
 
-    digits.extend(lit.tail.as_str().chars().filter(|c| *c != '_'));
+    digits.extend(lit.f1.as_str().chars().filter(|c| *c != '_'));
 
     digits.parse::<u32>().ok()
 }
@@ -58,7 +58,7 @@ pub fn decimal<I: UnsynInput>(lit: &LitDec<I>) -> Option<u32> {
 /// answer is whether the number of them is a character, which `D800` through
 /// `DFFF` are not.
 pub fn code_point<I: UnsynInput>(lit: &LitUnicode<I>) -> Option<char> {
-    let digits: String = lit.digits.iter().map(|digit| digit.0.as_str()).collect();
+    let digits: String = lit.hex_digit.iter().map(|digit| digit.0.as_str()).collect();
 
     u32::from_str_radix(&digits, 16)
         .ok()
@@ -72,7 +72,7 @@ pub fn code_point<I: UnsynInput>(lit: &LitUnicode<I>) -> Option<char> {
 /// read, and the offsets the refusals carry are the source's because the body
 /// says where in the source it began.
 pub fn literal<I: UnsynInput>(lit: &LitStr<I>) -> Body {
-    string_body(lit.body.as_str(), lit.body.start())
+    string_body(lit.1.as_str(), lit.1.start())
 }
 
 /// The characters a string literal spells.

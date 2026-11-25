@@ -20,24 +20,30 @@
 //! method of its own, and the analysis above it will read it exactly as this one
 //! does.
 
-use parserc::syntax::Syntax;
-
 use super::input::UnsynInput;
-use super::lexer::LeadingKeywords;
-use super::syntax::{Expr, ExprNoTopAlt, OneOrMore, Set, SetItem, Stmt};
+use super::lexer::{LeadingKeywords, S};
+use super::syntax::{Expr, ExprNoTopAlt, Set, SetItem, Stmt};
 
 // ---------------------------------------------------------------------------
 // The shapes a production writes
 // ---------------------------------------------------------------------------
 
-/// The operands of a `X+` sequence, in the order they were written.
+/// The pair `ExprNoTopAlt+` writes: the operand `+` asks for at least one of,
+/// then every operand the text offers after it, each with the run before it.
+///
+/// The same shape is [`crate::compiler::syntax::Branch`] in the hand tree; it is
+/// spelled out here rather than named from there because a build writes no type
+/// for a shape no rule named, and the passes below read whichever tree they are
+/// handed.
+pub type Branch<I> = (
+    Box<ExprNoTopAlt<I>>,
+    Vec<(Option<S<I>>, Box<ExprNoTopAlt<I>>)>,
+);
+
+/// The operands of one `ExprNoTopAlt+` sequence, in the order they were written.
 #[inline]
-pub fn elements<I, X>(run: &OneOrMore<I, X>) -> impl Iterator<Item = &X>
-where
-    I: UnsynInput,
-    X: Syntax<I>,
-{
-    std::iter::once(&run.first).chain(run.rest.iter().map(|(_, element)| element))
+pub fn elements<I: UnsynInput>(run: &Branch<I>) -> impl Iterator<Item = &ExprNoTopAlt<I>> {
+    std::iter::once(&*run.0).chain(run.1.iter().map(|(_, element)| &**element))
 }
 
 /// The alternatives of an expression, in the order they were written.
@@ -45,16 +51,14 @@ where
 /// The `|` that introduced an alternative is trivia of the tree rather than part
 /// of the alternative, so it is dropped here.
 #[inline]
-pub fn branches<'a, I: UnsynInput>(
-    expr: &'a Expr<I>,
-) -> impl Iterator<Item = &'a OneOrMore<I, ExprNoTopAlt<I>>> + 'a {
-    std::iter::once(&expr.first).chain(expr.rest.iter().map(|(_, _, _, branch)| branch))
+pub fn branches<'a, I: UnsynInput>(expr: &'a Expr<I>) -> impl Iterator<Item = &'a Branch<I>> + 'a {
+    std::iter::once(&expr.expr_no_top_alt).chain(expr.f1.iter().map(|(_, _, _, branch)| branch))
 }
 
 /// Whether the expression offers exactly one way of being read.
 #[inline]
 pub fn is_single<I: UnsynInput>(expr: &Expr<I>) -> bool {
-    expr.rest.is_empty()
+    expr.f1.is_empty()
 }
 
 /// The members of a set, in the order they were written.
@@ -64,10 +68,10 @@ pub fn is_single<I: UnsynInput>(expr: &Expr<I>) -> bool {
 /// member after it.
 #[inline]
 pub fn members<'a, I: UnsynInput>(set: &'a Set<I>) -> impl Iterator<Item = &'a SetItem<I>> + 'a {
-    set.items
+    set.1
         .iter()
         .map(|(_, item, _, _)| item)
-        .chain(set.tail.iter().map(|(_, item)| item))
+        .chain(set.2.iter().map(|(_, item)| item))
 }
 
 // ---------------------------------------------------------------------------

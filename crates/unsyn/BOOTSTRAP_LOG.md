@@ -512,6 +512,46 @@ because its generated half is now settled.
 - [ ] gates: `cargo check -p unsyn --features bootstrap --example bootstrap` —
       the count, staged down to **0**
 
+### Cycle-driven Box + the harness split — 74 → **29**
+
+Three changes, all of which the rules already decided:
+
+- `ExprNoTopAlt`'s two variants take `Box`, because the cycle is real:
+  `ExprNoTopAlt → ExprWithSuffix → Suffixed → ExprWithoutSuffix → Paren → Expr → ExprNoTopAlt`.
+- `Crate.inner_doc` **loses** a `Box`: `InnerDoc` reaches `BlockCommentOrDoc` and
+  stops, never back to `Crate`, so the hand tree had one the rule does not
+  license. The cycle test cuts both ways — it added two boxes above and removed
+  this one, which is the evidence it is being applied rather than grown.
+- `decode` became a `#[path]` recompile in the harness while `errors` stays a
+  re-export. Copying `errors` would mint a second `UnsynError`, but the generated
+  `UnsynInput` refers to `::unsyn::compiler::errors::UnsynError` by absolute
+  path, so a copied one would no longer satisfy its own bound. That asymmetry is
+  now written into the harness comment, correcting an earlier note there that
+  claimed `decode` named no front-end node — it reads `LitStr`/`LitDec`/
+  `LitUnicode`, so it does.
+
+**A gap this exposed, and it matters for S5.** `visit` in the harness is a
+*generated* slot — `pub mod visit { pub use super::generated::*; }` — so
+`src/compiler/visit.rs` is **never recompiled by bootstrap** and has never been
+measured by this scoreboard. Every shape fix made to the hand visitor in earlier
+rounds moved the count by nothing for that reason, and the claim "the two trees
+are one" currently covers the **nodes and the parsers but not the visitor**. S5
+must either compile `visit` too or say plainly that the visitor parity is
+unmeasured. Related: the generated visitor hands an anonymous punct field to
+`visit_text` while the hand `Visit` keeps a hook per punct, so the two visitors
+do not have the same method set.
+
+### The remaining 29, exactly
+
+| count | what |
+|---|---|
+| 26 | `Suffix::Star`/`Question`/`Plus` vs generated's fallback `F1`/`F2`/`F3` — **P5, held by your rule** |
+| 2 | `codegen.rs:723/726` `keyword.0.as_str()`: hand `Concat<I>`/`Except<I>` are newtypes with `.0`, generated writes bare `I` |
+| 1 | `Except.expr_without_suffix`: generated boxes it (`Except → ExprWithoutSuffix → Paren → Expr → ExprNoTopAlt → ExprWithSuffix → Except` is a cycle), hand is bare — the same rule as the two just added, simply not yet authorized |
+
+So after S4, the distance is **26 lines of P5 naming policy plus 3 mechanical
+items**, not 179 unknowns.
+
 ## Stage 5 — close the loop
 
 - [ ] the example asserts rather than prints: two generations equal, the spec

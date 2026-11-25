@@ -615,7 +615,7 @@ fn operand_refs<I>(
         syntax::ExprNoTopAlt::ExprWithoutSuffix(atom) => {
             atom_refs(source, atom, direct, src, syntaxes, edges)
         }
-        syntax::ExprNoTopAlt::ExprWithSuffix(suffix) => match suffix {
+        syntax::ExprNoTopAlt::ExprWithSuffix(suffix) => match &**suffix {
             syntax::ExprWithSuffix::Suffixed(part) => {
                 let target = &part.expr_without_suffix;
                 let suffix = &part.suffix;
@@ -713,14 +713,12 @@ pub(crate) fn external_key(name: &str) -> String {
 /// not, says no word at all. Anything else offers nothing, and `None` says so:
 /// the generator then calls the variant by its place, which is what
 /// [`variant_names`] asks about for the whole choice.
-pub(crate) fn variant_word<I>(
-    branch: &syntax::OneOrMore<I, syntax::ExprNoTopAlt<I>>,
-) -> Option<String>
+pub(crate) fn variant_word<I>(branch: &read::Branch<I>) -> Option<String>
 where
     I: UnsynInput,
 {
     read::elements(branch).find_map(|element| match element {
-        syntax::ExprNoTopAlt::ExprWithSuffix(suffix) => match suffix {
+        syntax::ExprNoTopAlt::ExprWithSuffix(suffix) => match &**suffix {
             syntax::ExprWithSuffix::Concat { f2: keyword, .. } => {
                 Some(keyword.0.as_str().to_owned())
             }
@@ -737,17 +735,19 @@ where
                 | syntax::Suffix::Repeat(_) => None,
             },
         },
-        syntax::ExprNoTopAlt::ExprWithoutSuffix(syntax::ExprWithoutSuffix::LitStr(lit)) => {
-            // The value the literal spells names the variant, not the quotes
-            // it was written between.
-            let text: String = decode::literal_chars(lit).into_iter().collect();
+        syntax::ExprNoTopAlt::ExprWithoutSuffix(each) => match &**each {
+            syntax::ExprWithoutSuffix::LitStr(lit) => {
+                // The value the literal spells names the variant, not the quotes
+                // it was written between.
+                let text: String = decode::literal_chars(lit).into_iter().collect();
 
-            text.chars()
-                .next()
-                .is_some_and(|c| c.is_alphabetic())
-                .then_some(text)
-        }
-        _ => None,
+                text.chars()
+                    .next()
+                    .is_some_and(|c| c.is_alphabetic())
+                    .then_some(text)
+            }
+            _ => None,
+        },
     })
 }
 
@@ -756,7 +756,7 @@ where
 /// An unnamed alternative is told at its own beginning rather than at the
 /// whole choice it sits in, because it is this alternative and no other that
 /// gives the variant nothing to be called.
-pub(crate) fn branch_head<I>(branch: &syntax::OneOrMore<I, syntax::ExprNoTopAlt<I>>) -> Span
+pub(crate) fn branch_head<I>(branch: &read::Branch<I>) -> Span
 where
     I: UnsynInput,
 {
@@ -985,7 +985,7 @@ where
 /// so `LitUnicode concat '-' concat LitUnicode` is a sequence of three however
 /// the tree holds it as one element — and a sequence is what earns a field
 /// apiece.
-fn operand_count<I>(branch: &syntax::OneOrMore<I, syntax::ExprNoTopAlt<I>>) -> usize
+fn operand_count<I>(branch: &read::Branch<I>) -> usize
 where
     I: UnsynInput,
 {
@@ -998,10 +998,13 @@ where
     I: UnsynInput,
 {
     match operand {
-        syntax::ExprNoTopAlt::ExprWithSuffix(syntax::ExprWithSuffix::Concat {
-            expr_no_top_alt: suffix,
-            ..
-        }) => 1 + operands_of(suffix),
+        syntax::ExprNoTopAlt::ExprWithSuffix(each) => match &**each {
+            syntax::ExprWithSuffix::Concat {
+                expr_no_top_alt: suffix,
+                ..
+            } => 1 + operands_of(suffix),
+            _ => 1,
+        },
         _ => 1,
     }
 }
@@ -1031,7 +1034,7 @@ where
 {
     match operand {
         syntax::ExprNoTopAlt::ExprWithoutSuffix(atom) => atom_forced(source, atom, forced),
-        syntax::ExprNoTopAlt::ExprWithSuffix(suffix) => match suffix {
+        syntax::ExprNoTopAlt::ExprWithSuffix(suffix) => match &**suffix {
             syntax::ExprWithSuffix::Suffixed(part) => {
                 atom_forced(source, &part.expr_without_suffix, forced)
             }
@@ -1086,9 +1089,9 @@ where
                 .next()
                 .is_some_and(|branch| read::elements(branch).count() == 1)
                 && read::is_single(group)
-                && let Some(syntax::ExprNoTopAlt::ExprWithoutSuffix(
-                    syntax::ExprWithoutSuffix::Ident(ident),
-                )) = read::elements(read::branches(group).next().expect("one element")).next()
+                && let Some(syntax::ExprNoTopAlt::ExprWithoutSuffix(each)) =
+                    read::elements(read::branches(group).next().expect("one element")).next()
+                && let syntax::ExprWithoutSuffix::Ident(ident) = &**each
             {
                 forced.insert(external_key(as_str(source, ident)));
             } else {
@@ -1786,10 +1789,7 @@ where
     /// to another rule, read as the node it names — every field is given one:
     /// the reference after the rule it reads, the rest as the count of anonymous
     /// fields.
-    fn fields_of(
-        &mut self,
-        branch: &syntax::OneOrMore<I, syntax::ExprNoTopAlt<I>>,
-    ) -> Result<Rule, UnsynError> {
+    fn fields_of(&mut self, branch: &read::Branch<I>) -> Result<Rule, UnsynError> {
         let fields = self.fields_from(branch)?;
         let fields = self.finish_fields(fields);
 
@@ -1800,10 +1800,7 @@ where
     }
 
     /// The fields of a sequence of operands, before any of them is named.
-    fn fields_from(
-        &mut self,
-        branch: &syntax::OneOrMore<I, syntax::ExprNoTopAlt<I>>,
-    ) -> Result<Vec<Field>, UnsynError> {
+    fn fields_from(&mut self, branch: &read::Branch<I>) -> Result<Vec<Field>, UnsynError> {
         let mut fields = Vec::new();
 
         for element in read::elements(branch) {
@@ -1836,7 +1833,7 @@ where
     fn field_of(&mut self, operand: &syntax::ExprNoTopAlt<I>) -> Result<Vec<Field>, UnsynError> {
         match operand {
             syntax::ExprNoTopAlt::ExprWithoutSuffix(atom) => Ok(vec![self.atom_field(atom, None)?]),
-            syntax::ExprNoTopAlt::ExprWithSuffix(suffix) => match suffix {
+            syntax::ExprNoTopAlt::ExprWithSuffix(suffix) => match &**suffix {
                 syntax::ExprWithSuffix::Suffixed(part) => {
                     let target = &part.expr_without_suffix;
                     let suffix = &part.suffix;
@@ -2278,10 +2275,7 @@ where
     /// the trivia between two of them — unless the operand that follows is a
     /// repetition that opens every match, the first included, with the run,
     /// which then says the boundary on its own.
-    fn branch_fields(
-        &mut self,
-        branch: &syntax::OneOrMore<I, syntax::ExprNoTopAlt<I>>,
-    ) -> Result<Vec<Field>, UnsynError> {
+    fn branch_fields(&mut self, branch: &read::Branch<I>) -> Result<Vec<Field>, UnsynError> {
         let mut fields = Vec::new();
         let mut first = true;
 
@@ -2329,12 +2323,12 @@ where
             let mut elements = read::elements(branch);
 
             match (elements.next(), elements.next()) {
-                (
-                    Some(syntax::ExprNoTopAlt::ExprWithoutSuffix(
-                        syntax::ExprWithoutSuffix::Ident(ident),
-                    )),
-                    None,
-                ) => self.eats_trivia(&external_key(as_str(self.source, ident)), seen),
+                (Some(syntax::ExprNoTopAlt::ExprWithoutSuffix(each)), None) => match &**each {
+                    syntax::ExprWithoutSuffix::Ident(ident) => {
+                        self.eats_trivia(&external_key(as_str(self.source, ident)), seen)
+                    }
+                    _ => false,
+                },
                 _ => false,
             }
         })
@@ -2486,7 +2480,7 @@ where
             syntax::ExprNoTopAlt::ExprWithSuffix(suffix) => suffix,
         };
 
-        match suffix {
+        match &**suffix {
             syntax::ExprWithSuffix::Suffixed(part) => {
                 let target = &part.expr_without_suffix;
                 let suffix = &part.suffix;
@@ -2794,10 +2788,7 @@ where
     /// The type one alternative of a group reads: the tuple its operands read
     /// in order, with the runs of the trivia between them — or, where the
     /// alternative is one operand of one type, that type itself.
-    fn branch_type(
-        &mut self,
-        branch: &syntax::OneOrMore<I, syntax::ExprNoTopAlt<I>>,
-    ) -> Result<TokenStream, UnsynError> {
+    fn branch_type(&mut self, branch: &read::Branch<I>) -> Result<TokenStream, UnsynError> {
         let mut types = Vec::new();
         let mut first = true;
 
@@ -2831,7 +2822,7 @@ where
             syntax::ExprNoTopAlt::ExprWithSuffix(suffix) => suffix,
         };
 
-        match atom {
+        match &**atom {
             syntax::ExprWithSuffix::Suffixed(part) => {
                 let target = &part.expr_without_suffix;
                 let suffix = &part.suffix;
@@ -3018,7 +3009,7 @@ where
     /// keeps the text those operands took, and so is a suffixed operand and a
     /// joined one; the only answer that is a node is a name read on its own,
     /// bare or behind a group that holds nothing else.
-    fn branch_yields_node(&self, branch: &syntax::OneOrMore<I, syntax::ExprNoTopAlt<I>>) -> bool {
+    fn branch_yields_node(&self, branch: &read::Branch<I>) -> bool {
         let mut elements = read::elements(branch);
         let Some(first) = elements.next() else {
             return false;
@@ -3054,10 +3045,7 @@ where
     }
 
     /// The code of one alternative: the operands of it, one after the other.
-    fn code_of_branch(
-        &mut self,
-        branch: &syntax::OneOrMore<I, syntax::ExprNoTopAlt<I>>,
-    ) -> Result<Code, UnsynError> {
+    fn code_of_branch(&mut self, branch: &read::Branch<I>) -> Result<Code, UnsynError> {
         let mut elements = read::elements(branch);
         let Some(first) = elements.next() else {
             return Ok(Code::Stmt(Vec::new()));
@@ -3578,12 +3566,13 @@ where
     I: UnsynInput,
 {
     match operand {
-        syntax::ExprNoTopAlt::ExprWithSuffix(syntax::ExprWithSuffix::Suffixed(part)) => {
-            matches!(
+        syntax::ExprNoTopAlt::ExprWithSuffix(each) => match &**each {
+            syntax::ExprWithSuffix::Suffixed(part) => matches!(
                 &part.suffix,
                 syntax::Suffix::Star(_) | syntax::Suffix::Question(_)
-            )
-        }
+            ),
+            _ => false,
+        },
         _ => false,
     }
 }
@@ -3932,19 +3921,19 @@ fn tuple_of(fields: &[Field]) -> bool {
 
 /// The one name an alternative that is nothing but a name holds, which is the
 /// variant the enum of a choice wears after it.
-fn one_reference<I>(
-    branch: &syntax::OneOrMore<I, syntax::ExprNoTopAlt<I>>,
-) -> Option<&lexer::Ident<I>>
+fn one_reference<I>(branch: &read::Branch<I>) -> Option<&lexer::Ident<I>>
 where
     I: UnsynInput,
 {
     let mut elements = read::elements(branch);
 
-    let (
-        Some(syntax::ExprNoTopAlt::ExprWithoutSuffix(syntax::ExprWithoutSuffix::Ident(ident))),
-        None,
-    ) = (elements.next(), elements.next())
+    let (Some(syntax::ExprNoTopAlt::ExprWithoutSuffix(each)), None) =
+        (elements.next(), elements.next())
     else {
+        return None;
+    };
+
+    let syntax::ExprWithoutSuffix::Ident(ident) = &**each else {
         return None;
     };
 
