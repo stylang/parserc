@@ -1051,7 +1051,7 @@ where
                 f4: tokens,
                 ..
             } => {
-                if let syntax::ExprWithoutSuffix::Ident(ident) = target {
+                if let syntax::ExprWithoutSuffix::Ident(ident) = &**target {
                     forced.insert(external_key(as_str(source, ident)));
                 }
 

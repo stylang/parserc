@@ -469,7 +469,10 @@ where
     /// ended.
     Concat {
         /// What is joined to the operand after the keyword.
-        expr_without_suffix: ExprWithoutSuffix<I>,
+        ///
+        /// Boxed: this operand is on the containment cycle
+        /// `ExprWithoutSuffix → Paren → Expr → ExprNoTopAlt → ExprWithSuffix → here`.
+        expr_without_suffix: Box<ExprWithoutSuffix<I>>,
         /// The run between the operand and the keyword.
         f1: Option<S<I>>,
         /// The keyword, which keeps no run of its own.
@@ -488,7 +491,9 @@ where
     /// therefore a name of its own, although `lexer` fits the head of it.
     Except {
         /// What the operand after the keyword is taken out of.
-        expr_without_suffix: ExprWithoutSuffix<I>,
+        ///
+        /// Boxed on the same cycle as the form above.
+        expr_without_suffix: Box<ExprWithoutSuffix<I>>,
         /// The run between the operand and the keyword.
         f1: Option<S<I>>,
         /// The keyword, which keeps no run of its own.
@@ -497,7 +502,10 @@ where
         /// The run between the keyword and the operand taken out.
         f3: Option<S<I>>,
         /// The operand to take out, which cannot itself carry a suffix.
-        f4: ExprWithoutSuffix<I>,
+        ///
+        /// Boxed on the same cycle: it is an `ExprWithoutSuffix` held inside
+        /// `ExprWithSuffix`.
+        f4: Box<ExprWithoutSuffix<I>>,
     },
 }
 

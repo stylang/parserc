@@ -40,10 +40,13 @@ pub mod syntax {
     pub use super::generated::*;
 }
 
-/// The descents of the visitor the generated file ships.
-pub mod visit {
-    pub use super::generated::*;
-}
+/// The descents of the visitor, over the nodes this harness names.
+///
+/// Reached by path like `read`/`semantic`/`codegen`: the walk names a node of
+/// the front end at every step, so one compilation in the crate would pin it to
+/// the hand tree and its shape differences would never be measured here.
+#[path = "../../../src/compiler/visit.rs"]
+pub mod visit;
 
 // The reports say nothing about which tree they were handed, and must be
 // compiled exactly once: the stream the generated file names carries

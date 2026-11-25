@@ -440,6 +440,57 @@ once and on purpose, not to slip in while renaming.
 | `OneOrMore` absent from generated | 11 | a decision |
 | `Expr::first`/`rest`, `Set::items`/`tail` | 7 | named struct → tuple (README §11) |
 
+### Field-level Box, and putting `visit` back into the measurement — 29 → **87**
+
+Two things happened, and the second one made the number **worse on purpose**.
+
+**A. The three unreported boxes were still wrong.** Generated carries four
+field-level boxes inside `ExprWithSuffix` (`Concat.expr_without_suffix`,
+`Concat.expr_no_top_alt`, `Except.expr_without_suffix`, `Except.f4`); the hand tree
+had one. Only **one** of the missing three produced an error, because `&Box<T>`
+coerces at an argument position — so reading the scoreboard alone would have left
+three real shape differences in place. Filling them moved 29 → 28: nearly nothing,
+and correct anyway. **"No error" is not "no difference"** — the scoreboard is a
+floor on the gap, never a ceiling on it.
+
+**B. `visit` was never being compiled, and fixing that costs 59 errors.**
+`pub mod visit { pub use super::generated::*; }` is a *generated* slot, so
+`src/compiler/visit.rs` was never recompiled against the generated tree. Pointing
+it at the source the way `read`/`semantic`/`codegen` are pointed — no change to
+`visit.rs` itself, byte-for-byte identical afterwards — took 28 → 87. All 59 new
+errors were already sitting in that file. Two consequences to carry forward:
+
+- Every earlier round's claim that visitor fixes "didn't move the count" was
+  **unmeasurable**, not harmless. Node and parser parity was measured; visitor
+  parity never was.
+- The biggest new class (40) is a genuine design fork, not a naming detail: the
+  hand tree makes every punctuation terminal a named newtype
+  (`Tilde<I>`, `Lt<I>`, …19 of them) with its own `visit_*`/`walk_*` hook, while
+  the generated tree writes them as anonymous `Char<I, '~'>` and routes them
+  straight to `visit_text` with no type and no hook. Same tree, two opposite
+  conventions. This needs a ruling, not a sweep.
+
+### A second unlicensed Box, found and left standing
+
+Generated has `Stmt { …, pub expr: Expr<I>, … }` — **bare**. The hand tree has
+`Box<Expr<I>>`, and `Expr` cannot reach `Stmt`, so it is on no cycle: same
+finding as `Crate.inner_doc` last round, and the same rule that licensed five
+boxes also forbids this one. Left in place because it was not in this round's
+authorization, and it currently reports nothing (coercion again). Along with it:
+generated names `Stmt`'s trivia and puncts `f1`…`f6` where the hand tree uses
+`s`/`s1`/`arrow`/`semi`.
+
+### The remaining 87, by kind (measured)
+
+| count | kind | status |
+|---|---|---|
+| 29 | `Suffix::Star`/`Question`/`Plus` vs `F1`/`F2`/`F3` | **P5, held** |
+| 6 | `AsciiEscape` named variants vs `F2`…`F6` | **P5, held** (only visible now) |
+| 40 | punctuation newtype + hook vs anonymous `Char<I,c>` | **needs a ruling** |
+| 6 | `Stmt` field names `s/s1/arrow/semi` → `f1`…`f6` | §11 decides; do next |
+| 4 | `RawIdent.sigil/.name`, `BlockComment`/`BlockCommentOrDoc` named-vs-tuple | §11 decides |
+| 2 | `Concat<I>`/`Except<I>` newtype `.0` vs bare `I` | part of the 40 |
+
 ### Still open, carried forward
 
 - [ ] **`OneOrMore` (11 errors, needs a call):** the hand tree has
