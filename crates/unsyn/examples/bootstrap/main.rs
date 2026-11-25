@@ -9,15 +9,31 @@
 //! read the same text to the same spans, which a behaviour can share while its
 //! types differ.
 //!
-//! This binary is behind the `bootstrap` feature and does not compile today.
-//! That is not an accident of scheduling: the compiler's errors are the list of
-//! what a build must learn to write, and [`BOOTSTRAP_LOG.md`](../../BOOTSTRAP_LOG.md)
-//! counts them down stage by stage.
+//! This binary is behind the `bootstrap` feature; `required-features` means an
+//! explicit `--example bootstrap` without it errors rather than silently doing
+//! nothing, though a bulk `--all-targets` will still skip it.
 //!
 //! ```text
-//! cargo check -p unsyn --features bootstrap --example bootstrap   # the distance
-//! cargo run   -p unsyn --features bootstrap --example bootstrap   # the loop, once it builds
+//! cargo run   -p unsyn --features bootstrap --example bootstrap   # the loop
+//! cargo check -p unsyn --features bootstrap --example bootstrap   # it compiles
 //! ```
+//!
+//! # Why this target allows `dead_code`
+//!
+//! The point of the harness is to compile the crate's own `codegen`, `visit`,
+//! `read` and `decode` a second time over a *different* front end, reached by
+//! `#[path]`. That copies their public surface into a binary: the `Builder`
+//! configuration methods, and every `walk_*` the visitor ships, are reachable
+//! from outside the library but have no caller in this one program. rustc then
+//! calls them dead.
+//!
+//! Nothing is being hidden. The lint fires because of where the code was
+//! compiled, not because the API is unused — the same items are live in the lib
+//! and are exercised by `src/`'s own tests and by `two_trees.rs`. The generated
+//! file carries the same allowance in its own header for the same reason: a
+//! build writes every rule's node and descent whether or not one particular
+//! program asks for them.
+#![allow(dead_code)]
 
 /// The scan the generated file reaches for as `crate::scan_ident_or_keyword`.
 /// `<IdentOrKeyword>` is an external, and a generated file's externals are the

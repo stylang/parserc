@@ -31,9 +31,14 @@ syn = { version = "^2", features = ["full"] }
 default = ["serde", "compiler", "runtimes"]
 runtimes = []
 # The bootstrap comparison: the crate's own analysis, compiled a second time
-# over the front end a build wrote. Inert by default because the loop is the
-# work in BOOTSTRAP_LOG.md and does not close yet; `--all-targets` must stay
-# green while the distance is being counted down.
+# over the front end a build wrote. Kept off by default so that a plain
+# `cargo test` does not pay for it and so that the wiring stays visible as a
+# choice; the loop itself closes — `cargo run -p unsyn --features bootstrap
+# --example bootstrap` reads `unsyn.us` with the parser a build wrote for it,
+# runs the crate's analysis over that tree, and asserts the code it writes back
+# is the code it read. No `cfg` appears in `semantic.rs`, `codegen.rs` or
+# `read.rs`: which front end they were given is decided only by what this
+# example wires by path, and by the names the `Builder` is configured with.
 bootstrap = ["compiler"]
 compiler = ["dep:proc-macro2", "dep:quote", "dep:thiserror", "dep:unicode-ident", "parserc/syntax"]
 serde = ["dep:serde", "parserc/serde"]
