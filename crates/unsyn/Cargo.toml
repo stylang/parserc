@@ -8,48 +8,44 @@ repository = "https://github.com/stylang/stylang/crates/unsyn"
 version.workspace = true
 
 [dependencies]
-unicode-ident = { version = "1.0.22", optional = true }
-parserc = { path = "../parserc", version = "^0.13", default-features = false, features = ["input"] }
+unicode-ident = "1.0.22"
+parserc = { path = "../parserc", version = "^0.13", default-features = false, features = ["input", "syntax"] }
 serde = { version = "1.0.228", optional = true }
-thiserror = { version = "2.0.17", optional = true }
-proc-macro2 = { version = "^1", optional = true }
-quote = { version = "^1", optional = true }
+thiserror = "2.0.17"
+proc-macro2 = "^1"
+quote = "^1"
 
 [dev-dependencies]
 walkdir = "2"
 syn = { version = "^2", features = ["full"] }
 
-# The crate holds one thing: the DSL front end and the generator that writes a
-# grammar for it. There is no runtime half to switch on, because a generated
-# file needs no unsyn at all — it names `parserc` items and nothing else, which
-# is what lets a proc macro emit a grammar without dragging this crate into the
-# build of whatever compiles the result.
+# The crate is the build phase: the DSL front end and the generator that writes
+# a grammar from it. There is nothing to switch off, because a generated file
+# needs no unsyn at all — it names `parserc` items and nothing else, which is
+# what lets a proc macro emit a grammar without dragging this crate into the
+# tree of whatever compiles the result. `serde` is the only real choice left.
 [features]
-default = ["serde", "compiler"]
+default = ["serde"]
+serde = ["dep:serde", "parserc/serde"]
 # The bootstrap comparison: the crate's own analysis, compiled a second time
 # over the front end a build wrote. Kept off by default so that a plain
-# `cargo test` does not pay for it and so that the wiring stays visible as a
-# choice; the loop itself closes — `cargo run -p unsyn --features bootstrap
-# --example bootstrap` reads `unsyn.us` with the parser a build wrote for it,
-# runs the crate's analysis over that tree, and asserts the code it writes back
-# is the code it read. No `cfg` appears in `semantic.rs`, `codegen.rs` or
-# `read.rs`: which front end they were given is decided only by what this
-# example wires by path, and by the names the `Builder` is configured with.
-bootstrap = ["compiler"]
-compiler = ["dep:proc-macro2", "dep:quote", "dep:thiserror", "dep:unicode-ident", "parserc/syntax"]
-serde = ["dep:serde", "parserc/serde"]
+# `cargo test` does not pay for it; the loop itself closes — `cargo run -p unsyn
+# --features bootstrap --example bootstrap` reads `unsyn.us` with the parser a
+# build wrote for it, runs the analysis over that tree, and asserts the code it
+# writes back is the code it read. No `cfg` appears in `semantic.rs`,
+# `codegen.rs` or `read.rs`: which front end they were given is decided only by
+# what this example wires by path, and by the names the `Builder` is given.
+bootstrap = []
 
-# The generated file is the code of a spec that calls two externals, and only the
-# generator writes it; without the feature there is nothing to check.
+# The generated file is the code of a spec that calls an external, and only the
+# generator writes it.
 [[test]]
 name = "unsyn_us"
-required-features = ["compiler"]
 
 # The two trees are the hand parser and the generated parser over one spec, and
-# the generated half is code only the compiler feature writes.
+# the generated half is code only the generator writes.
 [[test]]
 name = "two_trees"
-required-features = ["compiler"]
 
 # The fixed point, and the compiler's own list of what a build must still learn
 # to write. See `examples/bootstrap/main.rs`.

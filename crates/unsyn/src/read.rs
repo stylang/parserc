@@ -1,6 +1,6 @@
 //! Reading a tree that a build wrote.
 //!
-//! [`lexer`](crate::compiler::lexer) and [`syntax`](crate::compiler::syntax) hold
+//! [`lexer`](crate::lexer) and [`syntax`](crate::syntax) hold
 //! the tree and nothing else: types, their fields, and the parsers the derive
 //! builds from them. No `impl` block of ours stands beside those types, because
 //! [`unsyn`](crate) is a generator for *any* language and can not know what a
@@ -31,7 +31,7 @@ use super::syntax::{Expr, ExprNoTopAlt, Set, SetItem, Stmt};
 /// The pair `ExprNoTopAlt+` writes: the operand `+` asks for at least one of,
 /// then every operand the text offers after it, each with the run before it.
 ///
-/// The same shape is [`crate::compiler::syntax::Branch`] in the hand tree; it is
+/// The same shape is [`crate::syntax::Branch`] in the hand tree; it is
 /// spelled out here rather than named from there because a build writes no type
 /// for a shape no rule named, and the passes below read whichever tree they are
 /// handed.

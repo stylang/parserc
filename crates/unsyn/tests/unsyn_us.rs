@@ -14,14 +14,14 @@
 //! Only the terminals are in it. A `syntax` production makes a node of the tree
 //! rather than a run of the text, and no code is written for such a node yet, so a
 //! build of the whole spec is refused rather than half-written; see the
-//! [module documentation](unsyn::compiler::codegen) of the generator.
+//! [module documentation](unsyn::codegen) of the generator.
 
 use std::path::Path;
 use std::str::FromStr;
 
-use parserc::{ToSpan, syntax::SyntaxInput};
+use parserc::ToSpan;
 use quote::ToTokens;
-use unsyn::compiler::{codegen::Builder, input::TokenStream, semantic, syntax};
+use unsyn::{codegen::Builder, input::TokenStream, semantic, syntax};
 
 /// The code of the spec, kept beside this test so that it is compiled with it.
 #[path = "generated/unsyn_us.rs"]
@@ -45,23 +45,16 @@ pub use scan::scan_ident_or_keyword;
 fn code_of_the_spec() -> String {
     let source = include_str!("../unsyn.us");
 
-    let whole = TokenStream::from(source);
-
-    let mut input = TokenStream::from(source);
-    let file = input
-        .parse::<syntax::Crate<_>>()
-        .expect("unsyn.us should be a file of the language");
-
-    let report = semantic::analyze(&whole, &file);
-    assert!(report.errors.is_empty(), "unsyn.us: {:#?}", report.errors);
-
-    let mut builder = Builder::new(&whole, &file);
-    builder.external(
-        "IdentOrKeyword",
-        proc_macro2::TokenStream::from_str("crate::scan_ident_or_keyword").unwrap(),
-    );
-
-    builder
+    // Reading the spec is the builder's own work now: the stream, the tree and
+    // the analysis all happen inside `from_source`.
+    Builder::from_source(source)
+        .expect("unsyn.us should be a file of the language")
+        // `IdentOrKeyword` is the name a file of this language asks its caller
+        // for, and a build answers it with the scan above.
+        .external(
+            "IdentOrKeyword",
+            proc_macro2::TokenStream::from_str("crate::scan_ident_or_keyword").unwrap(),
+        )
         .build()
         .expect("unsyn.us should be generated whole")
         .to_string()
@@ -177,7 +170,7 @@ mod and_it_reads {
         AsStr,
         syntax::{Syntax, SyntaxInput},
     };
-    use unsyn::compiler::errors::UnsynError;
+    use unsyn::errors::UnsynError;
 
     /// Reads the node `T` from the start of `source`.
     fn parse<'a, T>(source: &'a str) -> Result<T, UnsynError>
@@ -337,7 +330,7 @@ mod and_it_reads_this_crate {
     };
 
     use super::generated::{Ident, LitStr, TokenStream};
-    use unsyn::compiler::errors::UnsynError;
+    use unsyn::errors::UnsynError;
 
     /// Reads the node `T` from the start of `source`, over the stream the
     /// generated front end names — which is the same concrete stream this
@@ -388,8 +381,8 @@ fn the_generated_parser_reads_the_spec_it_was_generated_from() {
     use crate::generated::{
         Crate as GeneratedCrate, Item as GeneratedItem, TokenStream as GeneratedStream,
     };
-    use unsyn::compiler::input::TokenStream as UnsynStream;
-    use unsyn::compiler::{syntax, syntax::Item};
+    use unsyn::input::TokenStream as UnsynStream;
+    use unsyn::{syntax, syntax::Item};
 
     const SOURCE: &str = include_str!("../unsyn.us");
 
@@ -415,7 +408,7 @@ fn the_generated_parser_reads_the_spec_it_was_generated_from() {
 
     // The generated `Crate` is the struct its pattern writes: two repeated
     // operands, each called by the rule it holds.
-    let defined = |name: &unsyn::compiler::lexer::Ident<UnsynStream<'_>>| name.to_span();
+    let defined = |name: &unsyn::lexer::Ident<UnsynStream<'_>>| name.to_span();
 
     let hand_names: Vec<_> = hand
         .item
@@ -501,11 +494,10 @@ fn a_build_aimed_at_another_crate_names_that_crate() {
     let report = semantic::analyze(&whole, &file);
     assert!(report.errors.is_empty(), "{SOURCE}: {:#?}", report.errors);
 
-    let mut builder = Builder::new(&whole, &file);
-    builder.input_name("GrammarInput");
-    builder.input_at(Syntax::from_str("::other::GrammarInput").unwrap());
-
-    let code = builder
+    let code = Builder::from_source(SOURCE)
+        .expect("a file of the language")
+        .input_name("GrammarInput")
+        .input_at(Syntax::from_str("::other::GrammarInput").unwrap())
         .build()
         .expect("the file should be generated")
         .to_string();

@@ -44,7 +44,61 @@ mod scan;
 
 pub use scan::scan_ident_or_keyword;
 
-mod compiler;
+// The pipeline below is declared at this crate's **root**, not under a
+// `compiler` module, because the library's modules live at its root too: the
+// sources reached by path say `crate::input` and `crate::lexer`, and those
+// resolve here only if this harness gives them the same depth they have there.
+// Mirroring `src/` means mirroring its shape, not merely its file names.
+
+/// The nodes, the parsers and the visitor a build wrote for `unsyn.us`.
+///
+/// One file, because a build writes one file. The slots below are what let that
+/// one file stand in for the parts the hand front end was cut into.
+#[path = "../../tests/generated/unsyn_us.rs"]
+pub mod generated;
+
+/// A terminal, in the generated telling. The split of terminals from nodes
+/// carries nothing a tree can tell; the hand file is cut that way, so the
+/// slots are cut that way.
+pub mod lexer {
+    pub use crate::generated::*;
+}
+
+/// A node of the tree, in the same telling.
+pub mod syntax {
+    pub use crate::generated::*;
+}
+
+/// The stream the generated file names: the trait it emitted, and its alias.
+pub mod input {
+    pub use crate::generated::*;
+}
+
+/// The reports say nothing about which tree they were handed, and must be
+/// compiled exactly once: the stream the generated file names carries
+/// `Error = ::unsyn::errors::UnsynError` written into it in absolute path, so a
+/// second copy here would be a different enum that the generated `UnsynInput`
+/// refuses to accept. `errors` therefore stays a re-export.
+pub use ::unsyn::errors;
+
+/// The three phases that name nodes of the front end are compiled again here,
+/// so that `crate::syntax` and `crate::lexer` inside them mean the tree under
+/// test rather than the hand one. The same is true of `visit`, whose every walk
+/// names a node, and of `decode`, which names the literal whose digits it reads.
+#[path = "../../src/read.rs"]
+pub mod read;
+
+#[path = "../../src/semantic.rs"]
+pub mod semantic;
+
+#[path = "../../src/codegen.rs"]
+pub mod codegen;
+
+#[path = "../../src/visit.rs"]
+pub mod visit;
+
+#[path = "../../src/decode.rs"]
+pub mod decode;
 
 /// The spec, in the language it describes.
 const SPEC: &str = include_str!("../../unsyn.us");
@@ -53,15 +107,15 @@ const SPEC: &str = include_str!("../../unsyn.us");
 const KEPT: &str = include_str!("../../tests/generated/unsyn_us.rs");
 
 fn main() {
-    use compiler::codegen::Builder;
-    use compiler::semantic::analyze;
-    use compiler::syntax::Crate;
+    use codegen::Builder;
     use parserc::{Input, syntax::SyntaxInput as _};
     use quote::ToTokens as _;
+    use semantic::analyze;
+    use syntax::Crate;
 
     // The first half: the parser a build wrote, on the file that made it. This
     // half already holds — it is what `unsyn_us.rs` proves today.
-    let mut input = parserc::chars::TokenStream::<compiler::errors::UnsynError>::from(SPEC);
+    let mut input = parserc::chars::TokenStream::<errors::UnsynError>::from(SPEC);
 
     let tree = input
         .parse::<Crate<_>>()
@@ -71,7 +125,7 @@ fn main() {
 
     // The second half: the analysis and the generation, handed that tree and
     // nothing else — no re-parsing, no conversion, no switch in either file.
-    let whole = parserc::chars::TokenStream::<compiler::errors::UnsynError>::from(SPEC);
+    let whole = parserc::chars::TokenStream::<errors::UnsynError>::from(SPEC);
 
     let report = analyze(&whole, &tree);
     assert!(
@@ -79,13 +133,13 @@ fn main() {
         "the spec, read by its own parser, denotes nothing: {report:#?}"
     );
 
-    let mut builder = Builder::new(&whole, &tree);
-    builder.external(
-        "IdentOrKeyword",
-        quote::quote! { crate::scan_ident_or_keyword },
-    );
-
-    let code = builder
+    // A build holds what it generates from, so this hands over a copy and keeps
+    // the tree it parsed for the checks above.
+    let code = Builder::new(whole.clone(), tree.clone())
+        .external(
+            "IdentOrKeyword",
+            quote::quote! { crate::scan_ident_or_keyword },
+        )
         .build()
         .expect("the spec, read by its own parser, builds");
 

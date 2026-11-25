@@ -197,12 +197,12 @@ use super::read::Decl;
 ///
 /// The file is held as the tree [`analyze`](super::semantic::analyze) was run
 /// over, so that a refusal can point at the text it was written in.
-pub struct Builder<'a, I>
+pub struct Builder<I>
 where
     I: UnsynInput,
 {
-    source: &'a I,
-    file: &'a syntax::Crate<I>,
+    source: I,
+    file: syntax::Crate<I>,
     external: HashMap<String, TokenStream>,
     /// The name the generated code gives its stream, which is the trait a rule
     /// is written against.
@@ -228,7 +228,7 @@ where
     input_path: Option<TokenStream>,
 }
 
-impl<'a, I> Builder<'a, I>
+impl<I> Builder<I>
 where
     I: UnsynInput,
 {
@@ -241,7 +241,7 @@ where
     /// has to come from a stream that reaches across both — and the only such
     /// stream is the whole one the file came from.
     #[inline]
-    pub fn new(source: &'a I, file: &'a syntax::Crate<I>) -> Self {
+    pub fn new(source: I, file: syntax::Crate<I>) -> Self {
         Self {
             source,
             file,
@@ -254,7 +254,7 @@ where
             // build writing the trait the crate ships.
             input_bounds: INPUT_BOUNDS.iter().map(|bound| bound.to_string()).collect(),
             error_name: String::from("UnsynError"),
-            errors_at: quote! { ::unsyn::compiler::errors },
+            errors_at: quote! { ::unsyn::errors },
             input_path: None,
         }
     }
@@ -266,7 +266,7 @@ where
     /// unconfigured build writes a file that the crate it came from compiles. A
     /// language of its own names the trait of its own input, and says so here.
     #[inline]
-    pub fn input_name(&mut self, name: &str) -> &mut Self {
+    pub fn input_name(mut self, name: &str) -> Self {
         self.input_name = name.to_owned();
         self
     }
@@ -274,7 +274,7 @@ where
     /// Says where the input trait is found, as a path the file imports rather
     /// than writes. By default there is none: a build emits the trait itself.
     #[inline]
-    pub fn input_at<P>(&mut self, path: P) -> &mut Self
+    pub fn input_at<P>(mut self, path: P) -> Self
     where
         P: ToTokens,
     {
@@ -290,7 +290,7 @@ where
     /// what no code answers — are the DSL's own rules, which no target grammar
     /// states, so they are carried from `path` rather than invented.
     #[inline]
-    pub fn error_at<P>(&mut self, name: &str, path: P) -> &mut Self
+    pub fn error_at<P>(mut self, name: &str, path: P) -> Self
     where
         P: ToTokens,
     {
@@ -305,7 +305,7 @@ where
     /// [`input_at`](Self::input_at) instead imports a trait already
     /// written, and then none of these are emitted.
     #[inline]
-    pub fn input_bound(&mut self, bound: &str) -> &mut Self {
+    pub fn input_bound(mut self, bound: &str) -> Self {
         self.input_bounds.push(bound.to_owned());
         self
     }
@@ -322,7 +322,7 @@ where
     /// The name is the one the file writes, and a name written raw and the same
     /// name written plain are one external: `r#gen` and `gen` bind together.
     #[inline]
-    pub fn external<P>(&mut self, name: &str, parser: P) -> &mut Self
+    pub fn external<P>(mut self, name: &str, parser: P) -> Self
     where
         P: ToTokens,
     {
@@ -344,15 +344,15 @@ where
     /// precondition is a file the analyzer found nothing in; a rule that reaches a
     /// name the file never declares, for instance, is refused there and not here,
     /// and the code written for it then names a type that is not.
-    pub fn build(&self) -> Result<TokenStream, UnsynError> {
-        let denotations = denotations(self.source, self.file);
-        let nodes = node_rules(self.source, self.file);
-        let trivia = trivia_rule(self.source, self.file);
-        let cyclic = cyclic_syntax_refs(self.source, self.file);
+    pub fn build(self) -> Result<TokenStream, UnsynError> {
+        let denotations = denotations(&self.source, &self.file);
+        let nodes = node_rules(&self.source, &self.file);
+        let trivia = trivia_rule(&self.source, &self.file);
+        let cyclic = cyclic_syntax_refs(&self.source, &self.file);
 
         let mut generator = Generator {
-            source: self.source,
-            file: self.file,
+            source: &self.source,
+            file: &self.file,
             external: &self.external,
             denotations: &denotations,
             nodes: &nodes,
@@ -391,6 +391,39 @@ where
         );
 
         Ok(quote! { #(#prelude)* #items #visit })
+    }
+}
+
+impl<'a> Builder<super::input::TokenStream<'a>> {
+    /// Prepares to generate the code of the spec written in `source`.
+    ///
+    /// This is the entry a build script wants: it takes the text of a `.us`
+    /// file and does the whole reading itself — the stream, the tree, and the
+    /// analysis the generator insists on — so the caller chains straight into
+    /// the configuration and asks for code. What it does *not* do is touch the
+    /// filesystem or emit `cargo:` instructions: reading a path and declaring
+    /// which files should retrigger a build belong to the build script that
+    /// calls this, which is the only place that knows them.
+    ///
+    /// # Errors
+    ///
+    /// The first error of reading or analyzing the file — text that is not a
+    /// file of the language, or a rule that denotes nothing. A lint is not an
+    /// error and does not refuse a build.
+    pub fn from_source(source: &'a str) -> Result<Self, UnsynError> {
+        use parserc::syntax::SyntaxInput as _;
+
+        let whole = super::input::TokenStream::from(source);
+        let mut scan = super::input::TokenStream::from(source);
+
+        let file = scan.parse::<syntax::Crate<_>>()?;
+
+        let report = super::semantic::analyze(&whole, &file);
+        if let Some(error) = report.errors.into_iter().next() {
+            return Err(error);
+        }
+
+        Ok(Self::new(whole, file))
     }
 }
 
@@ -4271,9 +4304,9 @@ mod tests {
     use parserc::{Input, syntax::SyntaxInput};
 
     use super::*;
-    use crate::compiler::errors::{LintKind, SemanticsKind};
-    use crate::compiler::input::TokenStream as Spec;
-    use crate::compiler::semantic;
+    use crate::errors::{LintKind, SemanticsKind};
+    use crate::input::TokenStream as Spec;
+    use crate::semantic;
 
     /// `source` as the whole file the tests here are written against.
     ///
@@ -4323,7 +4356,7 @@ mod tests {
     ///
     /// Unlike [`parse`], this does not insist the analysis found nothing: a
     /// probe of what a file earns in warnings needs the report, not an assertion.
-    fn analyzed(source: &str) -> crate::compiler::errors::Diagnostics {
+    fn analyzed(source: &str) -> crate::errors::Diagnostics {
         let source = whole(source);
         let whole = Spec::from(source);
         let tree = {
@@ -4339,31 +4372,27 @@ mod tests {
 
     /// The builder a file of the tests is built with: every external a file of
     /// the DSL reaches for, bound to what reads it here.
-    fn builder<'a>(
-        source: &'a Spec<'a>,
-        file: &'a syntax::Crate<Spec<'a>>,
-    ) -> Builder<'a, Spec<'a>> {
-        let mut builder = Builder::new(source, file);
-
-        builder.external(
-            "XID_Start",
-            quote! { ::parserc::next_if(::unicode_ident::is_xid_start) },
-        );
-        builder.external(
-            "XID_Continue",
-            quote! { ::parserc::next_if(::unicode_ident::is_xid_continue) },
-        );
-        builder.external(
-            "IdentOrKeyword",
-            quote! {
-                ::parserc::take_while_with(1.., |c: char| {
-                    ::unicode_ident::is_xid_continue(c) || ::unicode_ident::is_xid_start(c)
-                        || c == '_'
-                })
-            },
-        );
-
-        builder
+    fn builder<'a>(source: &Spec<'a>, file: &syntax::Crate<Spec<'a>>) -> Builder<Spec<'a>> {
+        // A build holds what it generates from, so the test hands over copies
+        // of a stream and a tree it keeps using itself.
+        Builder::new(source.clone(), file.clone())
+            .external(
+                "XID_Start",
+                quote! { ::parserc::next_if(::unicode_ident::is_xid_start) },
+            )
+            .external(
+                "XID_Continue",
+                quote! { ::parserc::next_if(::unicode_ident::is_xid_continue) },
+            )
+            .external(
+                "IdentOrKeyword",
+                quote! {
+                    ::parserc::take_while_with(1.., |c: char| {
+                        ::unicode_ident::is_xid_continue(c) || ::unicode_ident::is_xid_start(c)
+                            || c == '_'
+                    })
+                },
+            )
     }
 
     /// The code the file is written as, with what the builder was given.
@@ -4606,7 +4635,9 @@ mod tests {
         let source = whole("lexer A -> <NoSuchCombinator>;");
         let whole = Spec::from(source);
         let file = parse(source);
-        let error = Builder::new(&whole, &file).build().unwrap_err();
+        let error = Builder::new(whole.clone(), file.clone())
+            .build()
+            .unwrap_err();
 
         assert!(
             matches!(
@@ -4860,7 +4891,9 @@ mod tests {
         let source = whole("whitespace W -> <XID_Start>;");
         let whole = Spec::from(source);
         let file = parse(source);
-        let error = Builder::new(&whole, &file).build().unwrap_err();
+        let error = Builder::new(whole.clone(), file.clone())
+            .build()
+            .unwrap_err();
 
         assert!(matches!(
             error,
@@ -4877,7 +4910,9 @@ mod tests {
         let source = whole("lexer A -> 'a'; syntax B -> A{2};");
         let whole = Spec::from(source);
         let file = parse(source);
-        let error = Builder::new(&whole, &file).build().unwrap_err();
+        let error = Builder::new(whole.clone(), file.clone())
+            .build()
+            .unwrap_err();
 
         assert!(
             matches!(
@@ -4894,7 +4929,7 @@ mod tests {
         let source = whole("lexer _ -> 'a';");
         let whole = Spec::from(source);
         let file = parse(source);
-        let error = Builder::new(&whole, &file).build();
+        let error = Builder::new(whole.clone(), file.clone()).build();
         assert!(matches!(
             error,
             Err(UnsynError::Build(BuildKind::Name, span)) if span == Span::Range(6..7)
@@ -5048,7 +5083,7 @@ mod tests {
 
     #[test]
     fn the_code_of_a_file_of_the_language_is_well_formed_rust() {
-        let soup = terminals(include_str!("../../unsyn.us"));
+        let soup = terminals(include_str!("../unsyn.us"));
 
         let file = syn::parse_str::<syn::File>(&soup)
             .unwrap_or_else(|error| panic!("the generated code does not parse: {error}"));

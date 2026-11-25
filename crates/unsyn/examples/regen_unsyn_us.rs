@@ -18,7 +18,7 @@ use std::path::Path;
 use std::str::FromStr;
 
 use parserc::syntax::SyntaxInput;
-use unsyn::compiler::{codegen::Builder, input::TokenStream, semantic, syntax};
+use unsyn::{codegen::Builder, input::TokenStream, semantic, syntax};
 
 /// The header of the kept file: the document lines and the `#![allow(..)]` list
 /// that opens the file, up to and including the line that closes the list.
@@ -51,13 +51,11 @@ fn main() {
         report.lints
     );
 
-    let mut builder = Builder::new(&whole, &file);
-    builder.external(
-        "IdentOrKeyword",
-        proc_macro2::TokenStream::from_str("crate::scan_ident_or_keyword").unwrap(),
-    );
-
-    let code = builder
+    let code = Builder::new(whole.clone(), file.clone())
+        .external(
+            "IdentOrKeyword",
+            proc_macro2::TokenStream::from_str("crate::scan_ident_or_keyword").unwrap(),
+        )
         .build()
         .expect("unsyn.us should be generated whole")
         .to_string();

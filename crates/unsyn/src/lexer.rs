@@ -43,8 +43,8 @@ use parserc::syntax::Syntax;
 use parserc::{ControlFlow, Input, Kind, Parser, ToSpan, keyword, next, next_if, take_while};
 use unicode_ident::{is_xid_continue, is_xid_start};
 
-use crate::compiler::errors::{KeywordKind, PunctKind, SemanticsKind, SyntaxKind, UnsynError};
-use crate::compiler::input::UnsynInput;
+use crate::errors::{KeywordKind, PunctKind, SemanticsKind, SyntaxKind, UnsynError};
+use crate::input::UnsynInput;
 
 // ---------------------------------------------------------------------------
 // `whitespace S -> [ U+0009-U+000D, U+0020, U+0085, U+00A0, U+1680,`
@@ -1007,7 +1007,7 @@ mod tests {
     use parserc::{AsStr, Span, syntax::SyntaxInput};
 
     use super::*;
-    use crate::compiler::input::TokenStream;
+    use crate::input::TokenStream;
     use parserc::as_str;
 
     /// Parses `source` as the node `T`.

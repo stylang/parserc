@@ -36,8 +36,8 @@
 
 use parserc::syntax::{Char, Syntax};
 
-use crate::compiler::lexer::{Ident, LeadingKeywords, LitDec, LitStr, LitUnicode, S};
-use crate::compiler::{
+use crate::lexer::{Ident, LeadingKeywords, LitDec, LitStr, LitUnicode, S};
+use crate::{
     errors::{KeywordKind, PunctKind, SyntaxKind},
     input::UnsynInput,
 };
@@ -740,7 +740,7 @@ mod tests {
     use parserc::{AsStr, ControlFlow, Input, ParseError, Span, as_str, syntax::SyntaxInput};
 
     use super::*;
-    use crate::compiler::{
+    use crate::{
         errors::{SemanticsKind, UnsynError},
         input::TokenStream,
         read::{self, Decl},
@@ -1137,7 +1137,7 @@ mod tests {
     /// language it declares.
     #[test]
     fn unsyn_us_is_a_file_of_the_language_it_declares() {
-        let source = include_str!("../../unsyn.us");
+        let source = include_str!("../unsyn.us");
 
         let file =
             whole::<Crate<_>>(source).expect("unsyn.us should be a file of its own language");

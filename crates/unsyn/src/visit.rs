@@ -46,9 +46,9 @@
 //!
 //! ```
 //! use parserc::as_str;
-//! use unsyn::compiler::input::TokenStream;
-//! use unsyn::compiler::syntax::Stmt;
-//! use unsyn::compiler::visit::{Visit, walk};
+//! use unsyn::input::TokenStream;
+//! use unsyn::syntax::Stmt;
+//! use unsyn::visit::{Visit, walk};
 //!
 //! /// The name of a rule is the text its node covers, and reading that text
 //! /// asks the stream the tree was cut from: a visitor holds it beside its
@@ -74,7 +74,7 @@
 
 use super::lexer;
 use super::syntax;
-use crate::compiler::input::UnsynInput;
+use crate::input::UnsynInput;
 
 /// The methods a visitor of the CST has, one for every node of it.
 ///
@@ -442,9 +442,9 @@ where
 /// [`syn`]: https://docs.rs/syn/latest/syn/visit/index.html
 pub mod walk {
     use super::{lexer, syntax};
-    use crate::compiler::input::UnsynInput;
-    use crate::compiler::read;
-    use crate::compiler::visit::Visit;
+    use crate::input::UnsynInput;
+    use crate::read;
+    use crate::visit::Visit;
 
     // -----------------------------------------------------------------------
     // The nodes a `syntax` production names
@@ -1171,9 +1171,9 @@ mod tests {
     use parserc::{AsStr, Input, Span, as_str, syntax::SyntaxInput};
 
     use super::{Visit, walk};
-    use crate::compiler::input::TokenStream;
-    use crate::compiler::lexer;
-    use crate::compiler::syntax::{self, Crate, Stmt};
+    use crate::input::TokenStream;
+    use crate::lexer;
+    use crate::syntax::{self, Crate, Stmt};
 
     /// Parses `source` as a whole file.
     fn file(source: &str) -> Crate<TokenStream<'_>> {
@@ -1202,7 +1202,7 @@ mod tests {
 
     #[test]
     fn a_visitor_that_only_records_text_rebuilds_the_file() {
-        let source = include_str!("../../unsyn.us");
+        let source = include_str!("../unsyn.us");
         let tree = file(source);
 
         let mut echo = Echo::default();

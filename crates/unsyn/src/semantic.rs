@@ -53,7 +53,7 @@ use super::errors::{Diagnostics, LintKind, SemanticsKind, UnsynError};
 use super::input::UnsynInput;
 use super::visit::{Visit, walk};
 use super::{codegen, lexer, read, syntax};
-use crate::compiler::decode;
+use crate::decode;
 
 /// The kind of definition a statement opens with, which is a reading of the tree
 /// and not a part of it (see [`read`]).
@@ -1433,7 +1433,7 @@ mod tests {
     use parserc::{Input, syntax::SyntaxInput};
 
     use super::*;
-    use crate::compiler::input::TokenStream;
+    use crate::input::TokenStream;
 
     /// Reads `source` as a whole file and analyzes it, exactly as it stands.
     fn report_raw(source: &str) -> Diagnostics {
@@ -1501,7 +1501,7 @@ mod tests {
         // whose every name, range, set and repetition is written on purpose: an
         // error about any of it is a fault of this pass and not of the file.
         assert_eq!(
-            report(include_str!("../../unsyn.us")).errors,
+            report(include_str!("../unsyn.us")).errors,
             Vec::new(),
             "the spec denotes something"
         );
@@ -1940,7 +1940,7 @@ lexer B -> A | '/*' A;
                 .iter()
                 .filter(|lint| !matches!(lint.kind, LintKind::UnnamedAlternative))
                 .collect::<Vec<_>>(),
-            Vec::<&crate::compiler::errors::Lint>::new(),
+            Vec::<&crate::errors::Lint>::new(),
             "the members of the two sets are no business of each other"
         );
     }
@@ -2107,7 +2107,7 @@ lexer B -> A | '/*' A;
         // should not leave either of those about itself, and this is the gate
         // that keeps it so: every rule that answers one is named.
         assert_eq!(
-            lints(include_str!("../../unsyn.us")),
+            lints(include_str!("../unsyn.us")),
             Vec::new(),
             "the spec names the whole of its own tree"
         );

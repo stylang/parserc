@@ -87,97 +87,97 @@ macro_rules! recorder {
 
 recorder! {
     /// Records the hand tree.
-    Hand: unsyn::compiler::visit::Visit<'ast, I>, unsyn::compiler::input::UnsynInput,
-        unsyn::compiler::lexer::S<I>, unsyn::compiler::visit::walk::walk_s,
+    Hand: unsyn::visit::Visit<'ast, I>, unsyn::input::UnsynInput,
+        unsyn::lexer::S<I>, unsyn::visit::walk::walk_s,
     [
-        fn visit_crate: unsyn::compiler::syntax::Crate<I> => unsyn::compiler::visit::walk::walk_crate,
-        fn visit_item: unsyn::compiler::syntax::Item<I> => unsyn::compiler::visit::walk::walk_item,
-        fn visit_stmt: unsyn::compiler::syntax::Stmt<I> => unsyn::compiler::visit::walk::walk_stmt,
-        fn visit_outer_doc: unsyn::compiler::syntax::OuterDoc<I> => unsyn::compiler::visit::walk::walk_outer_doc,
-        fn visit_inner_doc: unsyn::compiler::syntax::InnerDoc<I> => unsyn::compiler::visit::walk::walk_inner_doc,
-        fn visit_expr: unsyn::compiler::syntax::Expr<I> => unsyn::compiler::visit::walk::walk_expr,
-        fn visit_expr_no_top_alt: unsyn::compiler::syntax::ExprNoTopAlt<I> => unsyn::compiler::visit::walk::walk_expr_no_top_alt,
+        fn visit_crate: unsyn::syntax::Crate<I> => unsyn::visit::walk::walk_crate,
+        fn visit_item: unsyn::syntax::Item<I> => unsyn::visit::walk::walk_item,
+        fn visit_stmt: unsyn::syntax::Stmt<I> => unsyn::visit::walk::walk_stmt,
+        fn visit_outer_doc: unsyn::syntax::OuterDoc<I> => unsyn::visit::walk::walk_outer_doc,
+        fn visit_inner_doc: unsyn::syntax::InnerDoc<I> => unsyn::visit::walk::walk_inner_doc,
+        fn visit_expr: unsyn::syntax::Expr<I> => unsyn::visit::walk::walk_expr,
+        fn visit_expr_no_top_alt: unsyn::syntax::ExprNoTopAlt<I> => unsyn::visit::walk::walk_expr_no_top_alt,
         fn visit_expr_without_suffix:
-            unsyn::compiler::syntax::ExprWithoutSuffix<I> => unsyn::compiler::visit::walk::walk_expr_without_suffix,
+            unsyn::syntax::ExprWithoutSuffix<I> => unsyn::visit::walk::walk_expr_without_suffix,
         fn visit_negated_set:
-            unsyn::compiler::syntax::NegatedSet<I> => unsyn::compiler::visit::walk::walk_negated_set,
-        fn visit_call: unsyn::compiler::syntax::Call<I> => unsyn::compiler::visit::walk::walk_call,
-        fn visit_paren: unsyn::compiler::syntax::Paren<I> => unsyn::compiler::visit::walk::walk_paren,
-        fn visit_set: unsyn::compiler::syntax::Set<I> => unsyn::compiler::visit::walk::walk_set,
-        fn visit_suffix: unsyn::compiler::syntax::Suffix<I> => unsyn::compiler::visit::walk::walk_suffix,
-        fn visit_star: unsyn::compiler::syntax::Star<I> => unsyn::compiler::visit::walk::walk_star,
-        fn visit_question: unsyn::compiler::syntax::Question<I> => unsyn::compiler::visit::walk::walk_question,
-        fn visit_plus: unsyn::compiler::syntax::Plus<I> => unsyn::compiler::visit::walk::walk_plus,
+            unsyn::syntax::NegatedSet<I> => unsyn::visit::walk::walk_negated_set,
+        fn visit_call: unsyn::syntax::Call<I> => unsyn::visit::walk::walk_call,
+        fn visit_paren: unsyn::syntax::Paren<I> => unsyn::visit::walk::walk_paren,
+        fn visit_set: unsyn::syntax::Set<I> => unsyn::visit::walk::walk_set,
+        fn visit_suffix: unsyn::syntax::Suffix<I> => unsyn::visit::walk::walk_suffix,
+        fn visit_star: unsyn::syntax::Star<I> => unsyn::visit::walk::walk_star,
+        fn visit_question: unsyn::syntax::Question<I> => unsyn::visit::walk::walk_question,
+        fn visit_plus: unsyn::syntax::Plus<I> => unsyn::visit::walk::walk_plus,
         fn visit_expr_with_suffix:
-            unsyn::compiler::syntax::ExprWithSuffix<I> => unsyn::compiler::visit::walk::walk_expr_with_suffix,
+            unsyn::syntax::ExprWithSuffix<I> => unsyn::visit::walk::walk_expr_with_suffix,
         fn visit_suffixed:
-            unsyn::compiler::syntax::Suffixed<I> => unsyn::compiler::visit::walk::walk_suffixed,
-        fn visit_repeat: unsyn::compiler::syntax::Repeat<I> => unsyn::compiler::visit::walk::walk_repeat,
+            unsyn::syntax::Suffixed<I> => unsyn::visit::walk::walk_suffixed,
+        fn visit_repeat: unsyn::syntax::Repeat<I> => unsyn::visit::walk::walk_repeat,
         fn visit_repeat_bound:
-            unsyn::compiler::syntax::RepeatBound<I> => unsyn::compiler::visit::walk::walk_repeat_bound,
+            unsyn::syntax::RepeatBound<I> => unsyn::visit::walk::walk_repeat_bound,
         fn visit_range_to:
-            unsyn::compiler::syntax::RangeTo<I> => unsyn::compiler::visit::walk::walk_range_to,
+            unsyn::syntax::RangeTo<I> => unsyn::visit::walk::walk_range_to,
         fn visit_range_from:
-            unsyn::compiler::syntax::RangeFrom<I> => unsyn::compiler::visit::walk::walk_range_from,
-        fn visit_range: unsyn::compiler::syntax::Range<I> => unsyn::compiler::visit::walk::walk_range,
+            unsyn::syntax::RangeFrom<I> => unsyn::visit::walk::walk_range_from,
+        fn visit_range: unsyn::syntax::Range<I> => unsyn::visit::walk::walk_range,
         fn visit_unicode_range:
-            unsyn::compiler::syntax::UnicodeRange<I> => unsyn::compiler::visit::walk::walk_unicode_range,
+            unsyn::syntax::UnicodeRange<I> => unsyn::visit::walk::walk_unicode_range,
         fn visit_str_range:
-            unsyn::compiler::syntax::StrRange<I> => unsyn::compiler::visit::walk::walk_str_range,
-        fn visit_set_item: unsyn::compiler::syntax::SetItem<I> => unsyn::compiler::visit::walk::walk_set_item,
+            unsyn::syntax::StrRange<I> => unsyn::visit::walk::walk_str_range,
+        fn visit_set_item: unsyn::syntax::SetItem<I> => unsyn::visit::walk::walk_set_item,
         fn visit_ident_or_keyword:
-            unsyn::compiler::lexer::IdentOrKeyword<I> => unsyn::compiler::visit::walk::walk_ident_or_keyword,
-        fn visit_raw_ident: unsyn::compiler::lexer::RawIdent<I> => unsyn::compiler::visit::walk::walk_raw_ident,
+            unsyn::lexer::IdentOrKeyword<I> => unsyn::visit::walk::walk_ident_or_keyword,
+        fn visit_raw_ident: unsyn::lexer::RawIdent<I> => unsyn::visit::walk::walk_raw_ident,
         fn visit_non_keyword_ident:
-            unsyn::compiler::lexer::NonKeywordIdent<I> => unsyn::compiler::visit::walk::walk_non_keyword_ident,
-        fn visit_ident: unsyn::compiler::lexer::Ident<I> => unsyn::compiler::visit::walk::walk_ident,
-        fn visit_keywords: unsyn::compiler::lexer::Keywords<I> => unsyn::compiler::visit::walk::walk_keywords,
+            unsyn::lexer::NonKeywordIdent<I> => unsyn::visit::walk::walk_non_keyword_ident,
+        fn visit_ident: unsyn::lexer::Ident<I> => unsyn::visit::walk::walk_ident,
+        fn visit_keywords: unsyn::lexer::Keywords<I> => unsyn::visit::walk::walk_keywords,
         fn visit_leading_keywords:
-            unsyn::compiler::lexer::LeadingKeywords<I> => unsyn::compiler::visit::walk::walk_leading_keywords,
+            unsyn::lexer::LeadingKeywords<I> => unsyn::visit::walk::walk_leading_keywords,
         fn visit_operator_keywords:
-            unsyn::compiler::lexer::OperatorKeywords<I> => unsyn::compiler::visit::walk::walk_operator_keywords,
-        fn visit_lit_str: unsyn::compiler::lexer::LitStr<I> => unsyn::compiler::visit::walk::walk_lit_str,
-        fn visit_quote_escape: unsyn::compiler::lexer::QuoteEscape<I> => unsyn::compiler::visit::walk::walk_quote_escape,
-        fn visit_ascii_escape: unsyn::compiler::lexer::AsciiEscape<I> => unsyn::compiler::visit::walk::walk_ascii_escape,
+            unsyn::lexer::OperatorKeywords<I> => unsyn::visit::walk::walk_operator_keywords,
+        fn visit_lit_str: unsyn::lexer::LitStr<I> => unsyn::visit::walk::walk_lit_str,
+        fn visit_quote_escape: unsyn::lexer::QuoteEscape<I> => unsyn::visit::walk::walk_quote_escape,
+        fn visit_ascii_escape: unsyn::lexer::AsciiEscape<I> => unsyn::visit::walk::walk_ascii_escape,
         fn visit_ascii_hex_escape:
-            unsyn::compiler::lexer::AsciiHexEscape<I> => unsyn::compiler::visit::walk::walk_ascii_hex_escape,
+            unsyn::lexer::AsciiHexEscape<I> => unsyn::visit::walk::walk_ascii_hex_escape,
         fn visit_ascii_newline:
-            unsyn::compiler::lexer::AsciiNewline<I> => unsyn::compiler::visit::walk::walk_ascii_newline,
+            unsyn::lexer::AsciiNewline<I> => unsyn::visit::walk::walk_ascii_newline,
         fn visit_ascii_carriage_return:
-            unsyn::compiler::lexer::AsciiCarriageReturn<I> =>
-                unsyn::compiler::visit::walk::walk_ascii_carriage_return,
+            unsyn::lexer::AsciiCarriageReturn<I> =>
+                unsyn::visit::walk::walk_ascii_carriage_return,
         fn visit_ascii_tab:
-            unsyn::compiler::lexer::AsciiTab<I> => unsyn::compiler::visit::walk::walk_ascii_tab,
+            unsyn::lexer::AsciiTab<I> => unsyn::visit::walk::walk_ascii_tab,
         fn visit_ascii_backslash:
-            unsyn::compiler::lexer::AsciiBackslash<I> => unsyn::compiler::visit::walk::walk_ascii_backslash,
+            unsyn::lexer::AsciiBackslash<I> => unsyn::visit::walk::walk_ascii_backslash,
         fn visit_ascii_null:
-            unsyn::compiler::lexer::AsciiNull<I> => unsyn::compiler::visit::walk::walk_ascii_null,
-        fn visit_unicode_escape: unsyn::compiler::lexer::UnicodeEscape<I> => unsyn::compiler::visit::walk::walk_unicode_escape,
-        fn visit_oct_digit: unsyn::compiler::lexer::OctDigit<I> => unsyn::compiler::visit::walk::walk_oct_digit,
-        fn visit_dec_digit: unsyn::compiler::lexer::DecDigit<I> => unsyn::compiler::visit::walk::walk_dec_digit,
-        fn visit_hex_digit: unsyn::compiler::lexer::HexDigit<I> => unsyn::compiler::visit::walk::walk_hex_digit,
-        fn visit_lit_dec: unsyn::compiler::lexer::LitDec<I> => unsyn::compiler::visit::walk::walk_lit_dec,
-        fn visit_lit_unicode: unsyn::compiler::lexer::LitUnicode<I> => unsyn::compiler::visit::walk::walk_lit_unicode,
-        fn visit_block_comment: unsyn::compiler::lexer::BlockComment<I> => unsyn::compiler::visit::walk::walk_block_comment,
+            unsyn::lexer::AsciiNull<I> => unsyn::visit::walk::walk_ascii_null,
+        fn visit_unicode_escape: unsyn::lexer::UnicodeEscape<I> => unsyn::visit::walk::walk_unicode_escape,
+        fn visit_oct_digit: unsyn::lexer::OctDigit<I> => unsyn::visit::walk::walk_oct_digit,
+        fn visit_dec_digit: unsyn::lexer::DecDigit<I> => unsyn::visit::walk::walk_dec_digit,
+        fn visit_hex_digit: unsyn::lexer::HexDigit<I> => unsyn::visit::walk::walk_hex_digit,
+        fn visit_lit_dec: unsyn::lexer::LitDec<I> => unsyn::visit::walk::walk_lit_dec,
+        fn visit_lit_unicode: unsyn::lexer::LitUnicode<I> => unsyn::visit::walk::walk_lit_unicode,
+        fn visit_block_comment: unsyn::lexer::BlockComment<I> => unsyn::visit::walk::walk_block_comment,
         fn visit_block_comment_body:
-            unsyn::compiler::lexer::BlockCommentBody<I> =>
-                unsyn::compiler::visit::walk::walk_block_comment_body,
+            unsyn::lexer::BlockCommentBody<I> =>
+                unsyn::visit::walk::walk_block_comment_body,
         fn visit_empty_block_comment:
-            unsyn::compiler::lexer::EmptyBlockComment<I> =>
-                unsyn::compiler::visit::walk::walk_empty_block_comment,
+            unsyn::lexer::EmptyBlockComment<I> =>
+                unsyn::visit::walk::walk_empty_block_comment,
         fn visit_starred_empty_block_comment:
-            unsyn::compiler::lexer::StarredEmptyBlockComment<I> =>
-                unsyn::compiler::visit::walk::walk_starred_empty_block_comment,
+            unsyn::lexer::StarredEmptyBlockComment<I> =>
+                unsyn::visit::walk::walk_starred_empty_block_comment,
         fn visit_block_comment_or_doc:
-            unsyn::compiler::lexer::BlockCommentOrDoc<I> => unsyn::compiler::visit::walk::walk_block_comment_or_doc,
-        fn visit_inner_line_doc: unsyn::compiler::lexer::InnerLineDoc<I> => unsyn::compiler::visit::walk::walk_inner_line_doc,
+            unsyn::lexer::BlockCommentOrDoc<I> => unsyn::visit::walk::walk_block_comment_or_doc,
+        fn visit_inner_line_doc: unsyn::lexer::InnerLineDoc<I> => unsyn::visit::walk::walk_inner_line_doc,
         fn visit_inner_block_doc:
-            unsyn::compiler::lexer::InnerBlockDoc<I> => unsyn::compiler::visit::walk::walk_inner_block_doc,
-        fn visit_outer_line_doc: unsyn::compiler::lexer::OuterLineDoc<I> => unsyn::compiler::visit::walk::walk_outer_line_doc,
+            unsyn::lexer::InnerBlockDoc<I> => unsyn::visit::walk::walk_inner_block_doc,
+        fn visit_outer_line_doc: unsyn::lexer::OuterLineDoc<I> => unsyn::visit::walk::walk_outer_line_doc,
         fn visit_outer_block_doc:
-            unsyn::compiler::lexer::OuterBlockDoc<I> => unsyn::compiler::visit::walk::walk_outer_block_doc,
-        fn visit_lf: unsyn::compiler::lexer::LF<I> => unsyn::compiler::visit::walk::walk_lf,
-        fn visit_cr: unsyn::compiler::lexer::CR<I> => unsyn::compiler::visit::walk::walk_cr,
+            unsyn::lexer::OuterBlockDoc<I> => unsyn::visit::walk::walk_outer_block_doc,
+        fn visit_lf: unsyn::lexer::LF<I> => unsyn::visit::walk::walk_lf,
+        fn visit_cr: unsyn::lexer::CR<I> => unsyn::visit::walk::walk_cr,
     ]
 }
 
@@ -278,9 +278,9 @@ mod generated;
 fn both_trees(source: &str) -> (Vec<Event>, Vec<Event>) {
     use parserc::{Input, syntax::SyntaxInput};
 
-    let mut hand_input = unsyn::compiler::input::TokenStream::from(source);
+    let mut hand_input = unsyn::input::TokenStream::from(source);
     let hand_tree = hand_input
-        .parse::<unsyn::compiler::syntax::Crate<_>>()
+        .parse::<unsyn::syntax::Crate<_>>()
         .unwrap_or_else(|error| panic!("the hand parser reads {source:?}: {error}"));
     assert!(
         hand_input.is_empty(),
@@ -300,7 +300,7 @@ fn both_trees(source: &str) -> (Vec<Event>, Vec<Event>) {
     );
 
     let mut hand_recorder = Hand::default();
-    unsyn::compiler::visit::Visit::visit_crate(&mut hand_recorder, &hand_tree);
+    unsyn::visit::Visit::visit_crate(&mut hand_recorder, &hand_tree);
 
     let mut generated_recorder = Generated::default();
     generated::Visit::visit_crate(&mut generated_recorder, &generated_tree);

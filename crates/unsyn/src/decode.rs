@@ -20,7 +20,7 @@
 //! come back as ranges of the source the literal was read from, so a diagnostic
 //! points at the escape and not at the whole literal.
 
-use crate::compiler::{
+use crate::{
     input::UnsynInput,
     lexer::{LitDec, LitStr, LitUnicode},
 };

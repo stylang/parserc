@@ -9,7 +9,7 @@
     clippy::enum_variant_names
 )]
 pub trait UnsynInput:
-    ::parserc::Input<Item = char, Error = ::unsyn::compiler::errors::UnsynError>
+    ::parserc::Input<Item = char, Error = ::unsyn::errors::UnsynError>
     + ::parserc::AsBytes
     + ::parserc::AsStr
     + ::parserc::StartWith<&'static str>
@@ -21,7 +21,7 @@ pub trait UnsynInput:
     + ::core::cmp::PartialEq
 {
 }
-pub type TokenStream<'a> = ::parserc::chars::TokenStream<'a, ::unsyn::compiler::errors::UnsynError>;
+pub type TokenStream<'a> = ::parserc::chars::TokenStream<'a, ::unsyn::errors::UnsynError>;
 impl<'a> UnsynInput for TokenStream<'a> {}
 fn text_of<P, I>(
     parser: P,

@@ -96,5 +96,12 @@
 //! the build changes, only what the documentation can show.
 #![cfg_attr(docsrs, feature(doc_cfg))]
 
-#[cfg(feature = "compiler")]
-pub mod compiler;
+pub mod codegen;
+pub mod decode;
+pub mod errors;
+pub mod input;
+pub mod lexer;
+pub mod read;
+pub mod semantic;
+pub mod syntax;
+pub mod visit;
