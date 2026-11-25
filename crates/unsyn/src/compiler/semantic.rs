@@ -187,7 +187,7 @@ fn alt_writes_nothing<I: UnsynInput>(alt: &syntax::ExprNoTopAlt<I>) -> bool {
     match alt {
         syntax::ExprNoTopAlt::ExprWithoutSuffix(_) => false,
         syntax::ExprNoTopAlt::ExprWithSuffix(with_suffix) => match with_suffix {
-            syntax::ExprWithSuffix::Suffixed { suffix, .. } => suffix_may_be_zero(suffix),
+            syntax::ExprWithSuffix::Suffixed(part) => suffix_may_be_zero(&part.suffix),
             syntax::ExprWithSuffix::Concat { .. } | syntax::ExprWithSuffix::Except { .. } => false,
         },
     }
@@ -209,8 +209,8 @@ fn suffix_may_be_zero<I: UnsynInput>(suffix: &syntax::Suffix<I>) -> bool {
 fn bound_may_be_zero<I: UnsynInput>(bound: &syntax::RepeatBound<I>) -> bool {
     match bound {
         syntax::RepeatBound::RangeTo(..) => true,
-        syntax::RepeatBound::RangeFrom(from, ..) => {
-            matches!(decode::decimal(from), Some(0))
+        syntax::RepeatBound::RangeFrom(from) => {
+            matches!(decode::decimal(&from.lit_dec), Some(0))
         }
         syntax::RepeatBound::LitDec(count) => matches!(decode::decimal(count), Some(0)),
     }
@@ -1136,7 +1136,7 @@ impl<'ast, I: UnsynInput> Visit<'ast, I> for Checker<'ast, I> {
             // written beside `~` stands on the refusal and not under it, so
             // `~X*` repeats the refusal and no operand of a `~` is ever one to
             // carry a quantity — which is what keeps this part plain.
-            syntax::ExprWithoutSuffix::NegatedSet { .. } => {
+            syntax::ExprWithoutSuffix::NegatedSet(..) => {
                 let refused = self.take_one();
 
                 debug_assert!(
@@ -1165,10 +1165,10 @@ impl<'ast, I: UnsynInput> Visit<'ast, I> for Checker<'ast, I> {
             // A call of an external is a link the caller of the parser binds, and
             // so mentions no name of this file: nothing here can ask that the file
             // have defined it, and nothing here can reach past it.
-            syntax::ExprWithoutSuffix::Call { .. } => Pattern::terminal(),
+            syntax::ExprWithoutSuffix::Call(..) => Pattern::terminal(),
             // A group is one operand, so what it can do is what the expression
             // written inside it can do, the name it holds bare and all.
-            syntax::ExprWithoutSuffix::Paren { .. } => self.take_one(),
+            syntax::ExprWithoutSuffix::Paren(..) => self.take_one(),
             syntax::ExprWithoutSuffix::LitStr(lit) => {
                 _ = self.chars_of(lit);
 
@@ -1191,7 +1191,8 @@ impl<'ast, I: UnsynInput> Visit<'ast, I> for Checker<'ast, I> {
         walk::walk_expr_with_suffix(self, node);
 
         let pattern = match node {
-            syntax::ExprWithSuffix::Suffixed { suffix, .. } => {
+            syntax::ExprWithSuffix::Suffixed(part) => {
+                let suffix = &part.suffix;
                 let mut target = self.take_one();
 
                 match suffix {
@@ -1259,13 +1260,13 @@ impl<'ast, I: UnsynInput> Visit<'ast, I> for Checker<'ast, I> {
         let bound = match node {
             // `{,n}` is as much `{0,n}` as `{n}` is `{n,n}`, which is what both
             // the bound below and the bound above are asked for.
-            syntax::RepeatBound::RangeTo(_, _, _, to) => Bound {
+            syntax::RepeatBound::RangeTo(to) => Bound {
                 from: 0,
-                to: Some(self.count_of(to)),
+                to: Some(self.count_of(&to.lit_dec)),
             },
-            syntax::RepeatBound::RangeFrom(from, _, _, to) => Bound {
-                from: self.count_of(from),
-                to: to.as_ref().map(|(_, to)| self.count_of(to)),
+            syntax::RepeatBound::RangeFrom(from) => Bound {
+                from: self.count_of(&from.lit_dec),
+                to: from.f3.as_ref().map(|(_, to)| self.count_of(to)),
             },
             syntax::RepeatBound::LitDec(count) => {
                 let count = self.count_of(count);
@@ -1284,10 +1285,13 @@ impl<'ast, I: UnsynInput> Visit<'ast, I> for Checker<'ast, I> {
         walk::walk_range(self, node);
 
         let ends = match node {
-            syntax::Range::UnicodeRange(from, _, to) => [self.code_of(from), self.code_of(to)],
-            syntax::Range::StrRange(from, _, to) => {
-                [self.end_of_range(from), self.end_of_range(to)]
+            syntax::Range::UnicodeRange(range) => {
+                [self.code_of(&range.lit_unicode), self.code_of(&range.f2)]
             }
+            syntax::Range::StrRange(range) => [
+                self.end_of_range(&range.lit_str),
+                self.end_of_range(&range.f2),
+            ],
         };
 
         let interval = match ends {

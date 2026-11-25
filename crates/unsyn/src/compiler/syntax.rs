@@ -334,42 +334,12 @@ where
     /// The punct and the operand are two operands of one sequence, so the run
     /// between them is the variant's own field: `'~' ( 'a' | 'b' )` is written
     /// with the space, and the tree has to keep it.
-    NegatedSet {
-        /// The `~` punct.
-        tilde: Tilde<I>,
-        /// The run between the punct and the operand.
-        s: Option<S<I>>,
-        /// The refused operand: this position may begin none of what it matches.
-        operand: Box<ExprWithoutSuffix<I>>,
-    },
-    /// `'<' Ident '>'`, a call of an external the caller of the parser binds,
-    /// read as the sequence of its parts.
-    Call {
-        /// The `<` that opens the call.
-        lt: Lt<I>,
-        /// The run the call reads after the `<`.
-        s: Option<S<I>>,
-        /// The name the caller binds.
-        ident: Ident<I>,
-        /// The run before the `>`.
-        s2: Option<S<I>>,
-        /// The `>` that closes the call.
-        gt: Gt<I>,
-    },
+    NegatedSet(Box<NegatedSet<I>>),
+    /// `'<' Ident '>'`, a call of an external the caller of the parser binds.
+    Call(Call<I>),
     /// `'(' Expr ')'`, a group, so that an expression may sit inside a sequence
     /// or take a suffix as one operand.
-    Paren {
-        /// The `(` that opens the group.
-        open: ParenStart<I>,
-        /// The run the group reads after the `(`.
-        s: Option<S<I>>,
-        /// The expression the group holds.
-        expr: Box<Expr<I>>,
-        /// The run before the `)`.
-        s2: Option<S<I>>,
-        /// The `)` that closes the group.
-        close: ParenEnd<I>,
-    },
+    Paren(Box<Paren<I>>),
     /// `'[' … ']'`, a set of the characters and strings it lists.
     ///
     /// A set is a union, so the pass that reads it compares its members by the
@@ -381,6 +351,79 @@ where
     LitUnicode(LitUnicode<I>),
     /// A reference to another rule by name.
     Ident(Ident<I>),
+}
+
+/// `syntax NegatedSet -> '~' ExprWithoutSuffix;`: an operand refused at this
+/// position.
+///
+/// What `~` asks is answered by the character here, and takes it: the operand is
+/// probed and must not begin what it matches, so the refusal fails where the
+/// operand would have fitted and always consumes input. That is what lets a line
+/// document read to the end of its line with `~[LF,CR]*` rather than stopping
+/// short of it.
+///
+/// The punct and the operand are two operands of one sequence, so the run between
+/// them is a field of this node: `'~' ( 'a' | 'b' )` is written with the space,
+/// and the tree has to keep it. The node is held boxed by [`ExprWithoutSuffix`],
+/// since a refusal reaches the rule it is written in.
+#[derive(Debug, PartialEq, Eq, PartialOrd, Ord, Clone, Syntax)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+pub struct NegatedSet<I>
+where
+    I: UnsynInput,
+{
+    /// The `~` punct.
+    pub f1: Tilde<I>,
+    /// The run between the punct and the operand.
+    pub f2: Option<S<I>>,
+    /// The refused operand: this position may begin none of what it matches.
+    pub expr_without_suffix: Box<ExprWithoutSuffix<I>>,
+}
+
+/// `syntax Call -> '<' Ident '>';`: a call of an external the caller of the
+/// parser binds, read as the sequence of its parts.
+///
+/// The name is a reference to a rule the file does not define, so nothing here
+/// can ask that it exist; the caller of the parser settles what it means.
+#[derive(Debug, PartialEq, Eq, PartialOrd, Ord, Clone, Syntax)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+pub struct Call<I>
+where
+    I: UnsynInput,
+{
+    /// The `<` that opens the call.
+    pub f1: Lt<I>,
+    /// The run the call reads after the `<`.
+    pub f2: Option<S<I>>,
+    /// The name the caller binds.
+    pub ident: Ident<I>,
+    /// The run before the `>`.
+    pub f3: Option<S<I>>,
+    /// The `>` that closes the call.
+    pub f4: Gt<I>,
+}
+
+/// `syntax Paren -> '(' Expr ')';`: a group, so that an expression may sit
+/// inside a sequence or take a suffix as one operand.
+///
+/// The node is held boxed by [`ExprWithoutSuffix`], since a group reaches the
+/// expression of a rule that can reach back to the group.
+#[derive(Debug, PartialEq, Eq, PartialOrd, Ord, Clone, Syntax)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+pub struct Paren<I>
+where
+    I: UnsynInput,
+{
+    /// The `(` that opens the group.
+    pub f1: ParenStart<I>,
+    /// The run the group reads after the `(`.
+    pub f2: Option<S<I>>,
+    /// The expression the group holds.
+    pub expr: Box<Expr<I>>,
+    /// The run before the `)`.
+    pub f3: Option<S<I>>,
+    /// The `)` that closes the group.
+    pub f4: ParenEnd<I>,
 }
 
 // ---------------------------------------------------------------------------
@@ -423,29 +466,22 @@ where
     I: UnsynInput,
 {
     /// The operand carries one of `*`, `?`, `+` or `{…}`.
-    Suffixed {
-        /// The operand the operator applies to.
-        target: ExprWithoutSuffix<I>,
-        /// The run between the operand and its operator.
-        s: Option<S<I>>,
-        /// The operator the group picked.
-        suffix: Suffix<I>,
-    },
+    Suffixed(Box<Suffixed<I>>),
     /// `concat`, which asks that what the two operands matched be joined into one
     /// token. Both operands are matched, the second one from where the first one
     /// ended.
     Concat {
         /// What is joined to the operand after the keyword.
-        target: ExprWithoutSuffix<I>,
+        expr_without_suffix: ExprWithoutSuffix<I>,
         /// The run between the operand and the keyword.
-        s: Option<S<I>>,
+        f1: Option<S<I>>,
         /// The keyword, which keeps no run of its own.
         #[parserc(crucial)]
-        keyword: Concat<I>,
+        f2: Concat<I>,
         /// The run between the keyword and the operand after it.
-        s2: Option<S<I>>,
+        f3: Option<S<I>>,
         /// The operand after the keyword.
-        suffix: Box<ExprNoTopAlt<I>>,
+        expr_no_top_alt: Box<ExprNoTopAlt<I>>,
     },
     /// `except`, which removes what the operand after the keyword matches from
     /// the operand before it.
@@ -455,17 +491,40 @@ where
     /// therefore a name of its own, although `lexer` fits the head of it.
     Except {
         /// What the operand after the keyword is taken out of.
-        target: ExprWithoutSuffix<I>,
+        expr_without_suffix: ExprWithoutSuffix<I>,
         /// The run between the operand and the keyword.
-        s: Option<S<I>>,
+        f1: Option<S<I>>,
         /// The keyword, which keeps no run of its own.
         #[parserc(crucial)]
-        keyword: Except<I>,
+        f2: Except<I>,
         /// The run between the keyword and the operand taken out.
-        s2: Option<S<I>>,
+        f3: Option<S<I>>,
         /// The operand to take out, which cannot itself carry a suffix.
-        tokens: ExprWithoutSuffix<I>,
+        f4: ExprWithoutSuffix<I>,
     },
+}
+
+// ---------------------------------------------------------------------------
+// `syntax Suffixed -> ExprWithoutSuffix Suffix;`
+// ---------------------------------------------------------------------------
+
+/// `syntax Suffixed -> ExprWithoutSuffix Suffix;`: an operand with one quantity
+/// operator written after it.
+///
+/// The rule is named because a reader of a suffix has to reach the operand the
+/// operator applies to, which the sequence writes before it.
+#[derive(Debug, PartialEq, Eq, PartialOrd, Ord, Clone, Syntax)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+pub struct Suffixed<I>
+where
+    I: UnsynInput,
+{
+    /// The operand the operator applies to.
+    pub expr_without_suffix: Box<ExprWithoutSuffix<I>>,
+    /// The run between the operand and its operator.
+    pub f1: Option<S<I>>,
+    /// The operator the operand picked.
+    pub suffix: Suffix<I>,
 }
 
 // ---------------------------------------------------------------------------
@@ -509,32 +568,51 @@ where
     I: UnsynInput,
 {
     /// `,n`, at most `n` times.
-    RangeTo(
-        /// The run before the comma, as the sequence says it.
-        Option<S<I>>,
-        /// The `,` that opens the form, and says which form this is.
-        Comma<I>,
-        /// The run between the comma and the bound.
-        Option<S<I>>,
-        /// The bound above.
-        Box<LitDec<I>>,
-    ),
+    RangeTo(RangeTo<I>),
     /// `n,m`, or `n,` with no bound above.
-    RangeFrom(
-        /// The bound below.
-        Box<LitDec<I>>,
-        /// The run before the comma.
-        Option<S<I>>,
-        /// The `,` that divides the two bounds.
-        Comma<I>,
-        /// The bound above with the run before it, if one is written.
-        Option<Led<I, Box<LitDec<I>>>>,
-    ),
+    RangeFrom(RangeFrom<I>),
     /// `n`, exactly `n` times.
-    LitDec(
-        /// The count.
-        LitDec<I>,
-    ),
+    LitDec(LitDec<I>),
+}
+
+/// `syntax RangeTo -> ',' LitDec;`: the bound above, written with no bound below
+/// it — which is why the comma opens the form and says which form it is.
+///
+/// The run the comma reads after the `{` belongs to [`Repeat`], which holds this
+/// node as its own field, so the comma stands first here.
+#[derive(Debug, PartialEq, Eq, PartialOrd, Ord, Clone, Syntax)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+pub struct RangeTo<I>
+where
+    I: UnsynInput,
+{
+    /// The `,` that opens the form, and says which form this is.
+    pub f1: Comma<I>,
+    /// The run between the comma and the bound.
+    pub f2: Option<S<I>>,
+    /// The bound above.
+    pub lit_dec: LitDec<I>,
+}
+
+/// `syntax RangeFrom -> LitDec ',' LitDec?;`: the bound below, the comma that
+/// divides it, and the bound above when one is written.
+///
+/// The bound above is a whole operand with the run before it, so it is kept as
+/// the pair the production writes it as.
+#[derive(Debug, PartialEq, Eq, PartialOrd, Ord, Clone, Syntax)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+pub struct RangeFrom<I>
+where
+    I: UnsynInput,
+{
+    /// The bound below.
+    pub lit_dec: LitDec<I>,
+    /// The run before the comma.
+    pub f1: Option<S<I>>,
+    /// The `,` that divides the two bounds.
+    pub f2: Comma<I>,
+    /// The bound above with the run before it, if one is written.
+    pub f3: Option<Led<I, LitDec<I>>>,
 }
 
 // ---------------------------------------------------------------------------
@@ -550,28 +628,49 @@ where
     I: UnsynInput,
 {
     /// A range of code points, as `U+0009-U+000D` is.
-    ///
-    /// The rule asks for the dash of this form by `concat`, as it does for the
-    /// form of two strings, so neither end of the dash holds trivia and the two
-    /// variants are written the same way.
-    UnicodeRange(
-        Box<LitUnicode<I>>,
-        /// The `-` that divides the two ends, joined to both of them.
-        #[parserc(crucial, keyword = "-", map_err = PunctKind::Minus.map())]
-        I,
-        Box<LitUnicode<I>>,
-    ),
+    UnicodeRange(UnicodeRange<I>),
     /// A range of strings, as `'0'-'7'` is.
-    ///
-    /// The rule asks for the dash of this form by `concat`, so it holds no trivia
-    /// and stands with nothing on either side of it.
-    StrRange(
-        LitStr<I>,
-        /// The `-` that divides the two ends, joined to both of them.
-        #[parserc(crucial, keyword = "-", map_err = PunctKind::Minus.map())]
-        I,
-        LitStr<I>,
-    ),
+    StrRange(StrRange<I>),
+}
+
+/// `syntax UnicodeRange -> LitUnicode concat '-' concat LitUnicode;`: a range of
+/// code points, the two ends and the dash between them.
+///
+/// The rule asks for the dash by `concat`, so it holds no trivia of its own and
+/// the two ends stand against it with nothing between them.
+#[derive(Debug, PartialEq, Eq, PartialOrd, Ord, Clone, Syntax)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+pub struct UnicodeRange<I>
+where
+    I: UnsynInput,
+{
+    /// The code point the range begins at.
+    pub lit_unicode: LitUnicode<I>,
+    /// The `-` that divides the two ends, joined to both of them.
+    #[parserc(crucial, keyword = "-", map_err = PunctKind::Minus.map())]
+    pub f1: I,
+    /// The code point the range ends at.
+    pub f2: LitUnicode<I>,
+}
+
+/// `syntax StrRange -> LitStr concat '-' concat LitStr;`: a range of strings,
+/// the two ends and the dash between them.
+///
+/// Written the same way as [`UnicodeRange`], since the rule asks for this dash by
+/// `concat` too, and an anonymous operand is named by its place.
+#[derive(Debug, PartialEq, Eq, PartialOrd, Ord, Clone, Syntax)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+pub struct StrRange<I>
+where
+    I: UnsynInput,
+{
+    /// The string the range begins at.
+    pub lit_str: LitStr<I>,
+    /// The `-` that divides the two ends, joined to both of them.
+    #[parserc(crucial, keyword = "-", map_err = PunctKind::Minus.map())]
+    pub f1: I,
+    /// The string the range ends at.
+    pub f2: LitStr<I>,
 }
 
 // ---------------------------------------------------------------------------
@@ -790,15 +889,15 @@ mod tests {
         ));
         assert!(matches!(
             whole::<ExprNoTopAlt<_>>("'a'*").unwrap(),
-            ExprNoTopAlt::ExprWithSuffix(ExprWithSuffix::Suffixed { .. })
+            ExprNoTopAlt::ExprWithSuffix(ExprWithSuffix::Suffixed(..))
         ));
         assert!(matches!(
             whole::<ExprNoTopAlt<_>>("A{1, 2}").unwrap(),
-            ExprNoTopAlt::ExprWithSuffix(ExprWithSuffix::Suffixed { .. })
+            ExprNoTopAlt::ExprWithSuffix(ExprWithSuffix::Suffixed(..))
         ));
         assert!(matches!(
             whole::<ExprNoTopAlt<_>>("<XID_Start>").unwrap(),
-            ExprNoTopAlt::ExprWithoutSuffix(ExprWithoutSuffix::Call { .. })
+            ExprNoTopAlt::ExprWithoutSuffix(ExprWithoutSuffix::Call(..))
         ));
 
         // Only one suffix is allowed, so `A*?` is not a repetition of an option.
@@ -898,9 +997,9 @@ mod tests {
         }
 
         assert!(matches!(bounds("{3}"), LitDec(_)));
-        assert!(matches!(bounds("{1, 6}"), RangeFrom(_, _, _, Some((_, _)))));
-        assert!(matches!(bounds("{1,}"), RangeFrom(_, _, _, None)));
-        assert!(matches!(bounds("{,4}"), RangeTo(_, _, _, _)));
+        assert!(matches!(bounds("{1, 6}"), RangeFrom(each) if each.f3.is_some()));
+        assert!(matches!(bounds("{1,}"), RangeFrom(each) if each.f3.is_none()));
+        assert!(matches!(bounds("{,4}"), RangeTo(_)));
 
         // A bound of two is not a bound followed by a brace that finds a comma.
         assert!(whole::<Repeat<_>>("{1, 2, 3}").is_err());
@@ -951,15 +1050,15 @@ mod tests {
         // operand must not begin.
         assert!(matches!(
             whole::<ExprWithoutSuffix<_>>("~['a', 'b']"),
-            Ok(ExprWithoutSuffix::NegatedSet { .. })
+            Ok(ExprWithoutSuffix::NegatedSet(_))
         ));
         assert!(matches!(
             whole::<ExprWithoutSuffix<_>>("~'a'"),
-            Ok(ExprWithoutSuffix::NegatedSet { .. })
+            Ok(ExprWithoutSuffix::NegatedSet(_))
         ));
         assert!(matches!(
             whole::<ExprWithoutSuffix<_>>("~( 'a' | 'b' )"),
-            Ok(ExprWithoutSuffix::NegatedSet { .. })
+            Ok(ExprWithoutSuffix::NegatedSet(_))
         ));
     }
 
@@ -969,20 +1068,20 @@ mod tests {
         // written between them is a field of the variant and not a character
         // any terminal hides — the same shape the generated tree gives the rule.
         let negated = whole::<ExprWithoutSuffix<_>>("~  ['a']").unwrap();
-        let ExprWithoutSuffix::NegatedSet { tilde, s, operand } = negated else {
+        let ExprWithoutSuffix::NegatedSet(negated) = negated else {
             panic!("not a negation");
         };
 
-        assert_eq!(tilde.to_span(), Span::Range(0..1));
-        assert_eq!(s.unwrap().0.as_str(), "  ");
-        assert_eq!(operand.to_span(), Span::Range(3..8));
+        assert_eq!(negated.f1.to_span(), Span::Range(0..1));
+        assert_eq!(negated.f2.unwrap().0.as_str(), "  ");
+        assert_eq!(negated.expr_without_suffix.to_span(), Span::Range(3..8));
 
         // Nothing between them leaves the field empty rather than misplaced.
         let tight = whole::<ExprWithoutSuffix<_>>("~['a']").unwrap();
-        let ExprWithoutSuffix::NegatedSet { s, .. } = tight else {
+        let ExprWithoutSuffix::NegatedSet(tight) = tight else {
             panic!("not a negation");
         };
-        assert!(s.is_none());
+        assert!(tight.f2.is_none());
     }
 
     #[test]

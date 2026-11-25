@@ -142,9 +142,29 @@ where
         walk::walk_expr_without_suffix(self, node);
     }
 
+    /// The node of the rule `syntax NegatedSet -> '~' ExprWithoutSuffix;`.
+    fn visit_negated_set(&mut self, node: &'ast syntax::NegatedSet<I>) {
+        walk::walk_negated_set(self, node);
+    }
+
     /// `syntax ExprWithSuffix -> ExprWithoutSuffix Suffix | …`
     fn visit_expr_with_suffix(&mut self, node: &'ast syntax::ExprWithSuffix<I>) {
         walk::walk_expr_with_suffix(self, node);
+    }
+
+    /// The node of the rule `syntax Suffixed -> ExprWithoutSuffix Suffix;`.
+    fn visit_suffixed(&mut self, node: &'ast syntax::Suffixed<I>) {
+        walk::walk_suffixed(self, node);
+    }
+
+    /// The node of the rule `syntax Call -> '<' Ident '>';`.
+    fn visit_call(&mut self, node: &'ast syntax::Call<I>) {
+        walk::walk_call(self, node);
+    }
+
+    /// The node of the rule `syntax Paren -> '(' Expr ')';`.
+    fn visit_paren(&mut self, node: &'ast syntax::Paren<I>) {
+        walk::walk_paren(self, node);
     }
 
     /// The node of the rule `syntax Set -> '[' ( SetItem ',' )* SetItem? ']';`.
@@ -172,9 +192,30 @@ where
         walk::walk_repeat_bound(self, node);
     }
 
+    /// The node of the rule `syntax RangeTo -> ',' LitDec;`.
+    fn visit_range_to(&mut self, node: &'ast syntax::RangeTo<I>) {
+        walk::walk_range_to(self, node);
+    }
+
+    /// The node of the rule `syntax RangeFrom -> LitDec ',' LitDec?;`.
+    fn visit_range_from(&mut self, node: &'ast syntax::RangeFrom<I>) {
+        walk::walk_range_from(self, node);
+    }
+
     /// `syntax Range -> UnicodeRange | StrRange;`
     fn visit_range(&mut self, node: &'ast syntax::Range<I>) {
         walk::walk_range(self, node);
+    }
+
+    /// The node of the rule `syntax UnicodeRange -> LitUnicode concat '-' concat
+    /// LitUnicode;`.
+    fn visit_unicode_range(&mut self, node: &'ast syntax::UnicodeRange<I>) {
+        walk::walk_unicode_range(self, node);
+    }
+
+    /// The node of the rule `syntax StrRange -> LitStr concat '-' concat LitStr;`.
+    fn visit_str_range(&mut self, node: &'ast syntax::StrRange<I>) {
+        walk::walk_str_range(self, node);
     }
 
     /// `syntax SetItem -> Range | LitStr | LitUnicode | Ident;`
@@ -560,57 +601,9 @@ pub mod walk {
         node: &'ast syntax::ExprWithoutSuffix<I>,
     ) {
         match node {
-            syntax::ExprWithoutSuffix::NegatedSet { tilde, s, operand } => {
-                v.visit_tilde(tilde);
-
-                if let Some(s) = s {
-                    v.visit_s(s);
-                }
-
-                v.visit_expr_without_suffix(operand);
-            }
-            syntax::ExprWithoutSuffix::Call {
-                lt,
-                s,
-                ident,
-                s2,
-                gt,
-            } => {
-                v.visit_lt(lt);
-
-                if let Some(s) = s {
-                    v.visit_s(s);
-                }
-
-                v.visit_ident(ident);
-
-                if let Some(s) = s2 {
-                    v.visit_s(s);
-                }
-
-                v.visit_gt(gt);
-            }
-            syntax::ExprWithoutSuffix::Paren {
-                open,
-                s,
-                expr,
-                s2,
-                close,
-            } => {
-                v.visit_paren_start(open);
-
-                if let Some(s) = s {
-                    v.visit_s(s);
-                }
-
-                v.visit_expr(expr);
-
-                if let Some(s) = s2 {
-                    v.visit_s(s);
-                }
-
-                v.visit_paren_end(close);
-            }
+            syntax::ExprWithoutSuffix::NegatedSet(part) => v.visit_negated_set(part),
+            syntax::ExprWithoutSuffix::Call(part) => v.visit_call(part),
+            syntax::ExprWithoutSuffix::Paren(part) => v.visit_paren(part),
             syntax::ExprWithoutSuffix::Set(set) => v.visit_set(set),
             syntax::ExprWithoutSuffix::LitStr(lit) => v.visit_lit_str(lit),
             syntax::ExprWithoutSuffix::LitUnicode(lit) => v.visit_lit_unicode(lit),
@@ -618,26 +611,74 @@ pub mod walk {
         }
     }
 
+    /// The `~` that refuses an operand, the run after it, and the operand it
+    /// refuses.
+    pub fn walk_negated_set<'ast, I: UnsynInput, V: ?Sized + Visit<'ast, I>>(
+        v: &mut V,
+        node: &'ast syntax::NegatedSet<I>,
+    ) {
+        v.visit_tilde(&node.f1);
+
+        if let Some(s) = &node.f2 {
+            v.visit_s(s);
+        }
+
+        v.visit_expr_without_suffix(&node.expr_without_suffix);
+    }
+
+    /// The `<`, the name and the `>` of a call of an external, with the runs
+    /// between them.
+    pub fn walk_call<'ast, I: UnsynInput, V: ?Sized + Visit<'ast, I>>(
+        v: &mut V,
+        node: &'ast syntax::Call<I>,
+    ) {
+        v.visit_lt(&node.f1);
+
+        if let Some(s) = &node.f2 {
+            v.visit_s(s);
+        }
+
+        v.visit_ident(&node.ident);
+
+        if let Some(s) = &node.f3 {
+            v.visit_s(s);
+        }
+
+        v.visit_gt(&node.f4);
+    }
+
+    /// The `(`, the expression and the `)` of a group, with the runs between them.
+    pub fn walk_paren<'ast, I: UnsynInput, V: ?Sized + Visit<'ast, I>>(
+        v: &mut V,
+        node: &'ast syntax::Paren<I>,
+    ) {
+        v.visit_paren_start(&node.f1);
+
+        if let Some(s) = &node.f2 {
+            v.visit_s(s);
+        }
+
+        v.visit_expr(&node.expr);
+
+        if let Some(s) = &node.f3 {
+            v.visit_s(s);
+        }
+
+        v.visit_paren_end(&node.f4);
+    }
+
     pub fn walk_expr_with_suffix<'ast, I: UnsynInput, V: ?Sized + Visit<'ast, I>>(
         v: &mut V,
         node: &'ast syntax::ExprWithSuffix<I>,
     ) {
         match node {
-            syntax::ExprWithSuffix::Suffixed { target, s, suffix } => {
-                v.visit_expr_without_suffix(target);
-
-                if let Some(s) = s {
-                    v.visit_s(s);
-                }
-
-                v.visit_suffix(suffix);
-            }
+            syntax::ExprWithSuffix::Suffixed(part) => v.visit_suffixed(part),
             syntax::ExprWithSuffix::Concat {
-                target,
-                s,
-                keyword,
-                s2,
-                suffix,
+                expr_without_suffix: target,
+                f1: s,
+                f2: keyword,
+                f3: s2,
+                expr_no_top_alt: suffix,
             } => {
                 v.visit_expr_without_suffix(target);
 
@@ -654,11 +695,11 @@ pub mod walk {
                 v.visit_expr_no_top_alt(suffix);
             }
             syntax::ExprWithSuffix::Except {
-                target,
-                s,
-                keyword,
-                s2,
-                tokens,
+                expr_without_suffix: target,
+                f1: s,
+                f2: keyword,
+                f3: s2,
+                f4: tokens,
             } => {
                 v.visit_expr_without_suffix(target);
 
@@ -701,37 +742,47 @@ pub mod walk {
         node: &'ast syntax::RepeatBound<I>,
     ) {
         match node {
-            syntax::RepeatBound::RangeTo(s, comma, s2, end) => {
-                if let Some(s) = s {
-                    v.visit_s(s);
-                }
-
-                v.visit_comma(comma);
-
-                if let Some(s) = s2 {
-                    v.visit_s(s);
-                }
-
-                v.visit_lit_dec(end);
-            }
-            syntax::RepeatBound::RangeFrom(start, s, comma, end) => {
-                v.visit_lit_dec(start);
-
-                if let Some(s) = s {
-                    v.visit_s(s);
-                }
-
-                v.visit_comma(comma);
-
-                if let Some((s, end)) = end {
-                    if let Some(s) = s {
-                        v.visit_s(s);
-                    }
-
-                    v.visit_lit_dec(end);
-                }
-            }
+            syntax::RepeatBound::RangeTo(part) => v.visit_range_to(part),
+            syntax::RepeatBound::RangeFrom(part) => v.visit_range_from(part),
             syntax::RepeatBound::LitDec(count) => v.visit_lit_dec(count),
+        }
+    }
+
+    /// The comma that opens a `RangeTo`, the run it reads before its bound, and
+    /// the bound above.
+    pub fn walk_range_to<'ast, I: UnsynInput, V: ?Sized + Visit<'ast, I>>(
+        v: &mut V,
+        node: &'ast syntax::RangeTo<I>,
+    ) {
+        v.visit_comma(&node.f1);
+
+        if let Some(s) = &node.f2 {
+            v.visit_s(s);
+        }
+
+        v.visit_lit_dec(&node.lit_dec);
+    }
+
+    /// The bound below of a `RangeFrom`, the comma that divides the two, and the
+    /// bound above with the run before it when one is written.
+    pub fn walk_range_from<'ast, I: UnsynInput, V: ?Sized + Visit<'ast, I>>(
+        v: &mut V,
+        node: &'ast syntax::RangeFrom<I>,
+    ) {
+        v.visit_lit_dec(&node.lit_dec);
+
+        if let Some(s) = &node.f1 {
+            v.visit_s(s);
+        }
+
+        v.visit_comma(&node.f2);
+
+        if let Some((s, end)) = &node.f3 {
+            if let Some(s) = s {
+                v.visit_s(s);
+            }
+
+            v.visit_lit_dec(end);
         }
     }
 
@@ -740,21 +791,35 @@ pub mod walk {
         node: &'ast syntax::Range<I>,
     ) {
         match node {
-            // The `-` of this form is joined to both of its neighbours by the
-            // `concat` the rule asks for, so it is the text of the node rather
-            // than a terminal of it, and reaches the visitor as text — as it
-            // does for the form of two strings.
-            syntax::Range::UnicodeRange(start, dash, end) => {
-                v.visit_lit_unicode(start);
-                v.visit_text(dash);
-                v.visit_lit_unicode(end);
-            }
-            syntax::Range::StrRange(start, dash, end) => {
-                v.visit_lit_str(start);
-                v.visit_text(dash);
-                v.visit_lit_str(end);
-            }
+            syntax::Range::UnicodeRange(part) => v.visit_unicode_range(part),
+            syntax::Range::StrRange(part) => v.visit_str_range(part),
         }
+    }
+
+    /// The two code points of a range, with the dash that divides them.
+    ///
+    /// The `-` is joined to both of its neighbours by the `concat` the rule asks
+    /// for, so it is the text of the node rather than a terminal of it, and
+    /// reaches the visitor as text.
+    pub fn walk_unicode_range<'ast, I: UnsynInput, V: ?Sized + Visit<'ast, I>>(
+        v: &mut V,
+        node: &'ast syntax::UnicodeRange<I>,
+    ) {
+        v.visit_lit_unicode(&node.lit_unicode);
+        v.visit_text(&node.f1);
+        v.visit_lit_unicode(&node.f2);
+    }
+
+    /// The two strings of a range, with the dash that divides them, reached the
+    /// same way as [`walk_unicode_range`] since the rule asks for this dash by
+    /// `concat` too.
+    pub fn walk_str_range<'ast, I: UnsynInput, V: ?Sized + Visit<'ast, I>>(
+        v: &mut V,
+        node: &'ast syntax::StrRange<I>,
+    ) {
+        v.visit_lit_str(&node.lit_str);
+        v.visit_text(&node.f1);
+        v.visit_lit_str(&node.f2);
     }
 
     pub fn walk_set_item<'ast, I: UnsynInput, V: ?Sized + Visit<'ast, I>>(
@@ -831,6 +896,21 @@ pub mod walk {
 
     /// `('*' | '?' | '+' | Repeat)`, the four quantity operators the production
     /// writes as one group.
+    /// The operand a quantity operator applies to, the run before the operator,
+    /// and the operator itself.
+    pub fn walk_suffixed<'ast, I: UnsynInput, V: ?Sized + Visit<'ast, I>>(
+        v: &mut V,
+        node: &'ast syntax::Suffixed<I>,
+    ) {
+        v.visit_expr_without_suffix(&node.expr_without_suffix);
+
+        if let Some(s) = &node.f1 {
+            v.visit_s(s);
+        }
+
+        v.visit_suffix(&node.suffix);
+    }
+
     pub fn walk_suffix<'ast, I: UnsynInput, V: ?Sized + Visit<'ast, I>>(
         v: &mut V,
         node: &'ast syntax::Suffix<I>,

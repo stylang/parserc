@@ -372,36 +372,86 @@ first, rest }` and named `OneOrMore<I,X>` are the deviation. So `Set`/`Expr`/
 decision to defer. What remains genuinely deferred is only the `Suffix`/
 `AsciiEscape` place-names (P5) and the serde key change.
 
-### The remaining 134, by kind (measured, not estimated)
+### Path A taken: the hand tree grew the eight rule nodes
 
-| kind | count | is it S4-rename? |
+This round does **not** bootstrap for real — the hand tree is grown to match the
+generated one rather than the generated file replacing it. 134 → **105**.
+
+The eight types were added to `syntax.rs` (`NegatedSet`, `Call`, `Paren`,
+`Suffixed`, `RangeTo`, `RangeFrom`, `UnicodeRange`, `StrRange`) with the
+generated tree's field names and order, and the four inlining variants now hold
+a node instead. No hand-written parse was needed: the derive produces it from the
+same `#[parserc(...)]` attributes the neighbouring structs already carry.
+
+**Box held exactly to the three cyclic variants — verified on the tree, not
+asserted:** `NegatedSet [BOX]`, `Paren [BOX]`, `Suffixed [BOX]`, and bare
+`Call`, `Set`, `LitStr`, `LitUnicode`, `Ident`, `RangeTo`, `RangeFrom`,
+`UnicodeRange`, `StrRange`, `LitDec`. `Call` stays bare because it reaches only
+`Ident`, a lexer rule, so it sits on no containment cycle. `cyclic_syntax_refs`
+was never touched.
+
+**One field was deleted, and it was right.** Hand `RangeTo` carried four fields
+where the generated tree has three: an extra run *before* the comma. That slot
+is a double count — the run after `{` already belongs to `Repeat.s` (generated
+`Repeat.f2`), and `Repeat`'s whitespace is greedy, so the extra field could only
+ever be `None`. The visitor's "every character handed to exactly one `visit_text`"
+assertion and the `two_trees` span parity both still pass, which is the evidence
+the trivia is not lost. Recorded here because a CST may not drop source text on
+a judgement call, and this one was checked rather than assumed.
+
+**A real remaining difference this surfaced, not yet settled:** the generated
+visitor hands an anonymous punct field to `visit_text`, while the hand `Visit`
+keeps a hook per punct (`visit_tilde`, `visit_lt`, `visit_comma`, …). The two
+visitors therefore do not have the same method set. Whichever side moves, it is a
+visitor question, not a naming one.
+
+### The remaining 105, by kind (measured)
+
+| kind | count | next step |
 |---|---|---|
-| `Suffix::Star/Question/Plus` fallback names | 26 | no — P5, contested |
-| `Box<X>` vs inline-named variant shape | ~86 | no — shape refactor |
-| `Expr`/`Set` named-vs-tuple | ~9 | no — shape refactor |
-| `OneOrMore` container absent in generated | 11 | open decision (below) |
+| `ExprWithSuffix::Concat`/`Except` field names | 13 | pure rename, hand moves to generated (`expr_without_suffix`/`f1`/`f2`/`f3`/`expr_no_top_alt`) |
+| `Set`/`Expr` named struct → tuple | ~11 | shape, touches `read.rs::members` + destructuring sites |
+| `Suffix::Star/Question/Plus` place-names | 26 | **P5 hold** |
+| `OneOrMore` container absent in generated | 11 | open decision |
+| E0308, the two trees' generics | ~44 | follows from the rows above |
 
-So **no further *renames* are safe to make without a decision** — the naming
-that is unambiguously right is done. What is left is two shape refactors, one
-P5 hold, and one open decision:
+### `Concat`/`Except` names — done, 105 → **93**
 
-- [ ] **`OneOrMore` (11 errors, needs your call):** the hand tree has
+E0026 cleared to zero. Done through rebinding patterns (`new: old`) so no
+function body moved. Box neither added nor removed — re-checked on the tree:
+still exactly `NegatedSet`, `Paren`, `Suffixed`.
+
+**Five differences left deliberately, and that is the honest state.** Generated
+has `Box<ExprWithoutSuffix<I>>` for `Concat/Except.expr_without_suffix` and for
+`Except.f4` where the hand tree is bare, and spells the two keyword fields as
+`I` + `keyword = …` where the hand tree uses its `Concat<I>`/`Except<I>` punct
+types. Those are type/box changes, outside a names-only pass, and they now make
+up most of the remaining E0308. `ExprWithSuffix` → `Except` → `ExprWithoutSuffix`
+→ `ExprWithSuffix` **is** a containment cycle, so those boxes are most likely
+right and the hand tree the loose side — but that is a sizing judgement to make
+once and on purpose, not to slip in while renaming.
+
+### The remaining 93, by kind (measured)
+
+| kind | count | needs |
+|---|---|---|
+| `Suffix::Star/Question/Plus` place-names | 26 | a P5 ruling |
+| E0308: box depth, and `&generated::LitStr<I>` vs `&lexer::LitStr<I>` | 49 | the five boxes above |
+| `OneOrMore` absent from generated | 11 | a decision |
+| `Expr::first`/`rest`, `Set::items`/`tail` | 7 | named struct → tuple (README §11) |
+
+### Still open, carried forward
+
+- [ ] **`OneOrMore` (11 errors, needs a call):** the hand tree has
       `OneOrMore<I, X>` for `X+`; the generator emits a `Vec` plus a separate
       first element and writes no such type. Either the generator emits
-      `OneOrMore` as its own type, or the hand container is dropped and `X+`
-      is modelled the generated way. This is a shape choice, not a rename.
-- [ ] `Set`/`Expr` → tuple; variants → `Box<X<I>>`: a stage-sized, `edit_file`
-      -only shape refactor of the hand tree.
+      `OneOrMore` as its own type, or the hand container is dropped and `X+` is
+      modelled the generated way. A shape choice, not a rename.
 - [ ] `Suffix`/`AsciiEscape` place-names: P5, held out deliberately.
 
 Serde note: `Crate` derives `Serialize`/`Deserialize`, so the JSON keys became
 `inner_doc`/`item`. No snapshot in the repo depends on it (suite green), but it
 is an external format change.
-
-- [ ] apply the *rule* renames above to the hand `syntax.rs`/`lexer.rs` and
-      their references in `read.rs`/`semantic.rs`/`codegen.rs`/`visit.rs` +
-      `two_trees.rs`/`unsyn_us.rs`, family by family, `cargo check` each
-- [ ] re-measure; what is left is exactly the P5 fallback/style set
 - [ ] `OneOrMore`: generate the type or drop the hand container (decide)
 
 **What S4 actually is, measured before any of it was written.** Grouping the
