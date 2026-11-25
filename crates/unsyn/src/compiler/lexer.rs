@@ -173,10 +173,10 @@ where
 {
     /// The `r#` that opens the name.
     #[parserc(keyword = "r#", map_err = SyntaxKind::Ident.map())]
-    pub sigil: I,
+    pub f1: I,
     /// The name the sigil marks, read by the rule that refuses a word of the
     /// language — which is what keeps `r#` for the words of Rust alone.
-    pub name: NonKeywordIdent<I>,
+    pub non_keyword_ident: NonKeywordIdent<I>,
 }
 
 /// A name that is not a word of the language.
@@ -404,8 +404,14 @@ where
 
 // ---------------------------------------------------------------------------
 // `lexer QuoteEscape -> '\\'';`
-// `lexer AsciiEscape -> '\\x' OctDigit HexDigit | '\\n' | '\\r' | '\\t'`
-// `                   | '\\\\' | '\\0';`
+// `lexer AsciiEscape -> AsciiHexEscape | AsciiNewline | AsciiCarriageReturn`
+// `                   | AsciiTab | AsciiBackslash | AsciiNull;`
+// `lexer AsciiHexEscape -> '\\x' OctDigit HexDigit;`
+// `lexer AsciiNewline -> '\\n';`
+// `lexer AsciiCarriageReturn -> '\\r';`
+// `lexer AsciiTab -> '\\t';`
+// `lexer AsciiBackslash -> '\\\\';`
+// `lexer AsciiNull -> '\\0';`
 // `lexer UnicodeEscape -> '\\u{' ( HexDigit '_'* ){1, 6} '}';`
 // ---------------------------------------------------------------------------
 
@@ -420,39 +426,88 @@ where
 
 /// An escape for one of the characters ASCII writes with a backslash.
 ///
-/// The rule is a choice, and the first of its alternatives is a sequence — the
-/// marker of `\x` and the two digits of the seven-bit code it spells — which is
-/// what the named fields of that variant hold.
+/// The rule is a choice of six named rules, so each alternative is a node of its
+/// own and the walk reaches it through that node's hook.
 #[derive(Debug, PartialEq, Eq, PartialOrd, Ord, Clone, Syntax)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub enum AsciiEscape<I>
 where
     I: UnsynInput,
 {
-    /// `\x` and the two digits of a code of seven bits, which is why the first
-    /// of them is refused above `7`.
-    Hex {
-        /// The `\x` that opens the escape.
-        ///
-        /// What is read past this marker is a written escape going wrong, and
-        /// no enclosing choice can put it right.
-        #[parserc(crucial, keyword = "\\x", map_err = SyntaxKind::AsciiEscape.map())]
-        marker: I,
-        /// The leading digit, bounded by [`OctDigit`].
-        oct: OctDigit<I>,
-        /// The second digit of the pair.
-        hex: HexDigit<I>,
-    },
+    /// `\x` and the two digits of a code of seven bits.
+    AsciiHexEscape(AsciiHexEscape<I>),
     /// `\n`, a line feed.
-    N(#[parserc(keyword = "\\n")] I),
+    AsciiNewline(AsciiNewline<I>),
     /// `\r`, a carriage return.
-    R(#[parserc(keyword = "\\r")] I),
+    AsciiCarriageReturn(AsciiCarriageReturn<I>),
     /// `\t`, a tab.
-    T(#[parserc(keyword = "\\t")] I),
+    AsciiTab(AsciiTab<I>),
     /// `\\`, the backslash itself.
-    Backslash(#[parserc(keyword = "\\\\")] I),
+    AsciiBackslash(AsciiBackslash<I>),
     /// `\0`, the nul character.
-    Zero(#[parserc(keyword = "\\0")] I),
+    AsciiNull(AsciiNull<I>),
+}
+
+/// `lexer AsciiNewline -> '\\n';`: an escaped line feed.
+#[derive(Debug, PartialEq, Eq, PartialOrd, Ord, Clone, Syntax)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+#[parserc(keyword = "\\n", map_err = SyntaxKind::AsciiEscape.map())]
+pub struct AsciiNewline<I>(pub I)
+where
+    I: UnsynInput;
+
+/// `lexer AsciiCarriageReturn -> '\\r';`: an escaped carriage return.
+#[derive(Debug, PartialEq, Eq, PartialOrd, Ord, Clone, Syntax)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+#[parserc(keyword = "\\r", map_err = SyntaxKind::AsciiEscape.map())]
+pub struct AsciiCarriageReturn<I>(pub I)
+where
+    I: UnsynInput;
+
+/// `lexer AsciiTab -> '\\t';`: an escaped tab.
+#[derive(Debug, PartialEq, Eq, PartialOrd, Ord, Clone, Syntax)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+#[parserc(keyword = "\\t", map_err = SyntaxKind::AsciiEscape.map())]
+pub struct AsciiTab<I>(pub I)
+where
+    I: UnsynInput;
+
+/// `lexer AsciiBackslash -> '\\\\';`: an escaped backslash.
+#[derive(Debug, PartialEq, Eq, PartialOrd, Ord, Clone, Syntax)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+#[parserc(keyword = "\\\\", map_err = SyntaxKind::AsciiEscape.map())]
+pub struct AsciiBackslash<I>(pub I)
+where
+    I: UnsynInput;
+
+/// `lexer AsciiNull -> '\\0';`: an escaped nul.
+#[derive(Debug, PartialEq, Eq, PartialOrd, Ord, Clone, Syntax)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+#[parserc(keyword = "\\0", map_err = SyntaxKind::AsciiEscape.map())]
+pub struct AsciiNull<I>(pub I)
+where
+    I: UnsynInput;
+
+/// `lexer AsciiHexEscape -> '\\x' OctDigit HexDigit;`: the escape of a code of
+/// seven bits, spelled by the two hex digits after its marker.
+///
+/// The three operands the rule writes are the three fields the node holds. What
+/// is read past the marker is a written escape going wrong, and no enclosing
+/// choice can mean anything else there — which is why the marker is `crucial`.
+#[derive(Debug, PartialEq, Eq, PartialOrd, Ord, Clone, Syntax)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+pub struct AsciiHexEscape<I>
+where
+    I: UnsynInput,
+{
+    /// The `\x` that opens the escape.
+    #[parserc(crucial, keyword = "\\x", map_err = SyntaxKind::AsciiEscape.map())]
+    pub f1: I,
+    /// The leading digit, bounded by [`OctDigit`] — which is why the first of
+    /// them is refused above `7`.
+    pub oct_digit: OctDigit<I>,
+    /// The second digit of the pair.
+    pub hex_digit: HexDigit<I>,
 }
 
 /// An escape of a code point, as `\u{1F600}` is.
@@ -720,188 +775,230 @@ where
     plain_refusing(input, &[], &["/*", "*/"])
 }
 
-/// The whole of a block comment: the body form, or one of the two closed forms.
+/// The text one parser read, cut from where it began.
 ///
-/// The alternatives come in the order the spec writes them. `/***/` is still
-/// read whole, because the body form takes `/*`, the two stars of its head and
-/// the closing that follows them, which is five characters — so the shorter
-/// closed form never wins the text the longer one means.
-fn read_block_comment<I>(input: &mut I) -> Result<I, <I as Input>::Error>
+/// A rule that holds no field of its own still has text, and a run of it is what
+/// a sequence of the enclosing rule keeps: the parser is asked to read, and what
+/// it took is the node, not whatever shape it wore the taking.
+fn text_of<P, I>(parser: P, input: &mut I) -> Result<I, <I as Input>::Error>
 where
     I: UnsynInput,
+    P: Parser<I>,
 {
-    read_block_comment_body
-        .or(keyword("/**/").map_err(SyntaxKind::BlockComment.map()))
-        .or(keyword("/***/").map_err(SyntaxKind::BlockComment.map()))
-        .parse(input)
+    let mut whole = input.clone();
+    let before = input.len();
+
+    parser.parse(input)?;
+
+    Ok(whole.split_to(before - input.len()))
 }
 
-/// Reads the first alternative of [`BlockComment`]: the opening, the head, the
-/// body and the closing of one comment.
-fn read_block_comment_body<I>(input: &mut I) -> Result<I, <I as Input>::Error>
+/// Reads the third operand of [`BlockCommentBody`]: as many groups and further
+/// runs as the comment takes, until the pair that closes it begins.
+fn read_block_comment_body_3<I>(input: &mut I) -> Result<I, <I as Input>::Error>
 where
     I: UnsynInput,
 {
     let mut whole = input.clone();
     let before = input.len();
 
-    keyword("/*")
-        .parse(input)
-        .map_err(SyntaxKind::BlockComment.map())?;
-
-    // The head: one character that is no star, no bang and opens no group; the
-    // two stars of a comment that closes at once; or a group of its own.
-    head_plain
-        .or(keyword("**").map_err(SyntaxKind::BlockComment.map()))
-        .or(<BlockCommentOrDoc<I>>::into_parser().map(|node| node.0))
-        .parse(input)?;
-
-    // The body, until the group that closes here arrives.
     loop {
-        let part = <BlockCommentOrDoc<I>>::into_parser()
-            .map(|node| node.0)
-            .or(tail_plain)
-            .ok()
-            .parse(input)?;
+        let part =
+            (|input: &mut I| text_of(<BlockCommentOrDoc<I> as Syntax<I>>::into_parser(), input))
+                .or(tail_plain)
+                .ok()
+                .parse(input)?;
 
         if part.is_none() {
             break;
         }
     }
 
-    keyword("*/")
-        .parse(input)
-        .map_err(SyntaxKind::BlockComment.map())?;
-
     Ok(whole.split_to(before - input.len()))
 }
 
-/// Reads [`InnerBlockDoc`]: its opening, a body of groups and text, and the
-/// closing of its own.
-fn read_inner_block_doc<I>(input: &mut I) -> Result<I, <I as Input>::Error>
+/// Reads the second operand of [`InnerBlockDoc`]: the groups and text the body
+/// holds, until the pair that closes the document begins.
+fn read_inner_block_doc_2<I>(input: &mut I) -> Result<I, <I as Input>::Error>
 where
     I: UnsynInput,
 {
     let mut whole = input.clone();
     let before = input.len();
 
-    keyword("/*!")
-        .parse(input)
-        .map_err(SyntaxKind::InnerBlockDoc.map())?;
-
     loop {
-        let part = <BlockCommentOrDoc<I>>::into_parser()
-            .map(|node| node.0)
-            .or(tail_plain)
-            .ok()
-            .parse(input)?;
+        let part =
+            (|input: &mut I| text_of(<BlockCommentOrDoc<I> as Syntax<I>>::into_parser(), input))
+                .or(tail_plain)
+                .ok()
+                .parse(input)?;
 
         if part.is_none() {
             break;
         }
     }
 
-    keyword("*/")
-        .parse(input)
-        .map_err(SyntaxKind::InnerBlockDoc.map())?;
-
     Ok(whole.split_to(before - input.len()))
 }
 
-/// Reads [`OuterBlockDoc`]: its opening of three, the head that is never a third
-/// star, the body, and the closing.
-fn read_outer_block_doc<I>(input: &mut I) -> Result<I, <I as Input>::Error>
+/// Reads the third operand of [`OuterBlockDoc`]: as many groups and further runs
+/// as the document takes.
+fn read_outer_block_doc_3<I>(input: &mut I) -> Result<I, <I as Input>::Error>
 where
     I: UnsynInput,
 {
     let mut whole = input.clone();
     let before = input.len();
 
-    keyword("/**")
-        .parse(input)
-        .map_err(SyntaxKind::OuterBlockDoc.map())?;
-
-    outer_head_plain
-        .or(<BlockCommentOrDoc<I>>::into_parser().map(|node| node.0))
-        .parse(input)?;
-
     loop {
-        let part = <BlockCommentOrDoc<I>>::into_parser()
-            .map(|node| node.0)
-            .or(tail_plain)
-            .ok()
-            .parse(input)?;
+        let part =
+            (|input: &mut I| text_of(<BlockCommentOrDoc<I> as Syntax<I>>::into_parser(), input))
+                .or(tail_plain)
+                .ok()
+                .parse(input)?;
 
         if part.is_none() {
             break;
         }
     }
 
-    keyword("*/")
-        .parse(input)
-        .map_err(SyntaxKind::OuterBlockDoc.map())?;
-
     Ok(whole.split_to(before - input.len()))
-}
-
-/// Reads [`BlockCommentOrDoc`], the one rule that nests.
-///
-/// The order is the order of the spec, and it matters only for `/***`, where a
-/// comment and an outer document both begin with the three characters and the
-/// fourth decides: the comment is read first, and the text an outer document
-/// would have taken is refused, so the choice settles on the comment.
-fn read_block_comment_or_doc<I>(input: &mut I) -> Result<I, <I as Input>::Error>
-where
-    I: UnsynInput,
-{
-    <BlockComment<I>>::into_parser()
-        .map(|node| node.0)
-        .or(<OuterBlockDoc<I>>::into_parser().map(|node| node.0))
-        .or(<InnerBlockDoc<I>>::into_parser().map(|node| node.0))
-        .parse(input)
 }
 
 /// A block comment, which nests and is closed by the `*/` of its own opening.
 ///
-/// The comment is one token of text, as the generated code reads it: what a
-/// pass asks of a comment is nothing at all — it is trivia — and the parts the
-/// hand tree used to keep were only how the reading found the closing that
-/// belongs to this opening.
+/// The rule is a choice of three named rules, so each form is a node of its own
+/// and the walk reaches it through that node's hook.
 #[derive(Debug, PartialEq, Eq, PartialOrd, Ord, Clone, Syntax)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
-#[parserc(read_block_comment)]
-pub struct BlockComment<I>(pub I)
+pub enum BlockComment<I>
+where
+    I: UnsynInput,
+{
+    /// `/*` … `*/`, a comment that holds something.
+    BlockCommentBody(BlockCommentBody<I>),
+    /// `/**/`, the comment that closes at once.
+    EmptyBlockComment(EmptyBlockComment<I>),
+    /// `/***/`, the comment that closes at once after a star.
+    StarredEmptyBlockComment(StarredEmptyBlockComment<I>),
+}
+
+/// `lexer EmptyBlockComment -> '/**/';`: a block comment with nothing between
+/// its pair of stars.
+#[derive(Debug, PartialEq, Eq, PartialOrd, Ord, Clone, Syntax)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+#[parserc(keyword = "/**/", map_err = SyntaxKind::BlockComment.map())]
+pub struct EmptyBlockComment<I>(pub I)
 where
     I: UnsynInput;
 
-/// A block document that describes the file it is written in.
+/// `lexer StarredEmptyBlockComment -> '/***/';`: a block comment whose one
+/// content is the star that keeps it from being an outer document.
 #[derive(Debug, PartialEq, Eq, PartialOrd, Ord, Clone, Syntax)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
-#[parserc(read_inner_block_doc)]
-pub struct InnerBlockDoc<I>(pub I)
+#[parserc(keyword = "/***/", map_err = SyntaxKind::BlockComment.map())]
+pub struct StarredEmptyBlockComment<I>(pub I)
 where
     I: UnsynInput;
 
-/// A block document that describes the definition after it.
+/// `lexer BlockCommentBody -> '/*' ( … ) ( … )* '*/';`: a comment that holds
+/// something. The four operands the rule writes are the four fields the node
+/// holds, and the nesting the reading has to count lives in the middle two.
+#[derive(Debug, PartialEq, Eq, PartialOrd, Ord, Clone, Syntax)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+pub struct BlockCommentBody<I>(
+    /// The `/*` that opens the comment.
+    #[parserc(keyword = "/*", map_err = SyntaxKind::BlockComment.map())]
+    pub I,
+    /// The head: one character that is no star, no bang and opens no group; the
+    /// two stars of a comment that closes at once; or a group of its own.
+    #[parserc(
+        parser = head_plain
+            .or(keyword("**").map_err(SyntaxKind::BlockComment.map()))
+            .or(|input: &mut I| {
+                text_of(<BlockCommentOrDoc<I> as Syntax<I>>::into_parser(), input)
+            })
+    )]
+    pub I,
+    /// As many groups and further runs as the comment takes, until the pair that
+    /// closes it begins.
+    #[parserc(read_block_comment_body_3)]
+    pub I,
+    /// The `*/` that closes the comment.
+    #[parserc(keyword = "*/", map_err = SyntaxKind::BlockComment.map())]
+    pub I,
+)
+where
+    I: UnsynInput;
+
+/// `lexer InnerBlockDoc -> '/*!' ( … )* '*/';`: a block document that describes
+/// the file it is written in.
+#[derive(Debug, PartialEq, Eq, PartialOrd, Ord, Clone, Syntax)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+pub struct InnerBlockDoc<I>(
+    /// The `/*!` that opens the document.
+    #[parserc(keyword = "/*!", map_err = SyntaxKind::InnerBlockDoc.map())]
+    pub I,
+    /// The groups and text the body holds.
+    #[parserc(read_inner_block_doc_2)]
+    pub I,
+    /// The `*/` that closes the document.
+    #[parserc(keyword = "*/", map_err = SyntaxKind::InnerBlockDoc.map())]
+    pub I,
+)
+where
+    I: UnsynInput;
+
+/// `lexer OuterBlockDoc -> '/**' ( … ) ( … )* '*/';`: a block document that
+/// describes the definition after it.
 ///
 /// The opening of three refuses what the head set keeps out of the body, which
 /// is what leaves `/**/` and `/***/` to the block comment: an opening of three
 /// is a comment that closes at once, and not an empty document.
 #[derive(Debug, PartialEq, Eq, PartialOrd, Ord, Clone, Syntax)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
-#[parserc(read_outer_block_doc)]
-pub struct OuterBlockDoc<I>(pub I)
+pub struct OuterBlockDoc<I>(
+    /// The `/**` that opens the document.
+    #[parserc(keyword = "/**", map_err = SyntaxKind::OuterBlockDoc.map())]
+    pub I,
+    /// The head: one character that is no star and opens no group, or a group of
+    /// its own.
+    #[parserc(
+        parser = outer_head_plain
+            .or(|input: &mut I| {
+                text_of(<BlockCommentOrDoc<I> as Syntax<I>>::into_parser(), input)
+            })
+    )]
+    pub I,
+    /// As many groups and further runs as the document takes.
+    #[parserc(read_outer_block_doc_3)]
+    pub I,
+    /// The `*/` that closes the document.
+    #[parserc(keyword = "*/", map_err = SyntaxKind::OuterBlockDoc.map())]
+    pub I,
+)
 where
     I: UnsynInput;
 
 /// A block group, which is the one rule that nests: a comment may hold a
 /// document, and a document may hold a comment.
+///
+/// The order of the alternatives is the order of the spec, and it matters only
+/// for `/***`, where a comment and an outer document both begin with the three
+/// characters: the comment is read first, so the choice settles on the comment.
 #[derive(Debug, PartialEq, Eq, PartialOrd, Ord, Clone, Syntax)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
-#[parserc(read_block_comment_or_doc)]
-pub struct BlockCommentOrDoc<I>(pub I)
+pub enum BlockCommentOrDoc<I>
 where
-    I: UnsynInput;
+    I: UnsynInput,
+{
+    /// A comment, which wins the three stars.
+    BlockComment(BlockComment<I>),
+    /// A document of a definition.
+    OuterBlockDoc(OuterBlockDoc<I>),
+    /// A document of the file.
+    InnerBlockDoc(InnerBlockDoc<I>),
+}
 
 #[cfg(test)]
 mod tests {
@@ -1326,17 +1423,18 @@ mod tests {
     #[test]
     fn an_unterminated_group_is_answered_by_no_form_of_its_rule() {
         // The comment is a choice of three forms, and none of them is what the
-        // text turns out to hold: the refusal is the longest form the rule
-        // could have been, which is what the generated reading of the same
-        // rule answers too — the two now report the same place, and differ
-        // only in that the hand file names what it expected.
+        // text turns out to hold. The reading reports the choice it could not
+        // settle, which is the whole of what it had reached for — and this is
+        // now the answer the generated tree gives of the same rule, character
+        // for character: the hand file kept its own longest-form span only
+        // while a hand-written scan read the comment, and the derive does not.
         assert_eq!(
             parse::<BlockComment<_>>("/* a "),
-            Err(UnsynError::Syntax(
-                SyntaxKind::BlockComment,
+            Err(UnsynError::Kind(Kind::Syntax(
+                "BlockComment",
                 ControlFlow::Recovable,
-                Span::Range(0..5)
-            ))
+                Span::Range(0..1)
+            )))
         );
 
         // The two documents are one form each, so what is missing is exactly

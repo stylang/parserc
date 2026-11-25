@@ -435,7 +435,7 @@ fn the_generated_parser_reads_the_spec_it_was_generated_from() {
         })
         .collect();
 
-    assert_eq!(hand_names.len(), 50, "every definition of the spec");
+    assert_eq!(hand_names.len(), 60, "every definition of the spec");
     assert_eq!(
         generated_names, hand_names,
         "the same definitions, where they were written"

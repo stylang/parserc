@@ -41,6 +41,7 @@ fn main() {
     use compiler::semantic::analyze;
     use compiler::syntax::Crate;
     use parserc::{Input, syntax::SyntaxInput as _};
+    use quote::ToTokens as _;
 
     // The first half: the parser a build wrote, on the file that made it. This
     // half already holds — it is what `unsyn_us.rs` proves today.
@@ -72,11 +73,81 @@ fn main() {
         .build()
         .expect("the spec, read by its own parser, builds");
 
-    // The comparison. Whitespace only: a build writes tokens, and the kept file
-    // is those tokens as `rustfmt` laid them out.
-    let same = KEPT
-        .split_whitespace()
-        .eq(code.to_string().split_whitespace());
+    // The comparison. What the file says about itself is not part of the code
+    // it is: the kept file carries a header of doc comments and `allow`s that
+    // no build writes, so both sides are reduced to their items before they are
+    // compared, exactly as `tests/unsyn_us.rs` does.
+    let items = |code: &str| -> Vec<String> {
+        let mut file = syn::parse_file(code).expect("the code should be Rust");
+        file.attrs.clear();
+        file.shebang = None;
+        // A trailing comma before a closer is layout, not code: `rustfmt` adds
+        // one to every list it breaks over lines, and a build writes none. It
+        // is dropped here by walking the token *tree* — cutting it out of the
+        // stringified form cannot work, because the printer joins the last token
+        // to the closer (`I)`) so the comma is not a separable word.
+        fn norm(ts: proc_macro2::TokenStream) -> Vec<String> {
+            use proc_macro2::{Delimiter, TokenTree};
+            let mut out: Vec<String> = Vec::new();
+            for tt in ts {
+                match tt {
+                    TokenTree::Group(g) => {
+                        let mut inner = norm(g.stream());
+                        while inner.last().map(|s| s == ",") == Some(true) {
+                            inner.pop();
+                        }
+                        let (o, c) = match g.delimiter() {
+                            Delimiter::Parenthesis => ("(", ")"),
+                            Delimiter::Bracket => ("[", "]"),
+                            Delimiter::Brace => ("{", "}"),
+                            Delimiter::None => ("", ""),
+                        };
+                        out.push(format!("{o}{}{c}", inner.join(" ")));
+                    }
+                    other => out.push(other.to_string()),
+                }
+            }
+            // a generic-argument list ends with a plain `>` punct, not a group,
+            // so the comma before one drops the same way
+            let mut i = 0;
+            while i + 1 < out.len() {
+                if out[i] == "," && out[i + 1] == ">" {
+                    out.remove(i);
+                } else {
+                    i += 1;
+                }
+            }
+            out
+        }
+        norm(file.to_token_stream())
+    };
+
+    let same = items(KEPT) == items(&code.to_string());
+
+    if !same {
+        // Print the first divergence rather than only the verdict: "differs"
+        // without a location says nothing an edit can act on.
+        let a = items(KEPT);
+        let b = items(&code.to_string());
+        let at = a
+            .iter()
+            .zip(&b)
+            .position(|(x, y)| x != y)
+            .unwrap_or_else(|| a.len().min(b.len()));
+        println!(
+            "first difference at token {at} (kept has {}, built has {})",
+            a.len(),
+            b.len()
+        );
+        println!(
+            "kept : {:?}",
+            &a[at.saturating_sub(3)..(at + 6).min(a.len())]
+        );
+        println!(
+            "built: {:?}",
+            &b[at.saturating_sub(3)..(at + 6).min(b.len())]
+        );
+    }
 
     println!(
         "bootstrap fixed point: {}",

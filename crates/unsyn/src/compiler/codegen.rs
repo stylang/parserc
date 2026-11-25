@@ -130,13 +130,13 @@
 //!   asks of the author of a file either way.
 //! - A single character of the described language is a field of
 //!   [`Char`](parserc::syntax::Char) in a generated `syntax` node, wearing the
-//!   character in its type. The hand file holds no `Char` at all: each
-//!   punctuator is a type of its own — `Tilde`, `Star`, `Or`, `ParenStart` —
-//!   named by the `syntax_terminal!` macro, which is what lets a refusal say
-//!   which punctuator it expected and lets a reader of the tree name what it
-//!   matched on. So the same `~` is `Char<I, '~'>` in generated code and
-//!   `Tilde<I>` here, and the two trees agree on the span while disagreeing on
-//!   the type that carries it.
+//!   character in its type. A punctuator that the production names no rule for
+//!   is the same shape here: `Char<I, '~'>` for `~`, `Char<I, '|'>` for `|`. What
+//!   earns a type of its own is a punctuator the spec gives a rule — `Star`,
+//!   `Question` and `Plus` — and each of those holds one `Char`, so the two trees
+//!   agree on both the type that carries the character and the span it covers.
+//!   What a refusal names when it reports a character no rule named is the
+//!   character itself, which is what [`Kind::Syntax`](parserc::Kind) carries.
 //! - A refusal the generated code reports is a [`Kind`](parserc::Kind) of the
 //!   combinator that met it, where the hand-written file names what it expected
 //!   with its own [`UnsynError`] variants. Naming them
@@ -719,12 +719,8 @@ where
 {
     read::elements(branch).find_map(|element| match element {
         syntax::ExprNoTopAlt::ExprWithSuffix(suffix) => match &**suffix {
-            syntax::ExprWithSuffix::Concat { f2: keyword, .. } => {
-                Some(keyword.0.as_str().to_owned())
-            }
-            syntax::ExprWithSuffix::Except { f2: keyword, .. } => {
-                Some(keyword.0.as_str().to_owned())
-            }
+            syntax::ExprWithSuffix::Concat { f2: keyword, .. } => Some(keyword.as_str().to_owned()),
+            syntax::ExprWithSuffix::Except { f2: keyword, .. } => Some(keyword.as_str().to_owned()),
             syntax::ExprWithSuffix::Suffixed(part) => match &part.suffix {
                 // A brace opens a bound and is punctuation, not a word: like
                 // the two operators beside it, it offers no name, and

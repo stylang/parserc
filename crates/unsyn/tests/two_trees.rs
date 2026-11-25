@@ -99,14 +99,31 @@ recorder! {
         fn visit_expr_no_top_alt: unsyn::compiler::syntax::ExprNoTopAlt<I> => unsyn::compiler::visit::walk::walk_expr_no_top_alt,
         fn visit_expr_without_suffix:
             unsyn::compiler::syntax::ExprWithoutSuffix<I> => unsyn::compiler::visit::walk::walk_expr_without_suffix,
+        fn visit_negated_set:
+            unsyn::compiler::syntax::NegatedSet<I> => unsyn::compiler::visit::walk::walk_negated_set,
+        fn visit_call: unsyn::compiler::syntax::Call<I> => unsyn::compiler::visit::walk::walk_call,
+        fn visit_paren: unsyn::compiler::syntax::Paren<I> => unsyn::compiler::visit::walk::walk_paren,
         fn visit_set: unsyn::compiler::syntax::Set<I> => unsyn::compiler::visit::walk::walk_set,
         fn visit_suffix: unsyn::compiler::syntax::Suffix<I> => unsyn::compiler::visit::walk::walk_suffix,
+        fn visit_star: unsyn::compiler::syntax::Star<I> => unsyn::compiler::visit::walk::walk_star,
+        fn visit_question: unsyn::compiler::syntax::Question<I> => unsyn::compiler::visit::walk::walk_question,
+        fn visit_plus: unsyn::compiler::syntax::Plus<I> => unsyn::compiler::visit::walk::walk_plus,
         fn visit_expr_with_suffix:
             unsyn::compiler::syntax::ExprWithSuffix<I> => unsyn::compiler::visit::walk::walk_expr_with_suffix,
+        fn visit_suffixed:
+            unsyn::compiler::syntax::Suffixed<I> => unsyn::compiler::visit::walk::walk_suffixed,
         fn visit_repeat: unsyn::compiler::syntax::Repeat<I> => unsyn::compiler::visit::walk::walk_repeat,
         fn visit_repeat_bound:
             unsyn::compiler::syntax::RepeatBound<I> => unsyn::compiler::visit::walk::walk_repeat_bound,
+        fn visit_range_to:
+            unsyn::compiler::syntax::RangeTo<I> => unsyn::compiler::visit::walk::walk_range_to,
+        fn visit_range_from:
+            unsyn::compiler::syntax::RangeFrom<I> => unsyn::compiler::visit::walk::walk_range_from,
         fn visit_range: unsyn::compiler::syntax::Range<I> => unsyn::compiler::visit::walk::walk_range,
+        fn visit_unicode_range:
+            unsyn::compiler::syntax::UnicodeRange<I> => unsyn::compiler::visit::walk::walk_unicode_range,
+        fn visit_str_range:
+            unsyn::compiler::syntax::StrRange<I> => unsyn::compiler::visit::walk::walk_str_range,
         fn visit_set_item: unsyn::compiler::syntax::SetItem<I> => unsyn::compiler::visit::walk::walk_set_item,
         fn visit_ident_or_keyword:
             unsyn::compiler::lexer::IdentOrKeyword<I> => unsyn::compiler::visit::walk::walk_ident_or_keyword,
@@ -122,6 +139,19 @@ recorder! {
         fn visit_lit_str: unsyn::compiler::lexer::LitStr<I> => unsyn::compiler::visit::walk::walk_lit_str,
         fn visit_quote_escape: unsyn::compiler::lexer::QuoteEscape<I> => unsyn::compiler::visit::walk::walk_quote_escape,
         fn visit_ascii_escape: unsyn::compiler::lexer::AsciiEscape<I> => unsyn::compiler::visit::walk::walk_ascii_escape,
+        fn visit_ascii_hex_escape:
+            unsyn::compiler::lexer::AsciiHexEscape<I> => unsyn::compiler::visit::walk::walk_ascii_hex_escape,
+        fn visit_ascii_newline:
+            unsyn::compiler::lexer::AsciiNewline<I> => unsyn::compiler::visit::walk::walk_ascii_newline,
+        fn visit_ascii_carriage_return:
+            unsyn::compiler::lexer::AsciiCarriageReturn<I> =>
+                unsyn::compiler::visit::walk::walk_ascii_carriage_return,
+        fn visit_ascii_tab:
+            unsyn::compiler::lexer::AsciiTab<I> => unsyn::compiler::visit::walk::walk_ascii_tab,
+        fn visit_ascii_backslash:
+            unsyn::compiler::lexer::AsciiBackslash<I> => unsyn::compiler::visit::walk::walk_ascii_backslash,
+        fn visit_ascii_null:
+            unsyn::compiler::lexer::AsciiNull<I> => unsyn::compiler::visit::walk::walk_ascii_null,
         fn visit_unicode_escape: unsyn::compiler::lexer::UnicodeEscape<I> => unsyn::compiler::visit::walk::walk_unicode_escape,
         fn visit_oct_digit: unsyn::compiler::lexer::OctDigit<I> => unsyn::compiler::visit::walk::walk_oct_digit,
         fn visit_dec_digit: unsyn::compiler::lexer::DecDigit<I> => unsyn::compiler::visit::walk::walk_dec_digit,
@@ -129,6 +159,15 @@ recorder! {
         fn visit_lit_dec: unsyn::compiler::lexer::LitDec<I> => unsyn::compiler::visit::walk::walk_lit_dec,
         fn visit_lit_unicode: unsyn::compiler::lexer::LitUnicode<I> => unsyn::compiler::visit::walk::walk_lit_unicode,
         fn visit_block_comment: unsyn::compiler::lexer::BlockComment<I> => unsyn::compiler::visit::walk::walk_block_comment,
+        fn visit_block_comment_body:
+            unsyn::compiler::lexer::BlockCommentBody<I> =>
+                unsyn::compiler::visit::walk::walk_block_comment_body,
+        fn visit_empty_block_comment:
+            unsyn::compiler::lexer::EmptyBlockComment<I> =>
+                unsyn::compiler::visit::walk::walk_empty_block_comment,
+        fn visit_starred_empty_block_comment:
+            unsyn::compiler::lexer::StarredEmptyBlockComment<I> =>
+                unsyn::compiler::visit::walk::walk_starred_empty_block_comment,
         fn visit_block_comment_or_doc:
             unsyn::compiler::lexer::BlockCommentOrDoc<I> => unsyn::compiler::visit::walk::walk_block_comment_or_doc,
         fn visit_inner_line_doc: unsyn::compiler::lexer::InnerLineDoc<I> => unsyn::compiler::visit::walk::walk_inner_line_doc,
@@ -156,14 +195,28 @@ recorder! {
         fn visit_expr_no_top_alt: crate::generated::ExprNoTopAlt<I> => crate::generated::walk::walk_expr_no_top_alt,
         fn visit_expr_without_suffix:
             crate::generated::ExprWithoutSuffix<I> => crate::generated::walk::walk_expr_without_suffix,
+        fn visit_negated_set:
+            crate::generated::NegatedSet<I> => crate::generated::walk::walk_negated_set,
+        fn visit_call: crate::generated::Call<I> => crate::generated::walk::walk_call,
+        fn visit_paren: crate::generated::Paren<I> => crate::generated::walk::walk_paren,
         fn visit_set: crate::generated::Set<I> => crate::generated::walk::walk_set,
         fn visit_suffix: crate::generated::Suffix<I> => crate::generated::walk::walk_suffix,
+        fn visit_star: crate::generated::Star<I> => crate::generated::walk::walk_star,
+        fn visit_question: crate::generated::Question<I> => crate::generated::walk::walk_question,
+        fn visit_plus: crate::generated::Plus<I> => crate::generated::walk::walk_plus,
         fn visit_expr_with_suffix:
             crate::generated::ExprWithSuffix<I> => crate::generated::walk::walk_expr_with_suffix,
+        fn visit_suffixed: crate::generated::Suffixed<I> => crate::generated::walk::walk_suffixed,
         fn visit_repeat: crate::generated::Repeat<I> => crate::generated::walk::walk_repeat,
         fn visit_repeat_bound:
             crate::generated::RepeatBound<I> => crate::generated::walk::walk_repeat_bound,
+        fn visit_range_to: crate::generated::RangeTo<I> => crate::generated::walk::walk_range_to,
+        fn visit_range_from:
+            crate::generated::RangeFrom<I> => crate::generated::walk::walk_range_from,
         fn visit_range: crate::generated::Range<I> => crate::generated::walk::walk_range,
+        fn visit_unicode_range:
+            crate::generated::UnicodeRange<I> => crate::generated::walk::walk_unicode_range,
+        fn visit_str_range: crate::generated::StrRange<I> => crate::generated::walk::walk_str_range,
         fn visit_set_item: crate::generated::SetItem<I> => crate::generated::walk::walk_set_item,
         fn visit_ident_or_keyword: crate::generated::IdentOrKeyword<I> => crate::generated::walk::walk_ident_or_keyword,
         fn visit_raw_ident: crate::generated::RawIdent<I> => crate::generated::walk::walk_raw_ident,
@@ -177,6 +230,16 @@ recorder! {
         fn visit_lit_str: crate::generated::LitStr<I> => crate::generated::walk::walk_lit_str,
         fn visit_quote_escape: crate::generated::QuoteEscape<I> => crate::generated::walk::walk_quote_escape,
         fn visit_ascii_escape: crate::generated::AsciiEscape<I> => crate::generated::walk::walk_ascii_escape,
+        fn visit_ascii_hex_escape:
+            crate::generated::AsciiHexEscape<I> => crate::generated::walk::walk_ascii_hex_escape,
+        fn visit_ascii_newline:
+            crate::generated::AsciiNewline<I> => crate::generated::walk::walk_ascii_newline,
+        fn visit_ascii_carriage_return:
+            crate::generated::AsciiCarriageReturn<I> => crate::generated::walk::walk_ascii_carriage_return,
+        fn visit_ascii_tab: crate::generated::AsciiTab<I> => crate::generated::walk::walk_ascii_tab,
+        fn visit_ascii_backslash:
+            crate::generated::AsciiBackslash<I> => crate::generated::walk::walk_ascii_backslash,
+        fn visit_ascii_null: crate::generated::AsciiNull<I> => crate::generated::walk::walk_ascii_null,
         fn visit_unicode_escape: crate::generated::UnicodeEscape<I> => crate::generated::walk::walk_unicode_escape,
         fn visit_oct_digit: crate::generated::OctDigit<I> => crate::generated::walk::walk_oct_digit,
         fn visit_dec_digit: crate::generated::DecDigit<I> => crate::generated::walk::walk_dec_digit,
@@ -184,6 +247,13 @@ recorder! {
         fn visit_lit_dec: crate::generated::LitDec<I> => crate::generated::walk::walk_lit_dec,
         fn visit_lit_unicode: crate::generated::LitUnicode<I> => crate::generated::walk::walk_lit_unicode,
         fn visit_block_comment: crate::generated::BlockComment<I> => crate::generated::walk::walk_block_comment,
+        fn visit_block_comment_body:
+            crate::generated::BlockCommentBody<I> => crate::generated::walk::walk_block_comment_body,
+        fn visit_empty_block_comment:
+            crate::generated::EmptyBlockComment<I> => crate::generated::walk::walk_empty_block_comment,
+        fn visit_starred_empty_block_comment:
+            crate::generated::StarredEmptyBlockComment<I> =>
+                crate::generated::walk::walk_starred_empty_block_comment,
         fn visit_block_comment_or_doc:
             crate::generated::BlockCommentOrDoc<I> => crate::generated::walk::walk_block_comment_or_doc,
         fn visit_inner_line_doc: crate::generated::InnerLineDoc<I> => crate::generated::walk::walk_inner_line_doc,
@@ -373,14 +443,11 @@ fn a_name_written_raw_is_two_parts_in_both_trees() {
 /// half does not record is a node the comparison says nothing about — and the
 /// silence would read as agreement. This names the silence.
 ///
-/// Ten of these are the parts of a pattern the spec gave a left side of their
-/// own, so that the generated tree holds each as a node while the hand tree
-/// still writes the same shape as the fields of a variant. Two are deliberate:
-/// the text a walk ends with, which is the leaf and names no rule, and the
-/// trivia `S`, which both trees walk and neither records.
-///
-/// When the hand tree is given the ten as rules, the last quarter of this test
-/// is what says so, and the hooks belong in the table beside the parity.
+/// Every rule the spec names is now a node of both trees and a hook of both
+/// recorders, so what is left here is the pair that was never a rule: the text a
+/// walk ends with, which is the leaf, and the trivia `S`, which both trees walk
+/// and neither records. A third entry arriving would be a rule the parity had
+/// silently stopped covering.
 #[test]
 fn the_parity_reaches_every_rule_of_either_tree() {
     let kept = std::fs::read_to_string(concat!(
@@ -413,20 +480,7 @@ fn the_parity_reaches_every_rule_of_either_tree() {
         .filter(|hook| !Generated::HOOKS.contains(&hook.as_str()))
         .collect::<Vec<_>>();
 
-    let expected = [
-        "visit_text",
-        "visit_s",
-        "visit_negated_set",
-        "visit_call",
-        "visit_paren",
-        "visit_suffixed",
-        "visit_range_to",
-        "visit_range_from",
-        "visit_unicode_range",
-        "visit_str_range",
-        "visit_ascii_hex_escape",
-        "visit_block_comment_body",
-    ];
+    let expected = ["visit_text", "visit_s"];
 
     for hook in expected {
         assert!(

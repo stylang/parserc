@@ -183,12 +183,37 @@ where
     I: UnsynInput,
 {
     AsciiHexEscape(AsciiHexEscape<I>),
-    F2(#[parserc(keyword = "\\n")] I),
-    F3(#[parserc(keyword = "\\r")] I),
-    F4(#[parserc(keyword = "\\t")] I),
-    F5(#[parserc(keyword = "\\\\")] I),
-    F6(#[parserc(keyword = "\\0")] I),
+    AsciiNewline(AsciiNewline<I>),
+    AsciiCarriageReturn(AsciiCarriageReturn<I>),
+    AsciiTab(AsciiTab<I>),
+    AsciiBackslash(AsciiBackslash<I>),
+    AsciiNull(AsciiNull<I>),
 }
+#[derive(Debug, PartialEq, Eq, PartialOrd, Ord, Clone, :: parserc :: syntax :: Syntax)]
+#[parserc(keyword = "\\n")]
+pub struct AsciiNewline<I>(pub I)
+where
+    I: UnsynInput;
+#[derive(Debug, PartialEq, Eq, PartialOrd, Ord, Clone, :: parserc :: syntax :: Syntax)]
+#[parserc(keyword = "\\r")]
+pub struct AsciiCarriageReturn<I>(pub I)
+where
+    I: UnsynInput;
+#[derive(Debug, PartialEq, Eq, PartialOrd, Ord, Clone, :: parserc :: syntax :: Syntax)]
+#[parserc(keyword = "\\t")]
+pub struct AsciiTab<I>(pub I)
+where
+    I: UnsynInput;
+#[derive(Debug, PartialEq, Eq, PartialOrd, Ord, Clone, :: parserc :: syntax :: Syntax)]
+#[parserc(keyword = "\\\\")]
+pub struct AsciiBackslash<I>(pub I)
+where
+    I: UnsynInput;
+#[derive(Debug, PartialEq, Eq, PartialOrd, Ord, Clone, :: parserc :: syntax :: Syntax)]
+#[parserc(keyword = "\\0")]
+pub struct AsciiNull<I>(pub I)
+where
+    I: UnsynInput;
 #[derive(Debug, PartialEq, Eq, PartialOrd, Ord, Clone, :: parserc :: syntax :: Syntax)]
 pub struct AsciiHexEscape<I>
 where
@@ -305,9 +330,19 @@ where
     I: UnsynInput,
 {
     BlockCommentBody(BlockCommentBody<I>),
-    F2(#[parserc(keyword = "/**/")] I),
-    F3(#[parserc(keyword = "/***/")] I),
+    EmptyBlockComment(EmptyBlockComment<I>),
+    StarredEmptyBlockComment(StarredEmptyBlockComment<I>),
 }
+#[derive(Debug, PartialEq, Eq, PartialOrd, Ord, Clone, :: parserc :: syntax :: Syntax)]
+#[parserc(keyword = "/**/")]
+pub struct EmptyBlockComment<I>(pub I)
+where
+    I: UnsynInput;
+#[derive(Debug, PartialEq, Eq, PartialOrd, Ord, Clone, :: parserc :: syntax :: Syntax)]
+#[parserc(keyword = "/***/")]
+pub struct StarredEmptyBlockComment<I>(pub I)
+where
+    I: UnsynInput;
 fn read_block_comment_body_1<I>(
     input: &mut I,
 ) -> ::core::result::Result<I, <I as ::parserc::Input>::Error>
@@ -679,11 +714,23 @@ pub enum Suffix<I>
 where
     I: UnsynInput,
 {
-    F1(::parserc::syntax::Char<I, '*'>),
-    F2(::parserc::syntax::Char<I, '?'>),
-    F3(::parserc::syntax::Char<I, '+'>),
+    Star(Star<I>),
+    Question(Question<I>),
+    Plus(Plus<I>),
     Repeat(Repeat<I>),
 }
+#[derive(Debug, PartialEq, Eq, PartialOrd, Ord, Clone, :: parserc :: syntax :: Syntax)]
+pub struct Star<I>(pub ::parserc::syntax::Char<I, '*'>)
+where
+    I: UnsynInput;
+#[derive(Debug, PartialEq, Eq, PartialOrd, Ord, Clone, :: parserc :: syntax :: Syntax)]
+pub struct Question<I>(pub ::parserc::syntax::Char<I, '?'>)
+where
+    I: UnsynInput;
+#[derive(Debug, PartialEq, Eq, PartialOrd, Ord, Clone, :: parserc :: syntax :: Syntax)]
+pub struct Plus<I>(pub ::parserc::syntax::Char<I, '+'>)
+where
+    I: UnsynInput;
 #[derive(Debug, PartialEq, Eq, PartialOrd, Ord, Clone, :: parserc :: syntax :: Syntax)]
 pub enum ExprWithSuffix<I>
 where
@@ -905,6 +952,26 @@ where
     fn visit_ascii_escape(&mut self, node: &'ast AsciiEscape<I>) {
         walk::walk_ascii_escape(self, node)
     }
+    # [doc = concat ! ("The node of the rule `" , stringify ! (AsciiNewline) , "`.")]
+    fn visit_ascii_newline(&mut self, node: &'ast AsciiNewline<I>) {
+        walk::walk_ascii_newline(self, node)
+    }
+    # [doc = concat ! ("The node of the rule `" , stringify ! (AsciiCarriageReturn) , "`.")]
+    fn visit_ascii_carriage_return(&mut self, node: &'ast AsciiCarriageReturn<I>) {
+        walk::walk_ascii_carriage_return(self, node)
+    }
+    # [doc = concat ! ("The node of the rule `" , stringify ! (AsciiTab) , "`.")]
+    fn visit_ascii_tab(&mut self, node: &'ast AsciiTab<I>) {
+        walk::walk_ascii_tab(self, node)
+    }
+    # [doc = concat ! ("The node of the rule `" , stringify ! (AsciiBackslash) , "`.")]
+    fn visit_ascii_backslash(&mut self, node: &'ast AsciiBackslash<I>) {
+        walk::walk_ascii_backslash(self, node)
+    }
+    # [doc = concat ! ("The node of the rule `" , stringify ! (AsciiNull) , "`.")]
+    fn visit_ascii_null(&mut self, node: &'ast AsciiNull<I>) {
+        walk::walk_ascii_null(self, node)
+    }
     # [doc = concat ! ("The node of the rule `" , stringify ! (AsciiHexEscape) , "`.")]
     fn visit_ascii_hex_escape(&mut self, node: &'ast AsciiHexEscape<I>) {
         walk::walk_ascii_hex_escape(self, node)
@@ -936,6 +1003,14 @@ where
     # [doc = concat ! ("The node of the rule `" , stringify ! (BlockComment) , "`.")]
     fn visit_block_comment(&mut self, node: &'ast BlockComment<I>) {
         walk::walk_block_comment(self, node)
+    }
+    # [doc = concat ! ("The node of the rule `" , stringify ! (EmptyBlockComment) , "`.")]
+    fn visit_empty_block_comment(&mut self, node: &'ast EmptyBlockComment<I>) {
+        walk::walk_empty_block_comment(self, node)
+    }
+    # [doc = concat ! ("The node of the rule `" , stringify ! (StarredEmptyBlockComment) , "`.")]
+    fn visit_starred_empty_block_comment(&mut self, node: &'ast StarredEmptyBlockComment<I>) {
+        walk::walk_starred_empty_block_comment(self, node)
     }
     # [doc = concat ! ("The node of the rule `" , stringify ! (BlockCommentBody) , "`.")]
     fn visit_block_comment_body(&mut self, node: &'ast BlockCommentBody<I>) {
@@ -992,6 +1067,18 @@ where
     # [doc = concat ! ("The node of the rule `" , stringify ! (Suffix) , "`.")]
     fn visit_suffix(&mut self, node: &'ast Suffix<I>) {
         walk::walk_suffix(self, node)
+    }
+    # [doc = concat ! ("The node of the rule `" , stringify ! (Star) , "`.")]
+    fn visit_star(&mut self, node: &'ast Star<I>) {
+        walk::walk_star(self, node)
+    }
+    # [doc = concat ! ("The node of the rule `" , stringify ! (Question) , "`.")]
+    fn visit_question(&mut self, node: &'ast Question<I>) {
+        walk::walk_question(self, node)
+    }
+    # [doc = concat ! ("The node of the rule `" , stringify ! (Plus) , "`.")]
+    fn visit_plus(&mut self, node: &'ast Plus<I>) {
+        walk::walk_plus(self, node)
     }
     # [doc = concat ! ("The node of the rule `" , stringify ! (ExprWithSuffix) , "`.")]
     fn visit_expr_with_suffix(&mut self, node: &'ast ExprWithSuffix<I>) {
@@ -1059,7 +1146,7 @@ where
 #[doc = r" the visitor below it."]
 #[allow(clippy::needless_borrow, clippy::possible_missing_else)]
 pub mod walk {
-    # [rustfmt :: skip] use super :: { Visit , UnsynInput , S , LF , CR , IdentOrKeyword , RawIdent , NonKeywordIdent , Ident , Keywords , LeadingKeywords , OperatorKeywords , LitStr , QuoteEscape , AsciiEscape , AsciiHexEscape , UnicodeEscape , OctDigit , DecDigit , HexDigit , LitDec , LitUnicode , BlockComment , BlockCommentBody , InnerLineDoc , InnerBlockDoc , OuterLineDoc , OuterBlockDoc , BlockCommentOrDoc , Expr , ExprNoTopAlt , Set , ExprWithoutSuffix , NegatedSet , Call , Paren , Suffix , ExprWithSuffix , Suffixed , RepeatBound , RangeTo , RangeFrom , Repeat , Range , UnicodeRange , StrRange , SetItem , Stmt , Item , OuterDoc , InnerDoc , Crate } ;
+    # [rustfmt :: skip] use super :: { Visit , UnsynInput , S , LF , CR , IdentOrKeyword , RawIdent , NonKeywordIdent , Ident , Keywords , LeadingKeywords , OperatorKeywords , LitStr , QuoteEscape , AsciiEscape , AsciiNewline , AsciiCarriageReturn , AsciiTab , AsciiBackslash , AsciiNull , AsciiHexEscape , UnicodeEscape , OctDigit , DecDigit , HexDigit , LitDec , LitUnicode , BlockComment , EmptyBlockComment , StarredEmptyBlockComment , BlockCommentBody , InnerLineDoc , InnerBlockDoc , OuterLineDoc , OuterBlockDoc , BlockCommentOrDoc , Expr , ExprNoTopAlt , Set , ExprWithoutSuffix , NegatedSet , Call , Paren , Suffix , Star , Question , Plus , ExprWithSuffix , Suffixed , RepeatBound , RangeTo , RangeFrom , Repeat , Range , UnicodeRange , StrRange , SetItem , Stmt , Item , OuterDoc , InnerDoc , Crate } ;
     # [doc = concat ! ("Descend through the node of `" , stringify ! (S) , "`.")]
     pub fn walk_s<'ast, I, V>(v: &mut V, node: &'ast S<I>)
     where
@@ -1200,22 +1287,62 @@ pub mod walk {
             AsciiEscape::AsciiHexEscape(part) => {
                 v.visit_ascii_hex_escape(part);
             }
-            AsciiEscape::F2(part) => {
-                v.visit_text(part);
+            AsciiEscape::AsciiNewline(part) => {
+                v.visit_ascii_newline(part);
             }
-            AsciiEscape::F3(part) => {
-                v.visit_text(part);
+            AsciiEscape::AsciiCarriageReturn(part) => {
+                v.visit_ascii_carriage_return(part);
             }
-            AsciiEscape::F4(part) => {
-                v.visit_text(part);
+            AsciiEscape::AsciiTab(part) => {
+                v.visit_ascii_tab(part);
             }
-            AsciiEscape::F5(part) => {
-                v.visit_text(part);
+            AsciiEscape::AsciiBackslash(part) => {
+                v.visit_ascii_backslash(part);
             }
-            AsciiEscape::F6(part) => {
-                v.visit_text(part);
+            AsciiEscape::AsciiNull(part) => {
+                v.visit_ascii_null(part);
             }
         }
+    }
+    # [doc = concat ! ("Descend through the node of `" , stringify ! (AsciiNewline) , "`.")]
+    pub fn walk_ascii_newline<'ast, I, V>(v: &mut V, node: &'ast AsciiNewline<I>)
+    where
+        I: UnsynInput,
+        V: ?Sized + Visit<'ast, I>,
+    {
+        v.visit_text(&node.0);
+    }
+    # [doc = concat ! ("Descend through the node of `" , stringify ! (AsciiCarriageReturn) , "`.")]
+    pub fn walk_ascii_carriage_return<'ast, I, V>(v: &mut V, node: &'ast AsciiCarriageReturn<I>)
+    where
+        I: UnsynInput,
+        V: ?Sized + Visit<'ast, I>,
+    {
+        v.visit_text(&node.0);
+    }
+    # [doc = concat ! ("Descend through the node of `" , stringify ! (AsciiTab) , "`.")]
+    pub fn walk_ascii_tab<'ast, I, V>(v: &mut V, node: &'ast AsciiTab<I>)
+    where
+        I: UnsynInput,
+        V: ?Sized + Visit<'ast, I>,
+    {
+        v.visit_text(&node.0);
+    }
+    # [doc = concat ! ("Descend through the node of `" , stringify ! (AsciiBackslash) , "`.")]
+    pub fn walk_ascii_backslash<'ast, I, V>(v: &mut V, node: &'ast AsciiBackslash<I>)
+    where
+        I: UnsynInput,
+        V: ?Sized + Visit<'ast, I>,
+    {
+        v.visit_text(&node.0);
+    }
+    # [doc = concat ! ("Descend through the node of `" , stringify ! (AsciiNull) , "`.")]
+    pub fn walk_ascii_null<'ast, I, V>(v: &mut V, node: &'ast AsciiNull<I>)
+    where
+        I: UnsynInput,
+        V: ?Sized + Visit<'ast, I>,
+    {
+        v.visit_text(&node.0);
     }
     # [doc = concat ! ("Descend through the node of `" , stringify ! (AsciiHexEscape) , "`.")]
     pub fn walk_ascii_hex_escape<'ast, I, V>(v: &mut V, node: &'ast AsciiHexEscape<I>)
@@ -1293,13 +1420,31 @@ pub mod walk {
             BlockComment::BlockCommentBody(part) => {
                 v.visit_block_comment_body(part);
             }
-            BlockComment::F2(part) => {
-                v.visit_text(part);
+            BlockComment::EmptyBlockComment(part) => {
+                v.visit_empty_block_comment(part);
             }
-            BlockComment::F3(part) => {
-                v.visit_text(part);
+            BlockComment::StarredEmptyBlockComment(part) => {
+                v.visit_starred_empty_block_comment(part);
             }
         }
+    }
+    # [doc = concat ! ("Descend through the node of `" , stringify ! (EmptyBlockComment) , "`.")]
+    pub fn walk_empty_block_comment<'ast, I, V>(v: &mut V, node: &'ast EmptyBlockComment<I>)
+    where
+        I: UnsynInput,
+        V: ?Sized + Visit<'ast, I>,
+    {
+        v.visit_text(&node.0);
+    }
+    # [doc = concat ! ("Descend through the node of `" , stringify ! (StarredEmptyBlockComment) , "`.")]
+    pub fn walk_starred_empty_block_comment<'ast, I, V>(
+        v: &mut V,
+        node: &'ast StarredEmptyBlockComment<I>,
+    ) where
+        I: UnsynInput,
+        V: ?Sized + Visit<'ast, I>,
+    {
+        v.visit_text(&node.0);
     }
     # [doc = concat ! ("Descend through the node of `" , stringify ! (BlockCommentBody) , "`.")]
     pub fn walk_block_comment_body<'ast, I, V>(v: &mut V, node: &'ast BlockCommentBody<I>)
@@ -1523,19 +1668,43 @@ pub mod walk {
         V: ?Sized + Visit<'ast, I>,
     {
         match node {
-            Suffix::F1(part) => {
-                v.visit_text(&(part).0);
+            Suffix::Star(part) => {
+                v.visit_star(part);
             }
-            Suffix::F2(part) => {
-                v.visit_text(&(part).0);
+            Suffix::Question(part) => {
+                v.visit_question(part);
             }
-            Suffix::F3(part) => {
-                v.visit_text(&(part).0);
+            Suffix::Plus(part) => {
+                v.visit_plus(part);
             }
             Suffix::Repeat(part) => {
                 v.visit_repeat(part);
             }
         }
+    }
+    # [doc = concat ! ("Descend through the node of `" , stringify ! (Star) , "`.")]
+    pub fn walk_star<'ast, I, V>(v: &mut V, node: &'ast Star<I>)
+    where
+        I: UnsynInput,
+        V: ?Sized + Visit<'ast, I>,
+    {
+        v.visit_text(&(&node.0).0);
+    }
+    # [doc = concat ! ("Descend through the node of `" , stringify ! (Question) , "`.")]
+    pub fn walk_question<'ast, I, V>(v: &mut V, node: &'ast Question<I>)
+    where
+        I: UnsynInput,
+        V: ?Sized + Visit<'ast, I>,
+    {
+        v.visit_text(&(&node.0).0);
+    }
+    # [doc = concat ! ("Descend through the node of `" , stringify ! (Plus) , "`.")]
+    pub fn walk_plus<'ast, I, V>(v: &mut V, node: &'ast Plus<I>)
+    where
+        I: UnsynInput,
+        V: ?Sized + Visit<'ast, I>,
+    {
+        v.visit_text(&(&node.0).0);
     }
     # [doc = concat ! ("Descend through the node of `" , stringify ! (ExprWithSuffix) , "`.")]
     pub fn walk_expr_with_suffix<'ast, I, V>(v: &mut V, node: &'ast ExprWithSuffix<I>)

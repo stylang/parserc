@@ -224,18 +224,13 @@ where
     }
 
     // -----------------------------------------------------------------------
-    // The terminals a `syntax` production is written with
+    // The terminals a `syntax` production names a rule for
     //
-    // Each holds its own text and nothing else, so each walk hands over that
-    // text alone; the runs about it belong to the sequence, whose walk reaches
-    // them through `visit_s`. See the crate document for the rule that files a
-    // run away exactly once, however two neighbours it lies between.
+    // A punct the production writes without naming a rule is an anonymous
+    // operand, so the tree holds the character and no type of its own, and the
+    // walk that reaches it hands its text over through `visit_text`. Only the
+    // three operators [`Suffix`] names are rules of their own, and so get a hook.
     // -----------------------------------------------------------------------
-
-    /// `';'`, which ends a definition.
-    fn visit_semi(&mut self, node: &'ast syntax::Semi<I>) {
-        walk::walk_semi(self, node);
-    }
 
     /// `'+'`, the suffix that asks for one operand or more.
     fn visit_plus(&mut self, node: &'ast syntax::Plus<I>) {
@@ -250,82 +245,6 @@ where
     /// `'?'`, the suffix that asks for an operand at most once.
     fn visit_question(&mut self, node: &'ast syntax::Question<I>) {
         walk::walk_question(self, node);
-    }
-
-    /// `'~'`, the prefix that asks for the one character a set does not denote.
-    fn visit_tilde(&mut self, node: &'ast syntax::Tilde<I>) {
-        walk::walk_tilde(self, node);
-    }
-
-    /// `'|'`, which joins two alternatives.
-    fn visit_or(&mut self, node: &'ast syntax::Or<I>) {
-        walk::walk_or(self, node);
-    }
-
-    /// `'('`, which opens a group.
-    fn visit_paren_start(&mut self, node: &'ast syntax::ParenStart<I>) {
-        walk::walk_paren_start(self, node);
-    }
-
-    /// `')'`, which closes a group.
-    fn visit_paren_end(&mut self, node: &'ast syntax::ParenEnd<I>) {
-        walk::walk_paren_end(self, node);
-    }
-
-    /// `'['`, which opens a set.
-    fn visit_bracket_start(&mut self, node: &'ast syntax::BracketStart<I>) {
-        walk::walk_bracket_start(self, node);
-    }
-
-    /// `']'`, which closes a set.
-    fn visit_bracket_end(&mut self, node: &'ast syntax::BracketEnd<I>) {
-        walk::walk_bracket_end(self, node);
-    }
-
-    /// `'{'`, which opens the bound of a repetition.
-    fn visit_brace_start(&mut self, node: &'ast syntax::BraceStart<I>) {
-        walk::walk_brace_start(self, node);
-    }
-
-    /// `'}'`, which closes the bound of a repetition.
-    fn visit_brace_end(&mut self, node: &'ast syntax::BraceEnd<I>) {
-        walk::walk_brace_end(self, node);
-    }
-
-    /// `'<'`, which opens a call of an external.
-    fn visit_lt(&mut self, node: &'ast syntax::Lt<I>) {
-        walk::walk_lt(self, node);
-    }
-
-    /// `'>'`, which closes a call of an external.
-    fn visit_gt(&mut self, node: &'ast syntax::Gt<I>) {
-        walk::walk_gt(self, node);
-    }
-
-    /// `','`, which separates two members of a set or the two bounds of a
-    /// repetition.
-    fn visit_comma(&mut self, node: &'ast syntax::Comma<I>) {
-        walk::walk_comma(self, node);
-    }
-
-    /// `'->'`, which divides the name of a node from the pattern it denotes.
-    fn visit_arrow_right(&mut self, node: &'ast syntax::ArrowRight<I>) {
-        walk::walk_arrow_right(self, node);
-    }
-
-    /// `'-'`, which divides the two ends of a range of code points.
-    fn visit_minus(&mut self, node: &'ast syntax::Minus<I>) {
-        walk::walk_minus(self, node);
-    }
-
-    /// `'concat'`, which asks that what two operands matched be joined.
-    fn visit_concat(&mut self, node: &'ast syntax::Concat<I>) {
-        walk::walk_concat(self, node);
-    }
-
-    /// `'except'`, which removes what one operand matches from another.
-    fn visit_except(&mut self, node: &'ast syntax::Except<I>) {
-        walk::walk_except(self, node);
     }
 
     // -----------------------------------------------------------------------
@@ -401,9 +320,39 @@ where
         walk::walk_quote_escape(self, node);
     }
 
-    /// `lexer AsciiEscape -> '\\x' OctDigit HexDigit | '\\n' | …;`
+    /// `lexer AsciiEscape -> AsciiHexEscape | AsciiNewline | …;`
     fn visit_ascii_escape(&mut self, node: &'ast lexer::AsciiEscape<I>) {
         walk::walk_ascii_escape(self, node);
+    }
+
+    /// `lexer AsciiHexEscape -> '\\x' OctDigit HexDigit;`
+    fn visit_ascii_hex_escape(&mut self, node: &'ast lexer::AsciiHexEscape<I>) {
+        walk::walk_ascii_hex_escape(self, node);
+    }
+
+    /// `lexer AsciiNewline -> '\\n';`
+    fn visit_ascii_newline(&mut self, node: &'ast lexer::AsciiNewline<I>) {
+        walk::walk_ascii_newline(self, node);
+    }
+
+    /// `lexer AsciiCarriageReturn -> '\\r';`
+    fn visit_ascii_carriage_return(&mut self, node: &'ast lexer::AsciiCarriageReturn<I>) {
+        walk::walk_ascii_carriage_return(self, node);
+    }
+
+    /// `lexer AsciiTab -> '\\t';`
+    fn visit_ascii_tab(&mut self, node: &'ast lexer::AsciiTab<I>) {
+        walk::walk_ascii_tab(self, node);
+    }
+
+    /// `lexer AsciiBackslash -> '\\\\';`
+    fn visit_ascii_backslash(&mut self, node: &'ast lexer::AsciiBackslash<I>) {
+        walk::walk_ascii_backslash(self, node);
+    }
+
+    /// `lexer AsciiNull -> '\\0';`
+    fn visit_ascii_null(&mut self, node: &'ast lexer::AsciiNull<I>) {
+        walk::walk_ascii_null(self, node);
     }
 
     /// `lexer UnicodeEscape -> '\\u{' … '}';`
@@ -439,6 +388,24 @@ where
     /// `lexer BlockComment -> '/*' … '*/' | '/**/' | '/***/';`
     fn visit_block_comment(&mut self, node: &'ast lexer::BlockComment<I>) {
         walk::walk_block_comment(self, node);
+    }
+
+    /// `lexer BlockCommentBody -> '/*' … '*/';`
+    fn visit_block_comment_body(&mut self, node: &'ast lexer::BlockCommentBody<I>) {
+        walk::walk_block_comment_body(self, node);
+    }
+
+    /// `lexer EmptyBlockComment -> '/**/';`
+    fn visit_empty_block_comment(&mut self, node: &'ast lexer::EmptyBlockComment<I>) {
+        walk::walk_empty_block_comment(self, node);
+    }
+
+    /// `lexer StarredEmptyBlockComment -> '/***/';`
+    fn visit_starred_empty_block_comment(
+        &mut self,
+        node: &'ast lexer::StarredEmptyBlockComment<I>,
+    ) {
+        walk::walk_starred_empty_block_comment(self, node);
     }
 
     /// `lexer BlockCommentOrDoc -> BlockComment | OuterBlockDoc | InnerBlockDoc;`
@@ -519,29 +486,29 @@ pub mod walk {
     ) {
         v.visit_leading_keywords(&node.leading_keywords);
 
-        if let Some(s) = &node.s {
+        if let Some(s) = &node.f1 {
             v.visit_s(s);
         }
 
         v.visit_ident(&node.ident);
 
-        if let Some(s) = &node.s1 {
+        if let Some(s) = &node.f2 {
             v.visit_s(s);
         }
 
-        v.visit_arrow_right(&node.arrow);
+        v.visit_text(&node.f3);
 
-        if let Some(s) = &node.s2 {
+        if let Some(s) = &node.f4 {
             v.visit_s(s);
         }
 
         v.visit_expr(&node.expr);
 
-        if let Some(s) = &node.s3 {
+        if let Some(s) = &node.f5 {
             v.visit_s(s);
         }
 
-        v.visit_semi(&node.semi);
+        v.visit_text(&node.f6.0);
     }
 
     pub fn walk_outer_doc<'ast, I: UnsynInput, V: ?Sized + Visit<'ast, I>>(
@@ -575,7 +542,7 @@ pub mod walk {
                 v.visit_s(s);
             }
 
-            v.visit_or(or);
+            v.visit_text(&or.0);
 
             if let Some(s) = s2 {
                 v.visit_s(s);
@@ -618,7 +585,7 @@ pub mod walk {
         v: &mut V,
         node: &'ast syntax::NegatedSet<I>,
     ) {
-        v.visit_tilde(&node.f1);
+        v.visit_text(&node.f1.0);
 
         if let Some(s) = &node.f2 {
             v.visit_s(s);
@@ -633,7 +600,7 @@ pub mod walk {
         v: &mut V,
         node: &'ast syntax::Call<I>,
     ) {
-        v.visit_lt(&node.f1);
+        v.visit_text(&node.f1.0);
 
         if let Some(s) = &node.f2 {
             v.visit_s(s);
@@ -645,7 +612,7 @@ pub mod walk {
             v.visit_s(s);
         }
 
-        v.visit_gt(&node.f4);
+        v.visit_text(&node.f4.0);
     }
 
     /// The `(`, the expression and the `)` of a group, with the runs between them.
@@ -653,7 +620,7 @@ pub mod walk {
         v: &mut V,
         node: &'ast syntax::Paren<I>,
     ) {
-        v.visit_paren_start(&node.f1);
+        v.visit_text(&node.f1.0);
 
         if let Some(s) = &node.f2 {
             v.visit_s(s);
@@ -665,7 +632,7 @@ pub mod walk {
             v.visit_s(s);
         }
 
-        v.visit_paren_end(&node.f4);
+        v.visit_text(&node.f4.0);
     }
 
     pub fn walk_expr_with_suffix<'ast, I: UnsynInput, V: ?Sized + Visit<'ast, I>>(
@@ -687,7 +654,7 @@ pub mod walk {
                     v.visit_s(s);
                 }
 
-                v.visit_concat(keyword);
+                v.visit_text(keyword);
 
                 if let Some(s) = s2 {
                     v.visit_s(s);
@@ -708,7 +675,7 @@ pub mod walk {
                     v.visit_s(s);
                 }
 
-                v.visit_except(keyword);
+                v.visit_text(keyword);
 
                 if let Some(s) = s2 {
                     v.visit_s(s);
@@ -723,7 +690,7 @@ pub mod walk {
         v: &mut V,
         node: &'ast syntax::Repeat<I>,
     ) {
-        v.visit_brace_start(&node.f1);
+        v.visit_text(&node.f1.0);
 
         if let Some(s) = &node.f2 {
             v.visit_s(s);
@@ -735,7 +702,7 @@ pub mod walk {
             v.visit_s(s);
         }
 
-        v.visit_brace_end(&node.f4);
+        v.visit_text(&node.f4.0);
     }
 
     pub fn walk_repeat_bound<'ast, I: UnsynInput, V: ?Sized + Visit<'ast, I>>(
@@ -755,7 +722,7 @@ pub mod walk {
         v: &mut V,
         node: &'ast syntax::RangeTo<I>,
     ) {
-        v.visit_comma(&node.f1);
+        v.visit_text(&node.f1.0);
 
         if let Some(s) = &node.f2 {
             v.visit_s(s);
@@ -776,7 +743,7 @@ pub mod walk {
             v.visit_s(s);
         }
 
-        v.visit_comma(&node.f2);
+        v.visit_text(&node.f2.0);
 
         if let Some((s, end)) = &node.f3 {
             if let Some(s) = s {
@@ -807,7 +774,7 @@ pub mod walk {
         node: &'ast syntax::UnicodeRange<I>,
     ) {
         v.visit_lit_unicode(&node.lit_unicode);
-        v.visit_text(&node.f1);
+        v.visit_text(&node.f1.0);
         v.visit_lit_unicode(&node.f2);
     }
 
@@ -819,7 +786,7 @@ pub mod walk {
         node: &'ast syntax::StrRange<I>,
     ) {
         v.visit_lit_str(&node.lit_str);
-        v.visit_text(&node.f1);
+        v.visit_text(&node.f1.0);
         v.visit_lit_str(&node.f2);
     }
 
@@ -865,7 +832,7 @@ pub mod walk {
         v: &mut V,
         node: &'ast syntax::Set<I>,
     ) {
-        v.visit_bracket_start(&node.0);
+        v.visit_text(&node.0.0);
 
         for (s, item, s2, comma) in &node.1 {
             if let Some(s) = s {
@@ -878,7 +845,7 @@ pub mod walk {
                 v.visit_s(s);
             }
 
-            v.visit_comma(comma);
+            v.visit_text(&comma.0);
         }
 
         if let Some((s, item)) = &node.2 {
@@ -893,7 +860,7 @@ pub mod walk {
             v.visit_s(s);
         }
 
-        v.visit_bracket_end(&node.4);
+        v.visit_text(&node.4.0);
     }
 
     /// `('*' | '?' | '+' | Repeat)`, the four quantity operators the production
@@ -926,48 +893,31 @@ pub mod walk {
     }
 
     // -----------------------------------------------------------------------
-    // The terminals a `syntax` production is written with
+    // The terminals a `syntax` production names a rule for
     //
-    // Every one of them is the word and nothing else, so every walk hands over
-    // that text alone; the runs about it belong to the sequence, whose walk
-    // reaches them through `visit_s`. A generator writes one walk per terminal
-    // for the same reason it writes one type per terminal.
+    // Each holds the anonymous punct the production wrote and nothing else, so
+    // each walk hands over that punct's text alone; the runs about it belong to
+    // the sequence, whose walk reaches them through `visit_s`.
     // -----------------------------------------------------------------------
 
     macro_rules! walk_terminal {
         ($($method:ident, $type:ident);* $(;)?) => {
             $(
-                #[doc = concat!("The `", stringify!($type), "` punct — one text, the runs beside it belonging to the sequence.")]
+                #[doc = concat!("The `", stringify!($type), "` operator — one text, the runs beside it belonging to the sequence.")]
                 pub fn $method<'ast, I: UnsynInput, V: ?Sized + Visit<'ast, I>>(
                     v: &mut V,
                     node: &'ast syntax::$type<I>,
                 ) {
-                    v.visit_text(&node.0);
+                    v.visit_text(&node.0.0);
                 }
             )*
         };
     }
 
     walk_terminal! {
-        walk_semi, Semi;
         walk_plus, Plus;
         walk_star, Star;
         walk_question, Question;
-        walk_tilde, Tilde;
-        walk_or, Or;
-        walk_paren_start, ParenStart;
-        walk_paren_end, ParenEnd;
-        walk_bracket_start, BracketStart;
-        walk_bracket_end, BracketEnd;
-        walk_brace_start, BraceStart;
-        walk_brace_end, BraceEnd;
-        walk_lt, Lt;
-        walk_gt, Gt;
-        walk_comma, Comma;
-        walk_arrow_right, ArrowRight;
-        walk_minus, Minus;
-        walk_concat, Concat;
-        walk_except, Except;
     }
 
     // -----------------------------------------------------------------------
@@ -999,18 +949,42 @@ pub mod walk {
         walk_oct_digit, OctDigit;
         walk_dec_digit, DecDigit;
         walk_hex_digit, HexDigit;
+        walk_ascii_newline, AsciiNewline;
+        walk_ascii_carriage_return, AsciiCarriageReturn;
+        walk_ascii_tab, AsciiTab;
+        walk_ascii_backslash, AsciiBackslash;
+        walk_ascii_null, AsciiNull;
+        walk_empty_block_comment, EmptyBlockComment;
+        walk_starred_empty_block_comment, StarredEmptyBlockComment;
     }
 
-    // A block comment and the two block documents are one token of text each:
-    // the nesting the reading has to count is how the closing that belongs to
-    // an opening is found, and nothing the tree would keep of it is a rule the
-    // spec names.
+    // A block comment and the two block documents each hold the run of text the
+    // nesting had to count its way through: the opening, the head, the body and
+    // the closing, kept apart because the spec named a rule for each.
 
     pub fn walk_block_comment<'ast, I: UnsynInput, V: ?Sized + Visit<'ast, I>>(
         v: &mut V,
         node: &'ast lexer::BlockComment<I>,
     ) {
+        match node {
+            lexer::BlockComment::BlockCommentBody(part) => v.visit_block_comment_body(part),
+            lexer::BlockComment::EmptyBlockComment(part) => v.visit_empty_block_comment(part),
+            lexer::BlockComment::StarredEmptyBlockComment(part) => {
+                v.visit_starred_empty_block_comment(part)
+            }
+        }
+    }
+
+    /// The opening, the head, the body and the closing of a comment that holds
+    /// something.
+    pub fn walk_block_comment_body<'ast, I: UnsynInput, V: ?Sized + Visit<'ast, I>>(
+        v: &mut V,
+        node: &'ast lexer::BlockCommentBody<I>,
+    ) {
         v.visit_text(&node.0);
+        v.visit_text(&node.1);
+        v.visit_text(&node.2);
+        v.visit_text(&node.3);
     }
 
     pub fn walk_inner_block_doc<'ast, I: UnsynInput, V: ?Sized + Visit<'ast, I>>(
@@ -1018,6 +992,8 @@ pub mod walk {
         node: &'ast lexer::InnerBlockDoc<I>,
     ) {
         v.visit_text(&node.0);
+        v.visit_text(&node.1);
+        v.visit_text(&node.2);
     }
 
     pub fn walk_outer_block_doc<'ast, I: UnsynInput, V: ?Sized + Visit<'ast, I>>(
@@ -1050,8 +1026,8 @@ pub mod walk {
         v: &mut V,
         node: &'ast lexer::RawIdent<I>,
     ) {
-        v.visit_text(&node.sigil);
-        v.visit_non_keyword_ident(&node.name);
+        v.visit_text(&node.f1);
+        v.visit_non_keyword_ident(&node.non_keyword_ident);
     }
 
     pub fn walk_non_keyword_ident<'ast, I: UnsynInput, V: ?Sized + Visit<'ast, I>>(
@@ -1100,17 +1076,23 @@ pub mod walk {
         node: &'ast lexer::AsciiEscape<I>,
     ) {
         match node {
-            lexer::AsciiEscape::Hex { marker, oct, hex } => {
-                v.visit_text(marker);
-                v.visit_oct_digit(oct);
-                v.visit_hex_digit(hex);
-            }
-            lexer::AsciiEscape::N(word)
-            | lexer::AsciiEscape::R(word)
-            | lexer::AsciiEscape::T(word)
-            | lexer::AsciiEscape::Backslash(word)
-            | lexer::AsciiEscape::Zero(word) => v.visit_text(word),
+            lexer::AsciiEscape::AsciiHexEscape(part) => v.visit_ascii_hex_escape(part),
+            lexer::AsciiEscape::AsciiNewline(part) => v.visit_ascii_newline(part),
+            lexer::AsciiEscape::AsciiCarriageReturn(part) => v.visit_ascii_carriage_return(part),
+            lexer::AsciiEscape::AsciiTab(part) => v.visit_ascii_tab(part),
+            lexer::AsciiEscape::AsciiBackslash(part) => v.visit_ascii_backslash(part),
+            lexer::AsciiEscape::AsciiNull(part) => v.visit_ascii_null(part),
         }
+    }
+
+    /// The marker of `\x`, the two digits of a code of seven bits.
+    pub fn walk_ascii_hex_escape<'ast, I: UnsynInput, V: ?Sized + Visit<'ast, I>>(
+        v: &mut V,
+        node: &'ast lexer::AsciiHexEscape<I>,
+    ) {
+        v.visit_text(&node.f1);
+        v.visit_oct_digit(&node.oct_digit);
+        v.visit_hex_digit(&node.hex_digit);
     }
 
     pub fn walk_unicode_escape<'ast, I: UnsynInput, V: ?Sized + Visit<'ast, I>>(
@@ -1174,7 +1156,11 @@ pub mod walk {
         v: &mut V,
         node: &'ast lexer::BlockCommentOrDoc<I>,
     ) {
-        v.visit_text(&node.0);
+        match node {
+            lexer::BlockCommentOrDoc::BlockComment(part) => v.visit_block_comment(part),
+            lexer::BlockCommentOrDoc::OuterBlockDoc(part) => v.visit_outer_block_doc(part),
+            lexer::BlockCommentOrDoc::InnerBlockDoc(part) => v.visit_inner_block_doc(part),
+        }
     }
 }
 

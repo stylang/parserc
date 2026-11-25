@@ -54,12 +54,27 @@ lexer QuoteEscape -> '\\\'';
 
 lexer AsciiEscape ->
       AsciiHexEscape
-    | '\\n'
-    | '\\r'
-    | '\\t'
-    | '\\\\'
-    | '\\0'
+    | AsciiNewline
+    | AsciiCarriageReturn
+    | AsciiTab
+    | AsciiBackslash
+    | AsciiNull
     ;
+
+/// The escape of a line feed, spelled by the letter after its marker.
+lexer AsciiNewline -> '\\n';
+
+/// The escape of a carriage return, spelled by the letter after its marker.
+lexer AsciiCarriageReturn -> '\\r';
+
+/// The escape of a tab, spelled by the letter after its marker.
+lexer AsciiTab -> '\\t';
+
+/// The escape of the marker itself, so that a backslash can stand in text.
+lexer AsciiBackslash -> '\\\\';
+
+/// The escape of the zero code point.
+lexer AsciiNull -> '\\0';
 
 /// The escape of a code of seven bits, spelled by the two hex digits after
 /// its marker.
@@ -79,9 +94,18 @@ lexer LitUnicode -> 'U+' HexDigit{4};
 
 lexer BlockComment ->
       BlockCommentBody
-    | '/**/'
-    | '/***/'
+    | EmptyBlockComment
+    | StarredEmptyBlockComment
     ;
+
+/// `/**/`: a block comment that holds nothing at all.
+///
+/// A rule of its own because it is one form of a comment and the reader has to
+/// tell it from the form that opens a document.
+lexer EmptyBlockComment -> '/**/';
+
+/// `/***/`: an empty comment with the star that keeps it from being a document.
+lexer StarredEmptyBlockComment -> '/***/';
 
 /// A block comment that holds something: what it opens with, the one run that
 /// cannot begin its end, then as many nested comments and further runs as it
@@ -175,11 +199,20 @@ syntax Paren -> '(' Expr ')';
 /// How many times an operand is read: as many as please, at most once, at
 /// least once, or a bounded number of times.
 syntax Suffix ->
-      '*'
-    | '?'
-    | '+'
+      Star
+    | Question
+    | Plus
     | Repeat
     ;
+
+/// `'*'`: the operand is read as often as it fits, including not at all.
+syntax Star -> '*';
+
+/// `'?'`: the operand is read at most once.
+syntax Question -> '?';
+
+/// `'+'`: the operand is read at least once.
+syntax Plus -> '+';
 
 syntax ExprWithSuffix ->
       Suffixed

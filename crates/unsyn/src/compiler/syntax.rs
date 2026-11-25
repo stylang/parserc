@@ -34,11 +34,11 @@
 //! [`Ident`] or [`LitStr`]: it keeps no trivia either, since its text is read
 //! into the text of the rule that reaches it.
 
-use parserc::syntax::Syntax;
+use parserc::syntax::{Char, Syntax};
 
 use crate::compiler::lexer::{Ident, LeadingKeywords, LitDec, LitStr, LitUnicode, S};
 use crate::compiler::{
-    errors::{PunctKind, SyntaxKind},
+    errors::{KeywordKind, PunctKind, SyntaxKind},
     input::UnsynInput,
 };
 
@@ -49,148 +49,53 @@ use crate::compiler::{
 pub type Led<I, N> = (Option<S<I>>, N);
 
 // ---------------------------------------------------------------------------
-// The terminals a `syntax` rule is written with.
+// The three operators a `syntax` rule names.
 //
-// Each is one fixed word and nothing more: a definition may be written `A| B`
-// as much as `A |B`, and the run that makes the two readings the same reading
-// is the sequence's own field rather than a part of the word. A terminal
-// therefore never fails for a missing separator; it fails only when its own
-// text is not there.
+// A punctuator the production writes without naming a rule for is an anonymous
+// operand: the tree holds the character as a [`Char`] and gives it no type, so
+// the walk that reaches it hands its text over and nothing else. Only these
+// three are rules of their own, because [`Suffix`] has to tell them apart.
+//
+// Each holds one fixed character and nothing more: a definition may be written
+// `A*` as much as `A *`, and the run that makes the two readings the same
+// reading is the sequence's own field rather than a part of the operator. An
+// operator therefore never fails for a missing separator; it fails only when its
+// own text is not there.
 // ---------------------------------------------------------------------------
 
-/// Declares one terminal of the syntax level: a fixed word and nothing else.
-macro_rules! syntax_terminal {
-    (
-        $(#[$meta:meta])*
-        $name:ident, $value:literal, $kind:ident :: $variant:ident
-    ) => {
-        $(#[$meta])*
-        #[derive(Debug, PartialEq, Eq, PartialOrd, Ord, Clone, Syntax)]
-        #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
-        pub struct $name<I>(
-            /// The word itself, kept whole — the runs around a terminal belong
-            /// to the sequence it stands in, exactly as the generated code
-            /// lays them out.
-            #[parserc(
-                keyword = $value,
-                map_err = crate::compiler::errors::$kind::$variant.map()
-            )]
-            pub I,
-        )
-        where
-            I: UnsynInput;
-    };
-}
-
-syntax_terminal!(
-    /// `;`, which ends a definition.
-    Semi, ";", PunctKind::Semi
-);
-syntax_terminal!(
-    /// `+`, the suffix that asks for one operand or more.
-    Plus, "+", PunctKind::Plus
-);
-syntax_terminal!(
-    /// `*`, the suffix that asks for an operand any number of times.
-    Star, "*", PunctKind::Star
-);
-syntax_terminal!(
-    /// `?`, the suffix that asks for an operand at most once.
-    Question, "?", PunctKind::Question
-);
-syntax_terminal!(
-    /// `~`, the prefix that asks for the one character a set does not denote.
-    Tilde, "~", PunctKind::Tilde
-);
-syntax_terminal!(
-    /// `|`, which joins two alternatives.
-    Or, "|", PunctKind::Or
-);
-syntax_terminal!(
-    /// `(`, which opens a group.
-    ParenStart, "(", PunctKind::ParenStart
-);
-syntax_terminal!(
-    /// `)`, which closes a group.
-    ParenEnd, ")", PunctKind::ParenEnd
-);
-syntax_terminal!(
-    /// `[`, which opens a set.
-    BracketStart, "[", PunctKind::BracketStart
-);
-syntax_terminal!(
-    /// `]`, which closes a set.
-    BracketEnd, "]", PunctKind::BracketEnd
-);
-syntax_terminal!(
-    /// `{`, which opens the bound of a repetition.
-    BraceStart, "{", PunctKind::BraceStart
-);
-syntax_terminal!(
-    /// `}`, which closes the bound of a repetition.
-    BraceEnd, "}", PunctKind::BraceEnd
-);
-syntax_terminal!(
-    /// `<`, which opens a call of an external.
-    Lt, "<", PunctKind::Lt
-);
-syntax_terminal!(
-    /// `>`, which closes a call of an external.
-    Gt, ">", PunctKind::Gt
-);
-syntax_terminal!(
-    /// `,`, which separates two members of a set or the two bounds of a
-    /// repetition.
-    Comma, ",", PunctKind::Comma
-);
-syntax_terminal!(
-    /// `->`, which divides the name of a node from the pattern it denotes.
-    ArrowRight, "->", PunctKind::ArrowRight
-);
-/// Declares one terminal of the syntax level that is a word rather than a sign.
+/// `'*'`: the operand is read as often as it fits, including not at all.
 ///
-/// The word is the text the spec writes and nothing more: `exceptKeywords` is
-/// read as the word `except` and the name `Keywords`, since it is the file,
-/// not the reader, that says where a word of the pattern ends.
-macro_rules! syntax_word {
-    (
-        $(#[$meta:meta])*
-        $name:ident, $value:literal, $kind:ident :: $variant:ident
-    ) => {
-        $(#[$meta])*
-        #[derive(Debug, PartialEq, Eq, PartialOrd, Ord, Clone, Syntax)]
-        #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
-        pub struct $name<I>(
-            /// The word itself; the runs beside it belong to the sequence.
-            #[parserc(
-                keyword = $value,
-                map_err = crate::compiler::errors::$kind::$variant.map()
-            )]
-            pub I,
-        )
-        where
-            I: UnsynInput;
-    };
-}
+/// A rule of its own, as [`Suffix`] says, so a reader of a suffix tells the
+/// operator from the bound. The character it holds is the anonymous punct the
+/// production writes, which is a node of no name and so keeps no type.
+#[derive(Debug, PartialEq, Eq, PartialOrd, Ord, Clone, Syntax)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+pub struct Star<I>(
+    /// The `*` itself, kept whole — the runs around it belong to the sequence.
+    pub Char<I, '*'>,
+)
+where
+    I: UnsynInput;
 
-syntax_word!(
-    /// `concat`, which asks that what two operands matched be joined into one
-    /// token.
-    Concat, "concat", KeywordKind::Concat
-);
-syntax_word!(
-    /// `except`, which removes what one operand matches from another.
-    Except, "except", KeywordKind::Except
-);
-syntax_terminal!(
-    /// `-`, which divides the two ends of a range.
-    ///
-    /// The form of a range written between two strings asks for this word by
-    /// `concat`, which is why [`Range::StrRange`] holds the bare text of a `-` rather
-    /// than a terminal of this shape: nothing may stand between a string, this
-    /// `-` and the string after it.
-    Minus, "-", PunctKind::Minus
-);
+/// `'?'`: the operand is read at most once.
+#[derive(Debug, PartialEq, Eq, PartialOrd, Ord, Clone, Syntax)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+pub struct Question<I>(
+    /// The `?` itself.
+    pub Char<I, '?'>,
+)
+where
+    I: UnsynInput;
+
+/// `'+'`: the operand is read at least once.
+#[derive(Debug, PartialEq, Eq, PartialOrd, Ord, Clone, Syntax)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+pub struct Plus<I>(
+    /// The `+` itself.
+    pub Char<I, '+'>,
+)
+where
+    I: UnsynInput;
 
 // ---------------------------------------------------------------------------
 // `syntax Expr -> ExprNoTopAlt+ ( '|' ExprNoTopAlt+ )*;`
@@ -242,7 +147,7 @@ where
 /// as stands for it as it is.
 /// The runs of trivia the sequence holds between its operands are fields of the
 /// tuple, and the sequence itself is the pair [`Branch`] writes.
-pub type Alternative<I> = (Option<S<I>>, Or<I>, Option<S<I>>, Branch<I>);
+pub type Alternative<I> = (Option<S<I>>, Char<I, '|'>, Option<S<I>>, Branch<I>);
 
 // ---------------------------------------------------------------------------
 // `syntax ExprNoTopAlt -> ExprWithSuffix | ExprWithoutSuffix;`
@@ -284,7 +189,7 @@ where
 /// The repetition `( SetItem ',' )` names no node of the tree, so the tuple
 /// stands for it as the production writes it: the run before the member, the
 /// member, the run before the comma, and the comma.
-pub type SetMember<I> = (Option<S<I>>, SetItem<I>, Option<S<I>>, Comma<I>);
+pub type SetMember<I> = (Option<S<I>>, SetItem<I>, Option<S<I>>, Char<I, ','>);
 
 /// `syntax Set -> '[' ( SetItem ',' )* SetItem? ']';`: a list of members, most
 /// of them followed by a comma, and a member the closing bracket may keep
@@ -298,7 +203,7 @@ pub type SetMember<I> = (Option<S<I>>, SetItem<I>, Option<S<I>>, Comma<I>);
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct Set<I>(
     /// The `[` that opens the set.
-    pub BracketStart<I>,
+    pub Char<I, '['>,
     /// The members each followed by a comma, with the runs about them.
     pub Vec<SetMember<I>>,
     /// The member after the last comma, when one is written — the pair the
@@ -307,7 +212,7 @@ pub struct Set<I>(
     /// The run before the closing bracket.
     pub Option<S<I>>,
     /// The `]` that closes the set.
-    pub BracketEnd<I>,
+    pub Char<I, ']'>,
 )
 where
     I: UnsynInput;
@@ -370,7 +275,7 @@ where
     I: UnsynInput,
 {
     /// The `~` punct.
-    pub f1: Tilde<I>,
+    pub f1: Char<I, '~'>,
     /// The run between the punct and the operand.
     pub f2: Option<S<I>>,
     /// The refused operand: this position may begin none of what it matches.
@@ -389,7 +294,7 @@ where
     I: UnsynInput,
 {
     /// The `<` that opens the call.
-    pub f1: Lt<I>,
+    pub f1: Char<I, '<'>,
     /// The run the call reads after the `<`.
     pub f2: Option<S<I>>,
     /// The name the caller binds.
@@ -397,7 +302,7 @@ where
     /// The run before the `>`.
     pub f3: Option<S<I>>,
     /// The `>` that closes the call.
-    pub f4: Gt<I>,
+    pub f4: Char<I, '>'>,
 }
 
 /// `syntax Paren -> '(' Expr ')';`: a group, so that an expression may sit
@@ -412,7 +317,7 @@ where
     I: UnsynInput,
 {
     /// The `(` that opens the group.
-    pub f1: ParenStart<I>,
+    pub f1: Char<I, '('>,
     /// The run the group reads after the `(`.
     pub f2: Option<S<I>>,
     /// The expression the group holds.
@@ -420,7 +325,7 @@ where
     /// The run before the `)`.
     pub f3: Option<S<I>>,
     /// The `)` that closes the group.
-    pub f4: ParenEnd<I>,
+    pub f4: Char<I, ')'>,
 }
 
 // ---------------------------------------------------------------------------
@@ -476,8 +381,8 @@ where
         /// The run between the operand and the keyword.
         f1: Option<S<I>>,
         /// The keyword, which keeps no run of its own.
-        #[parserc(crucial)]
-        f2: Concat<I>,
+        #[parserc(crucial, keyword = "concat", map_err = KeywordKind::Concat.map())]
+        f2: I,
         /// The run between the keyword and the operand after it.
         f3: Option<S<I>>,
         /// The operand after the keyword.
@@ -497,8 +402,8 @@ where
         /// The run between the operand and the keyword.
         f1: Option<S<I>>,
         /// The keyword, which keeps no run of its own.
-        #[parserc(crucial)]
-        f2: Except<I>,
+        #[parserc(crucial, keyword = "except", map_err = KeywordKind::Except.map())]
+        f2: I,
         /// The run between the keyword and the operand taken out.
         f3: Option<S<I>>,
         /// The operand to take out, which cannot itself carry a suffix.
@@ -548,7 +453,7 @@ where
     I: UnsynInput,
 {
     /// The `{` that opens the bound.
-    pub f1: BraceStart<I>,
+    pub f1: Char<I, '{'>,
     /// The run the repetition reads after the `{`.
     pub f2: Option<S<I>>,
     /// The bounds the braces hold.
@@ -556,7 +461,7 @@ where
     /// The run before the `}`.
     pub f3: Option<S<I>>,
     /// The `}` that closes the bound.
-    pub f4: BraceEnd<I>,
+    pub f4: Char<I, '}'>,
 }
 
 /// The bounds a [`Repeat`] is written with: `syntax RepeatBound -> ',' LitDec
@@ -592,7 +497,7 @@ where
     I: UnsynInput,
 {
     /// The `,` that opens the form, and says which form this is.
-    pub f1: Comma<I>,
+    pub f1: Char<I, ','>,
     /// The run between the comma and the bound.
     pub f2: Option<S<I>>,
     /// The bound above.
@@ -615,7 +520,7 @@ where
     /// The run before the comma.
     pub f1: Option<S<I>>,
     /// The `,` that divides the two bounds.
-    pub f2: Comma<I>,
+    pub f2: Char<I, ','>,
     /// The bound above with the run before it, if one is written.
     pub f3: Option<Led<I, LitDec<I>>>,
 }
@@ -652,8 +557,7 @@ where
     /// The code point the range begins at.
     pub lit_unicode: LitUnicode<I>,
     /// The `-` that divides the two ends, joined to both of them.
-    #[parserc(crucial, keyword = "-", map_err = PunctKind::Minus.map())]
-    pub f1: I,
+    pub f1: Char<I, '-'>,
     /// The code point the range ends at.
     pub f2: LitUnicode<I>,
 }
@@ -672,8 +576,7 @@ where
     /// The string the range begins at.
     pub lit_str: LitStr<I>,
     /// The `-` that divides the two ends, joined to both of them.
-    #[parserc(crucial, keyword = "-", map_err = PunctKind::Minus.map())]
-    pub f1: I,
+    pub f1: Char<I, '-'>,
     /// The string the range ends at.
     pub f2: LitStr<I>,
 }
@@ -727,21 +630,22 @@ where
     #[parserc(crucial)]
     pub leading_keywords: LeadingKeywords<I>,
     /// The run between the word and the name, which neither of the two owns.
-    pub s: Option<S<I>>,
+    pub f1: Option<S<I>>,
     /// The name of the node.
     pub ident: Ident<I>,
     /// The run between the name and the `->`.
-    pub s1: Option<S<I>>,
+    pub f2: Option<S<I>>,
     /// The `->` that opens the definition.
-    pub arrow: ArrowRight<I>,
+    #[parserc(keyword = "->", map_err = PunctKind::ArrowRight.map())]
+    pub f3: I,
     /// The run between the `->` and the pattern.
-    pub s2: Option<S<I>>,
+    pub f4: Option<S<I>>,
     /// The pattern the definition gives its node.
     pub expr: Box<Expr<I>>,
     /// The run before the `;`.
-    pub s3: Option<S<I>>,
+    pub f5: Option<S<I>>,
     /// The `;` that ends the definition.
-    pub semi: Semi<I>,
+    pub f6: Char<I, ';'>,
 }
 
 // ---------------------------------------------------------------------------
@@ -881,12 +785,12 @@ mod tests {
         // of a sequence out as fields of its own, exactly as the generated code
         // does for the same pattern, so every character stands where the
         // sequence says it and no terminal hides one.
-        let semi = whole::<Semi<_>>(";").unwrap();
-        assert_eq!(semi.0.as_str(), ";");
+        let star = whole::<Star<_>>("*").unwrap();
+        assert_eq!(star.0.0.as_str(), "*");
 
         // Over-reaching is not reading: what stands beside the word is left
         // for the sequence.
-        assert!(whole::<Semi<_>>(" ;").is_err());
+        assert!(whole::<Star<_>>(" *").is_err());
     }
 
     #[test]
@@ -1106,12 +1010,12 @@ mod tests {
         // The sequence carries every run between its operands as a field of
         // its own: the name comes after the word, the arrow after the name,
         // and the pattern after the arrow.
-        assert_eq!(stmt.s.unwrap().0.as_str(), " ");
-        assert_eq!(stmt.s1.unwrap().0.as_str(), " ");
-        assert_eq!(stmt.s2.unwrap().0.as_str(), " ");
+        assert_eq!(stmt.f1.unwrap().0.as_str(), " ");
+        assert_eq!(stmt.f2.unwrap().0.as_str(), " ");
+        assert_eq!(stmt.f4.unwrap().0.as_str(), " ");
         // Nothing lies between a pattern and the `;` that closes it here, so
         // the last junction of the sequence stands empty.
-        assert!(stmt.s3.is_none());
+        assert!(stmt.f5.is_none());
         // A word and a name run together is what the spec writes, not what it
         // refuses: `syntaxExpr` is the word `syntax` and then the name `Expr`,
         // and the space between them is trivia that belongs to no rule.
@@ -1250,21 +1154,21 @@ mod tests {
             })
             .collect::<Vec<_>>();
 
-        // One `whitespace`, twenty-six `lexer` and twenty-three `syntax` rules.
-        assert_eq!(statements.len(), 50);
+        // One `whitespace`, thirty-three `lexer` and twenty-six `syntax` rules.
+        assert_eq!(statements.len(), 60);
         assert_eq!(
             statements
                 .iter()
                 .filter(|kind| matches!(kind, Decl::Lexer))
                 .count(),
-            26
+            33
         );
         assert_eq!(
             statements
                 .iter()
                 .filter(|kind| matches!(kind, Decl::Syntax))
                 .count(),
-            23
+            26
         );
         assert_eq!(
             statements
@@ -1286,13 +1190,16 @@ mod tests {
             })
             .collect::<Vec<_>>();
 
-        assert_eq!(names.len(), 50, "a definition without a name");
+        assert_eq!(names.len(), 60, "a definition without a name");
         for name in [
             "S",
             "IdentOrKeyword",
             "Keywords",
             "LitStr",
             "BlockCommentOrDoc",
+            "Star",
+            "Question",
+            "Plus",
             "Expr",
             "ExprNoTopAlt",
             "ExprWithoutSuffix",
