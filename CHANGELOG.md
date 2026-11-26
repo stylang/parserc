@@ -9,6 +9,21 @@ Note: In this file, do not use the hard wrap in the middle of a sentence for
 compatibility with GitHub comment style markdown rendering.
 -->
 
+## [0.14.1] - 2026-11-26
+
+- unsyn: **breaking** — the crate now builds its own front end. `build.rs` runs the released generator over `unsyn.us`, and the `lexer`, node and visitor modules of this crate are that output: 4,034 hand-written lines of `src/lexer.rs`, `src/syntax.rs` and `src/visit.rs` are gone. What used to be argued by a comparison test is now argued by the compiler, since a name, a field or a bound a build writes wrongly is a compile error in the crate that consumes it.
+- unsyn: added `[build-dependencies] unsyn = "=0.14.0"`. A package cannot depend on the path version of itself, so the pinned version names exactly which generator wrote the front end a release ships — and a change to what a build *writes* therefore reaches the shipped output one release late. The two are the same release cycle, not a forgotten upgrade.
+- unsyn: removed the `bootstrap` feature, `examples/bootstrap`, `examples/regen_unsyn_us`, `tests/unsyn_us.rs`, `tests/two_trees.rs`, `tests/generated/**` and `tests/common/scan.rs`. There is no longer a second tree to compare against, and no kept copy of generated code to go stale.
+- unsyn: added `tests/front_end.rs`, which reads the spec with the shipped front end and pins what a build cannot check — that a walk hands over every character of the source exactly once, and that an escape bounds its digits, a comment closes the group it opened, and the separator is taken greedily.
+- unsyn: the error a build writes is now written, used, and wrapped. `src/error.rs` holds a `generated` module — the `error.rs` a build wrote, `ParseError { Kind(::parserc::Kind), Syntax(SyntaxKind, ControlFlow, Span) }` with its `SyntaxKind` derived from the spec — and `UnsynError` wraps it around `SemanticsKind` and `BuildKind`, the families no grammar states.
+- unsyn: **breaking** — removed `PunctKind`, `KeywordKind` and the hand-written `SyntaxKind`, and `src/errors.rs` became `src/error.rs`. The three families named what the hand-written parser expected; a build leaves a word to the combinator that met it, and a rule to the production that named it.
+- unsyn: **breaking** for the `serde` feature, which no longer puts `Serialize`/`Deserialize` on the front-end types: the released generator writes no serde derives, and a change to what a build writes needs the release cycle above to show up. The feature still selects `parserc/serde`.
+- unsyn: a build writes the whole of what a report needs — `Display` and `impl std::error::Error` for its error, and `Display` for the family of rules — so a consumer can chain it into a wrapper of its own without printing a `Debug` dump.
+- unsyn: a file now imports the error only where its own code reports a refusal, instead of every file of rules importing it whenever the spec named a rule anywhere.
+- unsyn: a character class that is exactly an ASCII class Rust has a name for is emitted as that name — `is_ascii_digit`, `is_ascii_hexdigit`, `is_ascii_alphabetic` and the rest — rather than as the range the set was written with.
+- unsyn: `clippy::type_complexity` is now stated by the generated code, on the items whose fields nest an unnamed group, instead of by whoever keeps the output; `#[rustfmt::skip]` is no longer written at all, since the only thing it protected was the comparison against a kept file.
+- unsyn: added `Builder::error_name`, which names the generated error apart from the wrapper a consumer builds around it; `Builder::input_at` documented as taking the path of the trait itself, while `Builder::error_at` takes the module an error is found in.
+
 ## [0.14.0] - 2026-11-26
 
 - unsyn: the DSL is now compiled. A `.us` file — `whitespace`, `lexer` and `syntax` productions — is read into a CST and turned into `parserc` syntax: a `Syntax` type per rule, the parsers its right side writes, and a `syn`-shaped visitor. This replaces the hand-written `lib.uns` self-description with a spec, `unsyn.us`, and `crates/unsyn/README.md` is the reference for the language and for what every production becomes.
