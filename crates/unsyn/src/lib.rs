@@ -126,43 +126,28 @@ pub mod semantic;
 // alone, and the directory a build writes into is known only once the build has
 // run.
 //
-// What each allowance here is for, and none of them is a style preference: each
-// covers a defect in the output, and a test beside the generator pins that the
-// generator in `src/` no longer writes two of the three.
-//
-// - `unused_imports` — the released generator gives every file of rules the error
-//   import whenever the spec names a refusal anywhere in it, so `syntax.rs` is
-//   handed two names it never reads. What is in `src/codegen.rs` now records
-//   which file did the naming, and imports only there.
-// - `clippy::manual_is_ascii_check` — a set written as `'0'-'9'` is emitted as
-//   the range it is written with, where `char` has a name for that exact class.
-//   The generator now recognises the six ASCII classes and writes the name.
-// - `clippy::type_complexity` — what a `+` of a node writes is a head and a tail,
-//   `(Box<A>, Vec<(Option<S>, Box<A>)>)`, and a group no production gave a left
-//   side to has no name to alias to. This one is unfixed, and fixing it is a
-//   decision about the language rather than about this file: either the spec
-//   names that shape as a rule of its own, or a build learns to write an alias it
-//   has to invent a name for.
-//
-// The first two are why a release is one behind its own generator: the front end
-// shipped here was written by the released one, so a change to what a build
-// *writes* reaches the output in the release after it.
-#[allow(unused_imports, clippy::manual_is_ascii_check, clippy::type_complexity)]
+// No allowance is written here, on purpose. The released generator's output has
+// three known defects — an error import in a file that reports no refusal, a
+// character class spelled as its range where `char` names it, and field types
+// nested as tuples because the spec gave those groups no left side. The first two
+// are fixed in `src/codegen.rs`, and a test beside each one pins the fix; the
+// third is now carried by the generated code itself, on the items that need it.
+// Until this crate is built by a generator that contains those fixes, the output
+// compiled here still warns, and that warning is the honest record of a release
+// being one behind its own generator — silencing it in this file would hide it
+// without fixing anything.
 pub mod error {
     include!(concat!(env!("OUT_DIR"), "/unsyn/error.rs"));
 }
 
-#[allow(unused_imports, clippy::manual_is_ascii_check, clippy::type_complexity)]
 pub mod lexer {
     include!(concat!(env!("OUT_DIR"), "/unsyn/lexer.rs"));
 }
 
-#[allow(unused_imports, clippy::manual_is_ascii_check, clippy::type_complexity)]
 pub mod syntax {
     include!(concat!(env!("OUT_DIR"), "/unsyn/syntax.rs"));
 }
 
-#[allow(unused_imports, clippy::manual_is_ascii_check, clippy::type_complexity)]
 pub mod visit {
     include!(concat!(env!("OUT_DIR"), "/unsyn/visit.rs"));
 }

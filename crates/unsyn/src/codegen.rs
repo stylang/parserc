@@ -782,20 +782,14 @@ impl Pieces {
         if self.error_path.is_none() && self.named_parts.contains(&part) {
             let error = &self.error;
 
-            uses.push(quote! {
-                #[rustfmt::skip]
-                use super::error::{#error, SyntaxKind};
-            });
+            uses.push(quote! { use super::error::{#error, SyntaxKind}; });
         }
 
         if part == Part::Syntax {
             let mentioned = mentioned(&self.lexers, &self.items, Part::Syntax);
 
             if !mentioned.is_empty() {
-                uses.push(quote! {
-                    #[rustfmt::skip]
-                    use super::lexer::{#(#mentioned),*};
-                });
+                uses.push(quote! { use super::lexer::{#(#mentioned),*}; });
             }
         }
 
@@ -803,21 +797,12 @@ impl Pieces {
             let lexers = &self.lexers;
             let syntaxes = &self.syntaxes;
 
-            // A list of names broken over lines is what a formatter adds a final
-            // comma to, and the formatter sorts one it leaves alone — so the line
-            // stands as written, as the walk of the visitor's own import does.
             if !lexers.is_empty() {
-                uses.push(quote! {
-                    #[rustfmt::skip]
-                    use super::lexer::{#(#lexers),*};
-                });
+                uses.push(quote! { use super::lexer::{#(#lexers),*}; });
             }
 
             if !syntaxes.is_empty() {
-                uses.push(quote! {
-                    #[rustfmt::skip]
-                    use super::syntax::{#(#syntaxes),*};
-                });
+                uses.push(quote! { use super::syntax::{#(#syntaxes),*}; });
             }
         }
 
@@ -962,10 +947,11 @@ fn syntax_kind_ref(path: &Option<TokenStream>) -> TokenStream {
 /// has them says where they stand with [`error_at`](Builder::error_at) instead,
 /// and the file reaches the error it was told about.
 ///
-/// No item is documented: `rustfmt` rewrites a document of more than one line
-/// into one attribute per line, and the file a build writes into the crate is a
-/// file `rustfmt` has been over, so the tokens kept would not be the tokens a
-/// build writes. What each is for is said here, beside the code that writes it.
+/// No item of the written file is documented. What a generated type is for is
+/// the production that declared it, and prose about it is not something the file
+/// states: a build that wrote its own sentences would be adding to the spec
+/// rather than compiling it. What each item is for is said here, beside the code
+/// that writes it.
 fn error_defs(
     named: &[String],
     error: &TokenStream,
@@ -2263,6 +2249,9 @@ where
         if self.nodes.contains(&external_key(text)) && !read::is_single(&stmt.expr) {
             let mut variants = Vec::new();
             let mut variant_descs = Vec::new();
+            // Whether any variant is written with a field that nests a tuple,
+            // which is what the item's allowances are decided from.
+            let mut complex = false;
             // The names are settled for the whole choice before any of them is
             // worn, since which of two alternatives that offer one word gets it
             // is a question about the choice and not about either alternative.
@@ -2300,6 +2289,7 @@ where
                 let fields = self.fields_from(branch)?;
                 let fields = self.finish_fields(fields);
                 let tuple = tuple_of(&fields);
+                complex |= complex_fields(&fields);
 
                 let body = if tuple {
                     let tys = fields.iter().map(|field| {
@@ -2333,10 +2323,10 @@ where
                 });
             }
 
-            let allow = allow.then(|| quote! { #[allow(non_camel_case_types)] });
+            let allows = item_allows(allow, complex);
             let enum_item = quote! {
                 #[derive(Debug, PartialEq, Eq, PartialOrd, Ord, Clone, ::parserc::syntax::Syntax)]
-                #allow
+                #(#allows)*
                 pub enum #name<I>
                 where
                     I: #input,
@@ -2730,11 +2720,10 @@ where
             },
             Some(at_most) => quote! {
                 while taken.len() < #at_most {
-                    // The `break` carries its semicolon because that is how
-                    // `rustfmt` writes it, and the file this code is kept in is
-                    // a file `rustfmt` has been over: tokens formatting changes
-                    // would make the code a build writes say something another
-                    // build does not.
+                    // The run ends when the operand is next and not there: the
+                    // `let … else` reads the one attempt and breaks on its
+                    // failure, which is what leaves the input untouched at the
+                    // position the bound went unmet.
                     let Some(one) = #each else { break; };
                     taken.push(one);
                 }
@@ -2870,7 +2859,9 @@ where
 
             if let Some(ident) = named {
                 let ty = self.reference_type(ident)?;
-                let allow = allow.then(|| quote! { #[allow(non_camel_case_types)] });
+                // A newtype of one rule's node nests no tuple: what it holds is
+                // named by the production it reads.
+                let allows = item_allows(allow, false);
 
                 self.descriptors.push((
                     name.clone(),
@@ -2885,7 +2876,7 @@ where
 
                 quote! {
                     #[derive(Debug, PartialEq, Eq, PartialOrd, Ord, Clone, ::parserc::syntax::Syntax)]
-                    #allow
+                    #(#allows)*
                     pub struct #name<I>(pub #ty)
                     where
                         I: #input;
@@ -2893,7 +2884,7 @@ where
             } else {
                 let fields = self.finish_fields(fields);
                 let tuple = tuple_of(&fields);
-                let allow = allow.then(|| quote! { #[allow(non_camel_case_types)] });
+                let allows = item_allows(allow, complex_fields(&fields));
 
                 self.descriptors.push((
                     name.clone(),
@@ -2903,11 +2894,12 @@ where
                     },
                 ));
 
-                struct_item(&name, &allow, tuple, &fields, &input)
+                struct_item(&name, &quote! { #(#allows)* }, tuple, &fields, &input)
             }
         } else {
             let mut variant_descs = Vec::new();
             let mut variants = Vec::new();
+            let mut complex = false;
             // The names are settled for the whole choice before any of them is
             // worn, since which of two alternatives that offer one word gets it
             // is a question about the choice and not about either alternative.
@@ -2951,6 +2943,7 @@ where
                 allow |= wants_allow(&variant.to_string());
 
                 let fields = self.finish_fields(fields);
+                complex |= complex_fields(&fields);
 
                 let body = if tuple_of(&fields) {
                     let tys = fields.iter().map(|field| {
@@ -2985,7 +2978,7 @@ where
                 });
             }
 
-            let allow = allow.then(|| quote! { #[allow(non_camel_case_types)] });
+            let allows = item_allows(allow, complex);
 
             self.descriptors.push((
                 name.clone(),
@@ -2996,7 +2989,7 @@ where
 
             quote! {
                 #[derive(Debug, PartialEq, Eq, PartialOrd, Ord, Clone, ::parserc::syntax::Syntax)]
-                #allow
+                #(#allows)*
                 pub enum #name<I>
                 where
                     I: #input,
@@ -4152,15 +4145,9 @@ where
             /// the visitor below it.
             #[allow(clippy::needless_borrow, clippy::possible_missing_else)]
             pub mod walk {
-                // The list keeps the order the file declared its rules in,
-                // which is the order the walks below read them — and the
-                // formatter sorts a list of names, so this one stands as
-                // written: a skip of the line, not of the module.
-                //
                 // The bound of every walk is the name the file imports, and a
                 // module of its own sees none of what stands outside it, so
                 // that name comes in with the rules it bounds.
-                #[rustfmt::skip]
                 use super::{Visit, #input, #(#names),*};
 
                 #(#walks)*
@@ -4879,6 +4866,47 @@ fn reader(read: &Ident, stmts: &[TokenStream], input: &TokenStream) -> TokenStre
             .parse(input)
         }
     }
+}
+
+/// Whether a written type nests a tuple, which is what an unnamed group of a
+/// production is written as: a `('|' X)*` becomes `(Option<S>, Char<'|'>, …)`, and
+/// no name exists to alias that to because the file gave the group no left side.
+///
+/// The test is on the type and not on the item, so an attribute holding a tuple
+/// expression (`take_while_with = (1.., is_s)`) is no cause for it.
+fn nests_tuple(ty: &TokenStream) -> bool {
+    ty.clone().into_iter().any(|tree| match tree {
+        TokenTree::Group(group) => {
+            group.delimiter() == proc_macro2::Delimiter::Parenthesis || nests_tuple(&group.stream())
+        }
+        _ => false,
+    })
+}
+
+/// The attributes a written item carries besides its derives: one for a name no
+/// item wears plain, and one for fields whose types a build had to write as nested
+/// tuples because the spec named no group of them.
+///
+/// Both belong to the generated code rather than to whoever keeps it: a build knows
+/// which names and which shapes it wrote, and a consumer asked to allow what it
+/// cannot see the cause of is left guessing whether the allowance is still needed.
+fn item_allows(camel: bool, complex: bool) -> Vec<TokenStream> {
+    let mut allows = Vec::new();
+
+    if camel {
+        allows.push(quote! { #[allow(non_camel_case_types)] });
+    }
+
+    if complex {
+        allows.push(quote! { #[allow(clippy::type_complexity)] });
+    }
+
+    allows
+}
+
+/// The fields of an item, as the descriptor of the visitor records them.
+fn complex_fields(fields: &[Field]) -> bool {
+    fields.iter().any(|field| nests_tuple(&field.ty))
 }
 
 /// The name of a rule, as the name of an item of Rust.
@@ -5622,6 +5650,37 @@ mod tests {
             error.contains("impl :: core :: fmt :: Display for SyntaxKind"),
             "{error}"
         );
+    }
+
+    #[test]
+    fn an_item_whose_fields_nest_a_tuple_allows_for_itself() {
+        // `Expr -> Alternative ( '|' Alternative )*` writes a field whose type is a
+        // tuple of the trivia, the bar, the trivia again and the alternative: a
+        // group no rule named, so no name exists to alias it to. The item says so
+        // itself rather than leaving a consumer to allow what it cannot see the
+        // cause of.
+        let soup = code("lexer B -> 'b'; lexer C -> 'c'; syntax A -> B (C B)*;");
+
+        assert!(
+            soup.contains("# [allow (clippy :: type_complexity)] pub struct A < I >"),
+            "{soup}"
+        );
+
+        // An item with no nested group in its fields carries no such allowance:
+        // `C -> 'c'` holds one run of text and nothing else.
+        assert!(
+            !soup.contains("[allow (clippy :: type_complexity)] pub struct C"),
+            "{soup}"
+        );
+    }
+
+    #[test]
+    fn an_item_whole_written_as_a_reference_needs_no_allowance_for_a_shape() {
+        // A newtype of one rule's node holds no tuple of its own, whatever the
+        // rule it reads is written as.
+        let soup = code("lexer B -> 'b'; syntax A -> B;");
+
+        assert!(!soup.contains("clippy :: type_complexity"), "{soup}");
     }
 
     #[test]
