@@ -119,49 +119,50 @@ pub mod semantic;
 // of every type below, and `build.rs` says how the released generator is the one
 // that wrote them. A `use super::input::UnsynInput` inside one of them is this
 // crate's own `input`, and a `super::lexer` is this crate's own `lexer` — the
-// three are siblings here exactly as the files of a build's output are siblings
+// four are siblings here exactly as the files of a build's output are siblings
 // wherever else one is written.
 //
 // `include!` rather than `#[path]` because a `path` attribute takes a literal
 // alone, and the directory a build writes into is known only once the build has
 // run.
 //
-// What the allowances are for, and why they are here rather than in the
-// generated files: a build writes code, and an `allow` is a statement about the
-// file that holds it. This crate holds the output as its own front end, so this
-// crate says what it tolerates — a rule's character class is written as one test
-// of a range, which is what `clippy` would rather had been a named method, and a
-// build writes every rule's node and descent whether or not this crate's passes
-// reach them. A caller that keeps the same output elsewhere decides for itself.
-#[allow(
-    dead_code,
-    clippy::manual_is_ascii_check,
-    clippy::needless_borrow,
-    clippy::type_complexity,
-    clippy::enum_variant_names
-)]
+// What each allowance here is for, and none of them is a style preference: each
+// covers a defect in the output, and a test beside the generator pins that the
+// generator in `src/` no longer writes two of the three.
+//
+// - `unused_imports` — the released generator gives every file of rules the error
+//   import whenever the spec names a refusal anywhere in it, so `syntax.rs` is
+//   handed two names it never reads. What is in `src/codegen.rs` now records
+//   which file did the naming, and imports only there.
+// - `clippy::manual_is_ascii_check` — a set written as `'0'-'9'` is emitted as
+//   the range it is written with, where `char` has a name for that exact class.
+//   The generator now recognises the six ASCII classes and writes the name.
+// - `clippy::type_complexity` — what a `+` of a node writes is a head and a tail,
+//   `(Box<A>, Vec<(Option<S>, Box<A>)>)`, and a group no production gave a left
+//   side to has no name to alias to. This one is unfixed, and fixing it is a
+//   decision about the language rather than about this file: either the spec
+//   names that shape as a rule of its own, or a build learns to write an alias it
+//   has to invent a name for.
+//
+// The first two are why a release is one behind its own generator: the front end
+// shipped here was written by the released one, so a change to what a build
+// *writes* reaches the output in the release after it.
+#[allow(unused_imports, clippy::manual_is_ascii_check, clippy::type_complexity)]
+pub mod error {
+    include!(concat!(env!("OUT_DIR"), "/unsyn/error.rs"));
+}
+
+#[allow(unused_imports, clippy::manual_is_ascii_check, clippy::type_complexity)]
 pub mod lexer {
     include!(concat!(env!("OUT_DIR"), "/unsyn/lexer.rs"));
 }
 
-#[allow(
-    dead_code,
-    clippy::manual_is_ascii_check,
-    clippy::needless_borrow,
-    clippy::type_complexity,
-    clippy::enum_variant_names
-)]
+#[allow(unused_imports, clippy::manual_is_ascii_check, clippy::type_complexity)]
 pub mod syntax {
     include!(concat!(env!("OUT_DIR"), "/unsyn/syntax.rs"));
 }
 
-#[allow(
-    dead_code,
-    clippy::manual_is_ascii_check,
-    clippy::needless_borrow,
-    clippy::type_complexity,
-    clippy::enum_variant_names
-)]
+#[allow(unused_imports, clippy::manual_is_ascii_check, clippy::type_complexity)]
 pub mod visit {
     include!(concat!(env!("OUT_DIR"), "/unsyn/visit.rs"));
 }

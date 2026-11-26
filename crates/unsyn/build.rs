@@ -16,16 +16,21 @@
 //! version with `=`, so the code shipped by a release is exactly the code its
 //! predecessor wrote from the spec at its tag.
 //!
-//! Two of the five files a build writes are absent, and that is deliberate:
-//! [`input_at`] and [`error_at`] say the stream trait and the error stand in
-//! `src/input.rs` and `src/errors.rs` rather than being written again. The error
-//! is the sharper case — its families of *analysis* (what a well formed token
-//! still denotes wrongly, what no code answers) are rules of the DSL and of the
-//! passes below, and no production of the spec states them, so a build told to
-//! write one would invent what the file never said.
+//! One of the five files a build writes is absent, and that is deliberate:
+//! [`input_at`] says the stream trait stands in `src/input.rs` rather than being
+//! written again. The trait is the one thing a build cannot derive — it is bounded
+//! by what the *passes over* the tree need (a prefix test, a look-ahead, a
+//! snapshot), which no grammar of the language states — and it carries the tests
+//! of the stream itself.
+//!
+//! The error is not exempt, and is written here: [`error`](unsyn's `error`) holds
+//! what reading a file reports, a combinator's own failure and a refusal named
+//! after a rule of the spec. What the analysis adds — a token well formed and
+//! meaningless, a shape no code answers — is not derivable from a grammar, so
+//! `src/errors.rs` wraps the generated error together with those families into the
+//! one type every pass returns.
 //!
 //! [`input_at`]: unsyn::codegen::Builder::input_at
-//! [`error_at`]: unsyn::codegen::Builder::error_at
 
 use std::path::PathBuf;
 use std::str::FromStr;
@@ -59,14 +64,18 @@ fn main() {
         .external("IdentOrKeyword", tokens(IDENT_OR_KEYWORD))
         .external("XID_Start", tokens(XID_START))
         .external("XID_Continue", tokens(XID_CONTINUE))
-        // The stream trait and the error are this crate's, reached by path: a
-        // second pair written here would be a different trait and a different
-        // error than the ones the analysis below is written against. The two
-        // setters differ in what their path names — `input_at` is told the trait
-        // itself, `error_at` the module the error is found in — which is what the
-        // import of each is built from.
+        // The stream trait is this crate's own, reached by path: the bounds the
+        // passes below are written against are wider than any grammar states,
+        // and the trait is documented and tested by hand.
+        //
+        // The error is not. A build writes it — the framework's kind and the
+        // family of rules a refusal is named after, both from the spec — and
+        // `src/errors.rs` wraps that together with the families of the analysis,
+        // which no production states. It is named `ParseError` rather than after
+        // the language because the wrapper is the crate's error, and this is the
+        // phase of it that reading a file produces.
         .input_at(tokens("crate::input::UnsynInput"))
-        .error_at("UnsynError", tokens("crate::errors"))
+        .error_name("ParseError")
         .to_dir(dir)
         .build()
         .unwrap_or_else(|err| panic!("unsyn.us does not build: {err}"));

@@ -26,11 +26,16 @@ use unsyn::{
 };
 
 /// Reads the node `T` from the start of `source`.
+///
+/// What reading reports is the error a build wrote; the `UnsynError` every pass
+/// returns wraps that together with the families of the analysis, so the reading
+/// failure is carried into it here, the way a pass that reads and then judges a
+/// file does with `?`.
 fn parse<'a, T>(source: &'a str) -> Result<T, UnsynError>
 where
     T: Syntax<TokenStream<'a>>,
 {
-    TokenStream::from(source).parse::<T>()
+    TokenStream::from(source).parse::<T>().map_err(Into::into)
 }
 
 /// The text one node covers, as its own rule writes it: the whole of the source

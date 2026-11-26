@@ -3,182 +3,36 @@
 //! Every report says which stage of [`unsyn`](crate) met the problem and which
 //! of two channels it belongs to:
 //!
-//! - an [`UnsynError`] means the file denotes nothing, and the analysis of it
-//!   ends with its diagnostics rather than with a model;
+//! - an [`UnsynError`] means the file denotes nothing, or that a build found no
+//!   code to write for it, and the pass ends with its diagnostics rather than
+//!   with a model;
 //! - a [`Lint`] means the file denotes something it need not have said twice,
 //!   and the analysis produces the model of it all the same.
 //!
 //! [`Diagnostics`] is the pair of lists a pass writes both kinds of finding to.
 //!
-//! An error also says what the stage was looking for, and how far the parser may
-//! still go:
+//! An [`UnsynError`] also says what the stage was looking for, and how far a
+//! parser may still go:
 //!
-//! - [`PunctKind`]: a punctuation token, [`KeywordKind`]: a keyword — both worn
-//!   by the passes that read a file by hand, since a build leaves a word to the
-//!   combinator that met it;
-//! - [`SyntaxKind`]: a composite token or node built out of them. It is also the
-//!   family a build names a refusal after, so every rule the generated front end
-//!   points at is a variant of this enum; see [`codegen`](crate::codegen).
-//! - [`SemanticsKind`]: a token that is well formed but meaningless, and every
-//!   rule the grammar itself cannot state (see [`crate::semantic`]).
+//! - [`Parse`](UnsynError::Parse): what reading the file reported. This arm
+//!   carries the error a build wrote for the spec — see [`error`](crate::error) —
+//!   so a combinator's own failure and the family of rules a refusal is named
+//!   after are both generated, not listed here;
+//! - [`Semantics`](UnsynError::Semantics) and [`Build`](UnsynError::Build): the
+//!   two families no grammar states, which is why they are still written by hand.
+//!   A well formed token can still denote wrongly, and a shape of a production can
+//!   still have no code to answer it, and neither is a fact about one rule that a
+//!   production could say.
 //!
-//! Everything but [`UnsynError::Semantics`] carries a
+//! Everything but the [`Semantics`](UnsynError::Semantics) and
+//! [`Build`](UnsynError::Build) arms carries a
 //! [`ControlFlow`]: [`Recovable`](ControlFlow::Recovable) means an enclosing
 //! backtracking parser may try another alternative, [`Fatal`](ControlFlow::Fatal)
-//! means the file is malformed and no alternative can help.
+//! means the file is malformed and no alternative can help. A report of the two
+//! hand-written families is fatal by definition: nothing further in the file can
+//! be trusted with it.
 
 use parserc::{ControlFlow, ParseError, Span};
-
-/// Error for punct tokens.
-///
-/// Every variant names what the parser expected at the position it stopped on;
-/// [`PunctKind::map`] turns the error the underlying keyword parser produced
-/// into a [`UnsynError::Punct`] that carries this expectation.
-#[derive(Debug, thiserror::Error, PartialEq, Eq, Clone, Copy)]
-pub enum PunctKind {
-    #[error("punct ';'")]
-    Semi,
-    #[error("punct '")]
-    SingleQuote,
-    #[error("punct '+'")]
-    Plus,
-    #[error("punct '*'")]
-    Star,
-    #[error("punct '?'")]
-    Question,
-    #[error("punct '~'")]
-    Tilde,
-    #[error("punct '|'")]
-    Or,
-    #[error("punct '('")]
-    ParenStart,
-    #[error("punct ')'")]
-    ParenEnd,
-    #[error("punct '['")]
-    BracketStart,
-    #[error("punct ']'")]
-    BracketEnd,
-    #[error("punct '{{'")]
-    BraceStart,
-    #[error("punct '}}'")]
-    BraceEnd,
-    #[error("punct '<'")]
-    Lt,
-    #[error("punct '>'")]
-    Gt,
-    #[error("punct ','")]
-    Comma,
-    #[error("punct '->'")]
-    ArrowRight,
-    #[error("punct '-'")]
-    Minus,
-}
-
-impl PunctKind {
-    /// Map error to `punct` error.
-    #[inline]
-    pub fn map(self) -> impl FnOnce(UnsynError) -> UnsynError {
-        move |err: UnsynError| UnsynError::Punct(self, err.control_flow(), err.to_span())
-    }
-}
-
-/// Error for keyword tokens.
-///
-/// A keyword is matched as a literal prefix, so this family also reports the
-/// case where a keyword is only the head of a longer word: `lexerX` is an
-/// identifier, and `lexer` inside it is not a keyword.
-#[derive(Debug, thiserror::Error, PartialEq, Eq, Clone, Copy)]
-pub enum KeywordKind {
-    #[error("keyword 'lexer'")]
-    Lexer,
-    #[error("keyword 'syntax'")]
-    Syntax,
-    #[error("keyword 'except'")]
-    Except,
-    #[error("keyword 'whitespace'")]
-    Whitespace,
-    #[error("keyword 'concat'")]
-    Concat,
-}
-
-impl KeywordKind {
-    /// Map error to `keyword` error.
-    #[inline]
-    pub fn map(self) -> impl FnOnce(UnsynError) -> UnsynError {
-        move |err: UnsynError| UnsynError::Keyword(self, err.control_flow(), err.to_span())
-    }
-}
-
-/// Error for a construct made of several tokens.
-///
-/// This is what [`crate::syntax`] and the composite tokens of
-/// [`crate::lexer`] report: literals, comments, documentation, identifiers and
-/// the expression forms of a node definition. The one exception is
-/// [`SyntaxKind::Eof`], which a whole file reports when it cannot be read to its
-/// end.
-///
-/// A variant is named after the rule it stands for, which is what the code a
-/// build writes for `unsyn.us` reaches this family for: a refusal there is
-/// named after the rule whose production wrote it, and the kept file lives in
-/// this crate, so the names below are part of what a build is trusted to find.
-#[derive(Debug, thiserror::Error, PartialEq, Eq, Clone, Copy)]
-pub enum SyntaxKind {
-    #[error("unicode literal")]
-    LitUnicode,
-    #[error("single quote")]
-    QuoteEscape,
-    #[error("ascii escape")]
-    AsciiEscape,
-    #[error("string content")]
-    StrContent,
-    #[error("ident")]
-    Ident,
-    /// A name that is none of the words of the language, which is what a
-    /// definition asks for after the word that opens it.
-    #[error("non-keyword ident")]
-    NonKeywordIdent,
-    #[error("block comment")]
-    BlockComment,
-    #[error("outer line document")]
-    OuterLineDoc,
-    #[error("inner block document")]
-    InnerBlockDoc,
-    #[error("inner line document")]
-    InnerLineDoc,
-    #[error("outer block document")]
-    OuterBlockDoc,
-    #[error("unicode escape")]
-    UnicodeEscape,
-    #[error("literal decimal number")]
-    Dec,
-    #[error("expression")]
-    ExprNoTopAlt,
-    /// One of the words a definition opens with, where none of them begins.
-    #[error("definition keyword")]
-    LeadingKeywords,
-    /// One of the words that join two operands, where none of them begins.
-    #[error("pattern operator keyword")]
-    OperatorKeywords,
-    /// The end of a file: whatever an item cannot read is left over, and the
-    /// construct that contains it reports this instead of handing the rest to
-    /// its caller.
-    #[error("end of file")]
-    Eof,
-}
-
-impl SyntaxKind {
-    /// Map error to `syntax` error.
-    #[inline]
-    pub fn map(self) -> impl FnOnce(UnsynError) -> UnsynError {
-        move |err: UnsynError| UnsynError::Syntax(self, err.control_flow(), err.to_span())
-    }
-
-    /// Map error to `syntax` fatal error.
-    #[inline]
-    pub fn map_into_fatal(self) -> impl FnOnce(UnsynError) -> UnsynError {
-        move |err: UnsynError| UnsynError::Syntax(self, ControlFlow::Fatal, err.to_span())
-    }
-}
 
 /// Error for values that are well formed but meaningless.
 ///
@@ -469,32 +323,36 @@ pub enum BuildKind {
     Output,
 }
 
-/// Error information container for `unsyn` parsing.
-#[derive(Debug, thiserror::Error, PartialEq, Eq)]
+/// The error of any phase that reads or builds a file of the language.
+///
+/// Three phases meet here, and they are not all written by the same hand:
+///
+/// - [`UnsynError::Parse`] carries what reading a file reports, and that enum is
+///   not written here — [`error`](crate::error) is the code a build wrote from
+///   `unsyn.us`, so its kind of combinator failure and its family of rules a
+///   refusal is named after arrive as the generated file declares them. A change
+///   to a production is a change to this arm, and nothing here has to be edited
+///   to follow it.
+/// - [`UnsynError::Semantics`] carries what a well formed token or file can still
+///   mean wrongly, which no grammar states because it is a fact about the whole
+///   program rather than about one rule.
+/// - [`UnsynError::Build`] carries what a build refused to write code for.
+///
+/// The last two are the DSL's own rules and belong to whoever analyzes a tree, so
+/// they stay here by hand; the first is a fact of the spec, so it is generated.
+/// Wrapping one inside the other is what lets a pass that both reads a file and
+/// judges it return one error type, with `?` carrying a reading failure in on its
+/// own.
+#[derive(Debug, PartialEq, Eq)]
 pub enum UnsynError {
-    /// Unhandled error produced by the [`parserc`] combinators.
-    #[error(transparent)]
-    Kind(#[from] parserc::Kind),
+    /// What reading the file reported: a combinator's own failure, or a refusal
+    /// named after the rule whose production asked for it.
+    Parse(crate::error::ParseError),
 
-    /// Reports a lexer error.
-    #[error("punct error: expect {0}, {1:?},{2:?}")]
-    Punct(PunctKind, ControlFlow, Span),
-
-    /// Expect a keyword
-    #[error("keyword error: expect {0}, {1:?},{2:?}")]
-    Keyword(KeywordKind, ControlFlow, Span),
-
-    /// Reports a syntax error.
-    #[error("syntax error: expect {0}, {1:?},{2:?}")]
-    Syntax(SyntaxKind, ControlFlow, Span),
-
-    /// Reports a semantics error
-    #[error("unexpect/invalid: {0} at {1:?}")]
+    /// A token or file that is well formed and denotes nothing.
     Semantics(SemanticsKind, Span),
 
-    /// Reports that a build of the file refused: the part at the span is what
-    /// no code was written for.
-    #[error("build: {0}, part at {1:?}")]
+    /// A build refused to write code for the part at the span.
     Build(BuildKind, Span),
 }
 
@@ -502,10 +360,7 @@ impl ParseError for UnsynError {
     #[inline]
     fn to_span(&self) -> Span {
         match self {
-            UnsynError::Kind(kind) => kind.to_span(),
-            UnsynError::Syntax(_, _, span) => span.clone(),
-            UnsynError::Punct(_, _, span) => span.clone(),
-            UnsynError::Keyword(_, _, span) => span.clone(),
+            UnsynError::Parse(err) => err.to_span(),
             UnsynError::Semantics(_, span) => span.clone(),
             UnsynError::Build(_, span) => span.clone(),
         }
@@ -514,10 +369,7 @@ impl ParseError for UnsynError {
     #[inline]
     fn control_flow(&self) -> parserc::ControlFlow {
         match self {
-            UnsynError::Kind(kind) => kind.control_flow(),
-            UnsynError::Syntax(_, control_flow, _) => *control_flow,
-            UnsynError::Punct(_, control_flow, _) => *control_flow,
-            UnsynError::Keyword(_, control_flow, _) => *control_flow,
+            UnsynError::Parse(err) => err.control_flow(),
             UnsynError::Semantics(_, _) => ControlFlow::Fatal,
             UnsynError::Build(_, _) => ControlFlow::Fatal,
         }
@@ -526,21 +378,60 @@ impl ParseError for UnsynError {
     #[inline]
     fn into_fatal(self) -> Self {
         match self {
-            UnsynError::Kind(kind) => Self::Kind(kind.into_fatal()),
-            UnsynError::Syntax(syntax_kind, _, span) => {
-                Self::Syntax(syntax_kind, ControlFlow::Fatal, span)
-            }
-            UnsynError::Punct(punct_kind, _, span) => {
-                UnsynError::Punct(punct_kind, ControlFlow::Fatal, span)
-            }
-            UnsynError::Keyword(punct_kind, _, span) => {
-                UnsynError::Keyword(punct_kind, ControlFlow::Fatal, span)
-            }
-            UnsynError::Semantics(semantics_kind, span) => {
-                UnsynError::Semantics(semantics_kind, span)
-            }
-            UnsynError::Build(build_kind, span) => UnsynError::Build(build_kind, span),
+            UnsynError::Parse(err) => Self::Parse(err.into_fatal()),
+            UnsynError::Semantics(kind, span) => Self::Semantics(kind, span),
+            UnsynError::Build(kind, span) => Self::Build(kind, span),
         }
+    }
+}
+
+/// The report of a reading failure is the generated enum's own words, told here
+/// rather than asked of it: the front end this crate ships was written by the
+/// released generator, which emits no `Display` for that error. The two arms are
+/// the contract of a build's error — the framework's kind, and a refusal named
+/// after a rule — and a spec changes which rules are named, never which arms
+/// there are.
+///
+/// A rule's name is printed through `Debug` for the same reason: the released
+/// generator writes no `Display` for the family of rules either.
+impl std::fmt::Display for UnsynError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            UnsynError::Parse(crate::error::ParseError::Kind(kind)) => {
+                std::fmt::Display::fmt(kind, f)
+            }
+            UnsynError::Parse(crate::error::ParseError::Syntax(kind, control_flow, span)) => {
+                write!(
+                    f,
+                    "syntax error: expect {kind:?}, {control_flow:?}, {span:?}"
+                )
+            }
+            UnsynError::Semantics(kind, span) => write!(f, "unexpect/invalid: {kind} at {span:?}"),
+            UnsynError::Build(kind, span) => write!(f, "build: {kind}, part at {span:?}"),
+        }
+    }
+}
+
+impl std::error::Error for UnsynError {}
+
+/// A combinator's failure is a reading failure, which the generated arm carries.
+///
+/// This is what lets `?` move a [`Kind`](parserc::Kind) out of a call into a pass
+/// that returns [`UnsynError`], exactly as the generated parser's own functions
+/// do.
+impl From<parserc::Kind> for UnsynError {
+    #[inline]
+    fn from(kind: parserc::Kind) -> Self {
+        Self::Parse(kind.into())
+    }
+}
+
+/// What a generated parser reports is a report of reading, which is what a pass
+/// that reads and then analyzes a file returns.
+impl From<crate::error::ParseError> for UnsynError {
+    #[inline]
+    fn from(err: crate::error::ParseError) -> Self {
+        Self::Parse(err)
     }
 }
 
@@ -550,28 +441,20 @@ mod tests {
 
     use super::*;
 
-    /// The rendering of an error is what a user of the DSL reads, so the
-    /// wording of every family is pinned here.
+    /// The rendering of an error is what a user of the DSL reads, so the wording
+    /// of every family is pinned here.
     #[test]
     fn every_family_names_what_was_expected() {
+        // The arm a build wrote: a rule's name, and the two facts about the
+        // position the refusal stands at.
         assert_eq!(
-            UnsynError::Punct(PunctKind::Semi, ControlFlow::Fatal, Span::Range(3..4)).to_string(),
-            "punct error: expect punct ';', Fatal,Range(3..4)"
-        );
-
-        assert_eq!(
-            UnsynError::Keyword(
-                KeywordKind::Lexer,
-                ControlFlow::Recovable,
-                Span::Range(0..5)
-            )
+            UnsynError::Parse(crate::error::ParseError::Syntax(
+                crate::error::SyntaxKind::LitUnicode,
+                ControlFlow::Fatal,
+                Span::None,
+            ))
             .to_string(),
-            "keyword error: expect keyword 'lexer', Recovable,Range(0..5)"
-        );
-
-        assert_eq!(
-            UnsynError::Syntax(SyntaxKind::Ident, ControlFlow::Fatal, Span::None).to_string(),
-            "syntax error: expect ident, Fatal,None"
+            "syntax error: expect LitUnicode, Fatal, None"
         );
 
         // A report of the file's own text carries no name of it: the span is
@@ -595,14 +478,54 @@ mod tests {
 
     #[test]
     fn an_unhandled_combinator_error_is_passed_through() {
-        let error = UnsynError::Kind(Kind::NextIf(ControlFlow::Recovable, Span::Range(0..1)));
+        let error = UnsynError::from(Kind::NextIf(ControlFlow::Recovable, Span::Range(0..1)));
 
-        // `transparent` keeps the message of the combinator, and so it keeps the
-        // code and the span it carried.
+        // The reading arm keeps the message of the combinator, and so it keeps
+        // the code and the span it carried: the wrapper says nothing of its own
+        // about a failure it did not judge.
+        assert!(
+            matches!(error, UnsynError::Parse(crate::error::ParseError::Kind(_))),
+            "{error:?}"
+        );
         assert_eq!(error.to_string(), "Error from `next_if` combinator");
         assert_eq!(error.control_flow(), ControlFlow::Recovable);
         assert_eq!(error.to_span(), Span::Range(0..1));
         assert!(!error.is_fatal());
+    }
+
+    #[test]
+    fn a_readers_error_and_a_judges_error_are_one_type() {
+        // The whole point of the wrapper: a pass that reads a file and then
+        // judges it returns one error, and `?` moves either kind into it. The
+        // reading kind is the generated enum, which the wrapper carries and does
+        // not flatten — a refusal named after a rule of the spec stays in the
+        // family the spec wrote.
+        let read = UnsynError::from(crate::error::ParseError::Kind(Kind::Next(
+            ControlFlow::Incomplete,
+            Span::Range(4..4),
+        )));
+        let judged = UnsynError::Semantics(SemanticsKind::EmptySet, Span::Range(4..6));
+
+        assert_eq!(read.to_span(), Span::Range(4..4));
+        assert_eq!(judged.to_span(), Span::Range(4..6));
+        assert_eq!(read.control_flow(), ControlFlow::Incomplete);
+        assert_eq!(judged.control_flow(), ControlFlow::Fatal);
+
+        // A failure of reading can be made fatal; a judgment is already fatal and
+        // stays as it was.
+        assert_eq!(
+            read.into_fatal(),
+            UnsynError::Parse(crate::error::ParseError::Kind(Kind::Next(
+                ControlFlow::Fatal,
+                Span::Range(4..4),
+            )))
+        );
+        // A judgment is already fatal, and making it fatal keeps the family and
+        // the place it stands at.
+        assert_eq!(
+            UnsynError::Semantics(SemanticsKind::EmptySet, Span::Range(4..6)).into_fatal(),
+            UnsynError::Semantics(SemanticsKind::EmptySet, Span::Range(4..6)),
+        );
     }
 
     #[test]
@@ -627,70 +550,61 @@ mod tests {
         let span = Span::Range(2..3);
 
         assert_eq!(
-            UnsynError::Punct(PunctKind::Or, ControlFlow::Recovable, span.clone()).into_fatal(),
-            UnsynError::Punct(PunctKind::Or, ControlFlow::Fatal, span.clone())
+            UnsynError::Parse(crate::error::ParseError::Syntax(
+                crate::error::SyntaxKind::UnicodeEscape,
+                ControlFlow::Incomplete,
+                span.clone(),
+            ))
+            .into_fatal(),
+            UnsynError::Parse(crate::error::ParseError::Syntax(
+                crate::error::SyntaxKind::UnicodeEscape,
+                ControlFlow::Fatal,
+                span.clone(),
+            ))
         );
 
         assert_eq!(
-            UnsynError::Keyword(KeywordKind::Except, ControlFlow::Recovable, span.clone())
-                .into_fatal(),
-            UnsynError::Keyword(KeywordKind::Except, ControlFlow::Fatal, span.clone())
-        );
-
-        assert_eq!(
-            UnsynError::Syntax(SyntaxKind::Dec, ControlFlow::Incomplete, span.clone()).into_fatal(),
-            UnsynError::Syntax(SyntaxKind::Dec, ControlFlow::Fatal, span.clone())
-        );
-
-        assert_eq!(
-            UnsynError::Kind(Kind::Keyword(ControlFlow::Recovable, span.clone())).into_fatal(),
-            UnsynError::Kind(Kind::Keyword(ControlFlow::Fatal, span))
+            UnsynError::Parse(crate::error::ParseError::Kind(Kind::Keyword(
+                ControlFlow::Recovable,
+                span.clone(),
+            )))
+            .into_fatal(),
+            UnsynError::Parse(crate::error::ParseError::Kind(Kind::Keyword(
+                ControlFlow::Fatal,
+                span,
+            )))
         );
     }
 
     #[test]
-    fn mapping_relabels_the_error_of_a_combinator() {
-        // The token that owns a failed parser reports what *it* expected, at the
-        // place where the combinator stopped.
-        let inner = UnsynError::Kind(Kind::Keyword(ControlFlow::Recovable, Span::Range(2..3)));
-
-        assert_eq!(
-            PunctKind::Semi.map()(inner),
-            UnsynError::Punct(PunctKind::Semi, ControlFlow::Recovable, Span::Range(2..3))
+    fn a_refusal_named_after_a_rule_survives_being_wrapped() {
+        // The wrapper exists so that a pass can return one error type; it must not
+        // flatten what a build wrote. A refusal named after a rule of the spec
+        // arrives holding that rule, and says so when it is read back.
+        let refusal = crate::error::ParseError::Syntax(
+            crate::error::SyntaxKind::NonKeywordIdent,
+            ControlFlow::Fatal,
+            Span::Range(30..46),
         );
 
-        let inner = UnsynError::Kind(Kind::Keyword(ControlFlow::Recovable, Span::Range(2..3)));
+        let wrapped = UnsynError::from(refusal.clone());
 
+        assert_eq!(wrapped.to_span(), Span::Range(30..46));
+        assert_eq!(wrapped.control_flow(), ControlFlow::Fatal);
         assert_eq!(
-            KeywordKind::Whitespace.map()(inner),
-            UnsynError::Keyword(
-                KeywordKind::Whitespace,
-                ControlFlow::Recovable,
-                Span::Range(2..3)
-            )
+            wrapped,
+            UnsynError::Parse(crate::error::ParseError::Syntax(
+                crate::error::SyntaxKind::NonKeywordIdent,
+                ControlFlow::Fatal,
+                Span::Range(30..46),
+            ))
         );
 
-        let inner = UnsynError::Kind(Kind::Keyword(ControlFlow::Recovable, Span::Range(2..3)));
-
+        // A semantic error has no code of its own, so only the span travels over
+        // into the wrapper's judgment arm.
         assert_eq!(
-            SyntaxKind::Ident.map()(inner),
-            UnsynError::Syntax(SyntaxKind::Ident, ControlFlow::Recovable, Span::Range(2..3))
-        );
-
-        // The fatal variant overrides the code instead of keeping it.
-        let inner = UnsynError::Kind(Kind::Keyword(ControlFlow::Recovable, Span::Range(2..3)));
-
-        assert_eq!(
-            SyntaxKind::Ident.map_into_fatal()(inner),
-            UnsynError::Syntax(SyntaxKind::Ident, ControlFlow::Fatal, Span::Range(2..3))
-        );
-
-        // A semantic error has no code, so only the span travels over.
-        let inner = UnsynError::Kind(Kind::Keyword(ControlFlow::Recovable, Span::Range(2..3)));
-
-        assert_eq!(
-            SemanticsKind::EmptySet.map()(inner),
-            UnsynError::Semantics(SemanticsKind::EmptySet, Span::Range(2..3))
+            SemanticsKind::EmptySet.map()(UnsynError::from(refusal)),
+            UnsynError::Semantics(SemanticsKind::EmptySet, Span::Range(30..46))
         );
     }
 

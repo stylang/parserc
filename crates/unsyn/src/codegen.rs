@@ -152,11 +152,12 @@
 //!   arm the framework's kind is carried in, because the file says nothing wider
 //!   about a position that begins no token.
 //!
-//! Because the crate builds itself, every rule this module names in a refusal
-//! must already be a variant of [`SyntaxKind`](super::errors::SyntaxKind), worn
-//! under the name the rule is written under: the build reaches this crate's
-//! error rather than writing one, and a variant it asks for that the enum does
-//! not hold is a compile error here, not a silent string.
+//! Because the crate builds itself, the family of rules a refusal is named after
+//! is this module's own output rather than a table someone maintains: a variant
+//! exists exactly where a production stood and pointed, under the name the rule is
+//! written under, and the wrapper in `src/errors.rs` carries that error beside the
+//! families of the analysis. What a build cannot do is name a rule the file never
+//! declared, and what it must not do is invent a family the file never needed.
 //!
 //! # What a build writes beside the rules
 //!
@@ -497,6 +498,8 @@ where
             error: error_ref(&self.error_path, &self.error_name)?,
             syntax_kind: syntax_kind_ref(&self.error_path),
             named: Vec::new(),
+            named_parts: HashSet::new(),
+            part: Part::Lexer,
             taken: HashSet::new(),
             helpers: Vec::new(),
             seq: 0,
@@ -526,12 +529,13 @@ where
         let lexers = generator.rule_names(Part::Lexer);
         let syntaxes = generator.rule_names(Part::Syntax);
         let named = std::mem::take(&mut generator.named);
+        let named_parts = std::mem::take(&mut generator.named_parts);
         let errors = error_defs(&named, &error, &error_path)?;
 
         Ok(Pieces {
             input_defs: defs,
             error_defs: errors,
-            named: !named.is_empty(),
+            named_parts,
             input,
             error,
             input_path,
@@ -612,7 +616,7 @@ pub struct Module {
 /// a terminal is `lexer.rs`, with the separator among them because it is read
 /// the same way, and a node of the tree is `syntax.rs`. The visitor is no rule,
 /// and stands apart because it walks both kinds.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 enum Part {
     Lexer,
     Syntax,
@@ -636,12 +640,6 @@ impl Part {
             Part::Visit => "visit.rs",
         }
     }
-
-    /// Whether the code of this part reports a refusal, which is whether it has
-    /// cause to reach the error and the family of rules beside it.
-    fn reports(self) -> bool {
-        !matches!(self, Part::Visit)
-    }
 }
 
 /// The parts a build is made of, which is one stream or a directory of files
@@ -652,9 +650,9 @@ struct Pieces {
     input_defs: Vec<TokenStream>,
     /// The family of rules, the error, and what the framework asks of it.
     error_defs: Vec<TokenStream>,
-    /// Whether the code named any rule at all, which is whether the family of
-    /// rules is reached, and so whether a file has cause to import it.
-    named: bool,
+    /// Whether each of the two files of rules named a rule in a refusal, which
+    /// is whether it has cause to reach the error and the family beside it.
+    named_parts: HashSet<Part>,
     /// The bound every written type carries.
     input: TokenStream,
     /// The error a refusal reports, as a path.
@@ -781,7 +779,7 @@ impl Pieces {
             }
         }
 
-        if self.error_path.is_none() && self.named && part.reports() {
+        if self.error_path.is_none() && self.named_parts.contains(&part) {
             let error = &self.error;
 
             uses.push(quote! {
@@ -979,13 +977,22 @@ fn error_defs(
     if path.is_some() {
         return Ok(Vec::new());
     }
+    let kind = syntax_kind_ref(path);
 
+    // Two lists from one: the pattern of a variant is the name as an identifier,
+    // and what the report says about it is the same name as a word of text.
+    let named = named
+        .iter()
+        .map(|rule| item_name(rule, Span::None))
+        .collect::<Result<Vec<Ident>, _>>()?;
+    let words = named
+        .iter()
+        .map(|name| name.to_string())
+        .collect::<Vec<_>>();
     let variants = named
         .iter()
-        .map(|rule| item_name(rule, Span::None).map(|name| name.to_token_stream()))
-        .collect::<Result<Vec<TokenStream>, _>>()?;
-
-    let kind = syntax_kind_ref(path);
+        .map(ToTokens::to_token_stream)
+        .collect::<Vec<_>>();
 
     Ok(vec![quote! {
         #[derive(Debug, PartialEq, Eq, Clone, Copy)]
@@ -993,11 +1000,41 @@ fn error_defs(
             #(#variants),*
         }
 
+        // What a refusal of a rule expected is the rule, and the file named it:
+        // the report says that name and no other, since nothing in a production
+        // says what the rule is called in prose.
+        impl ::core::fmt::Display for SyntaxKind {
+            fn fmt(&self, f: &mut ::core::fmt::Formatter<'_>) -> ::core::fmt::Result {
+                match self {
+                    #(Self::#named => f.write_str(#words),)*
+                }
+            }
+        }
+
         #[derive(Debug, PartialEq, Eq, Clone)]
         pub enum #error {
             Kind(::parserc::Kind),
             Syntax(#kind, ::parserc::ControlFlow, ::parserc::Span),
         }
+
+        impl ::core::fmt::Display for #error {
+            fn fmt(&self, f: &mut ::core::fmt::Formatter<'_>) -> ::core::fmt::Result {
+                match self {
+                    #error::Kind(kind) => ::core::fmt::Display::fmt(kind, f),
+                    #error::Syntax(kind, control_flow, span) => write!(
+                        f,
+                        "syntax error: expect {}, {:?}, {:?}",
+                        kind, control_flow, span
+                    ),
+                }
+            }
+        }
+
+        // A report of reading a file is an error of it, so that whoever holds one
+        // can put it in a chain: the wrapper a consumer writes around this — the
+        // families of an analysis, which no grammar states — needs its inner
+        // error to be an error itself.
+        impl ::std::error::Error for #error {}
 
         impl ::core::convert::From<::parserc::Kind> for #error {
             #[inline]
@@ -1704,7 +1741,7 @@ where
 
 /// One character or one run of characters between two of them, which is all a set
 /// of a rule can be written out of and still be one test of one character.
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum Arm {
     /// One character, as `'a'` is.
     Char(char),
@@ -1913,6 +1950,53 @@ fn one_char(chars: Vec<char>) -> Option<char> {
 /// answer is written for the case nonetheless, so that a file which ever got
 /// past that gate without the refusal would still be given a test that means
 /// what the class means, and not a `matches!` of no arms, which is not Rust.
+/// The named test of a class of characters, when the class is one the language
+/// of Rust already names.
+///
+/// A set of `'0'-'9'` is spelled as a range because that is what the file wrote,
+/// and a range written as a test is what `clippy` calls a manual check for a
+/// common ASCII range — a warning in the file a build writes, which no author of
+/// a spec asked for. Where the two spellings mean the same characters, the named
+/// method is the one to write: it says what the class is rather than where its
+/// ends lie, and it is what a reader of `is_ascii_hexdigit` looks for.
+fn ascii_class(arms: &[Arm]) -> Option<Ident> {
+    // Every method of `char` named for an ASCII class, with the exact set of
+    // ranges that class holds. A set wider or narrower than one of these is
+    // spelled as a test of its own, because no method says it.
+    const NAMED: [(&str, &[&[Arm]]); 6] = [
+        ("is_ascii_digit", &[&[Arm::Range('0', '9')]]),
+        ("is_ascii_lowercase", &[&[Arm::Range('a', 'z')]]),
+        ("is_ascii_uppercase", &[&[Arm::Range('A', 'Z')]]),
+        (
+            "is_ascii_alphabetic",
+            &[&[Arm::Range('a', 'z')], &[Arm::Range('A', 'Z')]],
+        ),
+        (
+            "is_ascii_alphanumeric",
+            &[
+                &[Arm::Range('0', '9')],
+                &[Arm::Range('a', 'z')],
+                &[Arm::Range('A', 'Z')],
+            ],
+        ),
+        (
+            "is_ascii_hexdigit",
+            &[
+                &[Arm::Range('0', '9')],
+                &[Arm::Range('a', 'f')],
+                &[Arm::Range('A', 'F')],
+            ],
+        ),
+    ];
+
+    NAMED.iter().find_map(|(name, ranges)| {
+        let wanted = ranges.concat();
+
+        (wanted.len() == arms.len() && wanted.iter().all(|want| arms.contains(want)))
+            .then(|| Ident::new(name, proc_macro2::Span::call_site()))
+    })
+}
+
 fn char_test(arms: &[Arm], accepts: bool) -> (TokenStream, TokenStream) {
     // The two are asked at once because they are one decision: a body that
     // never reads the character wants a name it will not use, and an ignored
@@ -1925,6 +2009,17 @@ fn char_test(arms: &[Arm], accepts: bool) -> (TokenStream, TokenStream) {
         };
 
         (quote! { _c }, nothing)
+    } else if let Some(test) = ascii_class(arms) {
+        // A named method answers for the character itself, so the refusal of it
+        // is written as the negation rather than as a test of the ranges it would
+        // have spelled.
+        let body = if accepts {
+            quote! { c.#test() }
+        } else {
+            quote! { !c.#test() }
+        };
+
+        (quote! { c }, body)
     } else {
         let patterns = arms.iter().copied().map(Arm::to_pattern);
         let class = quote! { matches!(c, #(#patterns)|*) };
@@ -2061,7 +2156,15 @@ where
     syntax_kind: TokenStream,
     /// The rules whose code has named a refusal after itself, in the order the
     /// file declares them, which is what the emitted family holds.
+    /// The rules whose code has named a refusal after itself, in the order the
+    /// file declares them, which is what the emitted family of rules holds.
     named: Vec<String>,
+    /// Which of the two files of rules did the naming, which is what decides
+    /// whether a file has cause to import the error at all: the nodes of a spec
+    /// whose productions name no refusal hold no reason to reach it.
+    named_parts: HashSet<Part>,
+    /// The file the rule being written is code for.
+    part: Part,
     /// The names of the functions the module has been given already.
     taken: HashSet<String>,
     /// The functions the rule being written has asked for, in the order asked.
@@ -2136,6 +2239,7 @@ where
 
         self.rule = text.to_owned();
         self.rule_span = stmt.ident.to_span();
+        self.part = Part::of(stmt);
         self.seq = 0;
         self.helpers.clear();
         self.field_no = 0;
@@ -2693,6 +2797,8 @@ where
         if !self.named.contains(&self.rule) {
             self.named.push(self.rule.clone());
         }
+
+        self.named_parts.insert(self.part);
 
         let flow = format_ident!("{}", flow);
         let error = self.error.clone();
@@ -5137,7 +5243,7 @@ mod tests {
         assert!(
             has(
                 &soup,
-                quote! { #[parserc(next_if = |c: char| !(matches!(c, 'a'..='z')))] }
+                quote! { #[parserc(next_if = |c: char| !c.is_ascii_lowercase())] }
             ),
             "{soup}"
         );
@@ -5150,7 +5256,7 @@ mod tests {
         // The refusal is one test of a character, named as the combinator it
         // calls rather than folded behind `parser =`.
         assert!(
-            soup.contains("next_if = | c : char | ! (matches ! (c , 'a' ..= 'z'))"),
+            soup.contains("next_if = | c : char | ! c . is_ascii_lowercase ()"),
             "{soup}"
         );
     }
@@ -5416,6 +5522,106 @@ mod tests {
     /// The code of one file a build wrote.
     fn written_as(dir: &Path, file: &str) -> String {
         std::fs::read_to_string(dir.join(file)).expect("the file should be written")
+    }
+
+    /// What the generator in this source tree writes for the spec, which is not
+    /// yet what this crate is built with.
+    ///
+    /// `build.rs` runs the released generator, so the shipped front end carries
+    /// the shapes of that release; the allowances in `lib.rs` are for those, and
+    /// for nothing else. This test is what keeps that claim honest: it asks the
+    /// code in `src/` about the same spec and looks for the shapes the released
+    /// one writes.
+    fn spec() -> Vec<Module> {
+        let source = include_str!("../unsyn.us");
+        let file = parse(source);
+        let whole = Spec::from(source);
+
+        builder(&whole, &file)
+            .project("unsyn")
+            .external(
+                "IdentOrKeyword",
+                quote! { crate::scan::scan_ident_or_keyword },
+            )
+            .modules()
+            .expect("the spec should be generated whole")
+    }
+
+    #[test]
+    fn a_file_imports_the_error_only_where_its_own_code_reports_one() {
+        // The refusals of the spec are all in terminals: an `except` and a bounded
+        // repetition, neither of which a `syntax` rule writes. So the file of
+        // nodes has no cause to name the error, and an import it never reads is a
+        // warning in whoever's crate the code lands in.
+        let modules = spec();
+        let of = |name: &str| {
+            modules
+                .iter()
+                .find(|module| module.file == name)
+                .expect("the file is written")
+                .code
+                .to_string()
+        };
+
+        assert!(
+            of("lexer.rs").contains("use super :: error ::"),
+            "{}",
+            of("lexer.rs")
+        );
+        assert!(
+            !of("syntax.rs").contains("use super :: error"),
+            "{}",
+            of("syntax.rs")
+        );
+        assert!(
+            !of("visit.rs").contains("use super :: error"),
+            "{}",
+            of("visit.rs")
+        );
+    }
+
+    #[test]
+    fn a_class_of_ascii_characters_is_written_as_the_test_rust_names() {
+        // `DecDigit` is `'0'-'9'` and `HexDigit` is the three ranges of a hex digit,
+        // which are `is_ascii_digit` and `is_ascii_hexdigit` said another way. A
+        // range spelled out is what `clippy` calls a manual check for a common
+        // ASCII range — a warning a spec author never asked for.
+        let lexers = spec()
+            .into_iter()
+            .find(|module| module.file == "lexer.rs")
+            .expect("terminals are written")
+            .code
+            .to_string();
+
+        assert!(lexers.contains("is_ascii_digit"), "{lexers}");
+        assert!(lexers.contains("is_ascii_hexdigit"), "{lexers}");
+        assert!(!lexers.contains("'0' ..= '9' | 'a' ..= 'f'"), "{lexers}");
+    }
+
+    #[test]
+    fn the_written_error_reports_itself_as_an_error() {
+        // The wrapper a consumer writes around the parser's error — this crate's
+        // `UnsynError`, which carries the families of an analysis beside it — can
+        // only hold an arm that is an error itself.
+        let error = spec()
+            .into_iter()
+            .find(|module| module.file == "error.rs")
+            .expect("the error is written")
+            .code
+            .to_string();
+
+        assert!(
+            error.contains("impl :: core :: fmt :: Display for UnsynError"),
+            "{error}"
+        );
+        assert!(
+            error.contains("impl :: std :: error :: Error for UnsynError"),
+            "{error}"
+        );
+        assert!(
+            error.contains("impl :: core :: fmt :: Display for SyntaxKind"),
+            "{error}"
+        );
     }
 
     #[test]
@@ -5693,11 +5899,24 @@ mod tests {
         );
 
         // A range of arms is joined by `|`, and the parameter is read, not
-        // ignored, as soon as there is anything to compare.
+        // ignored, as soon as there is anything to compare. Two arms that are no
+        // named class stay spelled as their ranges.
         let two = [Arm::Char('a'), Arm::Range('0', '9')];
         assert_eq!(
             class_pred(&two).to_string().replace(' ', ""),
             "|c:char|matches!(c,'a'|'0'..='9')"
+        );
+
+        // The same arms in the order of a class Rust names are written as that
+        // class, which is what the spec said either way.
+        let digits = [Arm::Range('0', '9')];
+        assert_eq!(
+            class_pred(&digits).to_string().replace(' ', ""),
+            "|c:char|c.is_ascii_digit()"
+        );
+        assert_eq!(
+            refused_pred(&digits).to_string().replace(' ', ""),
+            "|c:char|!c.is_ascii_digit()"
         );
     }
 
@@ -5712,7 +5931,7 @@ mod tests {
         assert!(
             has(
                 &soup,
-                quote! { #[parserc(take_while = |c: char| matches!(c, '0'..='9'))] }
+                quote! { #[parserc(take_while = |c: char| c.is_ascii_digit())] }
             ),
             "{soup}"
         );
@@ -5722,7 +5941,7 @@ mod tests {
             has(
                 &soup,
                 quote! {
-                    #[parserc(take_while_with = (1usize..=3usize, |c: char| matches!(c, '0'..='9')))]
+                    #[parserc(take_while_with = (1usize..=3usize, |c: char| c.is_ascii_digit()))]
                 }
             ),
             "{soup}"

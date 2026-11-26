@@ -4,17 +4,16 @@ use std::fmt::Debug;
 
 use parserc::{AsBytes, AsStr, Find, Input, StartWith};
 
-use super::errors::UnsynError;
-
 /// The capabilities an input stream needs to parse `unsyn`.
 ///
-/// The lexical layer of the language is written against these traits instead
-/// of against one concrete stream, so that a caller may feed the parser
+/// The lexical layer of the language — the code a build wrote for `unsyn.us` —
+/// is written against these traits instead of against one concrete stream, so
+/// that a caller may feed the parser
 /// anything it likes — a borrowed `&str`, a rope, a slice of a larger file — as
 /// long as it can:
 ///
 /// - [`Input<Item = char>`]: be consumed one character at a time and split, and
-///   report failures as [`UnsynError`];
+///   report failures as [`ParseError`](crate::error::ParseError);
 /// - [`AsStr`] and [`AsBytes`]: expose what is left of it, which the multi
 ///   character keywords (`whitespace`, `*/`, `\\x`) and the fixed-width escape
 ///   checks need;
@@ -22,8 +21,15 @@ use super::errors::UnsynError;
 /// - [`Find`]: look ahead for a literal, which the comment scanners use;
 /// - [`Clone`], [`Debug`] and [`PartialEq`]: snapshot a position and compare
 ///   tokens, both of which the recursive-descent parsers and the tests rely on.
+///
+/// The error a stream reports is the one a build wrote for the spec —
+/// [`ParseError`](crate::error::ParseError) — and not the
+/// [`UnsynError`](crate::errors::UnsynError) the
+/// passes below collect, which is that error wrapped around the families no
+/// grammar states. A pass that both reads a file and judges it returns the
+/// wrapper, and `?` carries a reading failure into it on its own.
 pub trait UnsynInput:
-    Input<Item = char, Error = UnsynError>
+    Input<Item = char, Error = crate::error::ParseError>
     + AsBytes
     + AsStr
     + StartWith<&'static str>
@@ -41,7 +47,7 @@ pub trait UnsynInput:
 /// A token keeps the slice it was read from and the offset it started at, so
 /// every node of the CST can report a [`Span`](parserc::Span) back into the
 /// source text.
-pub type TokenStream<'a> = parserc::chars::TokenStream<'a, UnsynError>;
+pub type TokenStream<'a> = parserc::chars::TokenStream<'a, crate::error::ParseError>;
 
 impl<'a> UnsynInput for TokenStream<'a> {}
 
