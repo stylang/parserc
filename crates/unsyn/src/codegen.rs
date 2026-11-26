@@ -121,14 +121,14 @@
 //!
 //! # What the generated code is written from
 //!
-//! This crate's own front end is output of this module: `build.rs` runs a
-//! released generator over `unsyn.us`, and the `lexer`, `syntax` and `visit`
-//! modules of this crate are that output. So nothing below is a difference
-//! between two trees — there is one tree, and what a build cannot see is the
-//! test. A name, a field or a bound this module writes wrong is a compile error
-//! in the crate that consumes the output, which is the reason the passes read
-//! the tree through free functions in the [`read`] module rather than methods on
-//! it.
+//! This crate's own front end is output of this module: the `unsyn-gen` binary runs
+//! it over `unsyn.us`, and the `lexer`, `syntax`, `visit` and generated `error`
+//! modules of this crate are that output, committed under `src/generated`. So
+//! nothing below is a difference between two trees — there is one tree, and what a
+//! generator cannot see is the test. A name, a field or a bound this module writes
+//! wrong is a compile error in the crate that consumes the output, which is the
+//! reason the passes read the tree through free functions in the [`read`] module
+//! rather than methods on it.
 //!
 //! Three decisions in the output are worth naming, because each is a rule taken
 //! from the file and nothing else:
@@ -152,7 +152,7 @@
 //!   arm the framework's kind is carried in, because the file says nothing wider
 //!   about a position that begins no token.
 //!
-//! Because the crate builds itself, the family of rules a refusal is named after
+//! Because the crate generates itself, the family of rules a refusal is named after
 //! is this module's own output rather than a table someone maintains: a variant
 //! exists exactly where a production stood and pointed, under the name the rule is
 //! written under, and the wrapper in `src/error.rs` carries that error beside the
@@ -4104,14 +4104,19 @@ where
             let body = walk_body(rule, desc);
 
             names.push(rule.clone());
+            // The doc of each is spelled out rather than assembled by `concat!` of
+            // a `stringify!`, because the name is known here: what a reader of the
+            // file should see is the sentence, not the machinery that made it.
+            let node = Literal::string(&format!("The node of the rule `{rule}`."));
+            let descent = Literal::string(&format!("Descend through the node of `{rule}`."));
             hooks.push(quote! {
-                #[doc = concat!("The node of the rule `", stringify!(#rule), "`.")]
+                #[doc = #node]
                 fn #visit(&mut self, node: &'ast #rule<I>) {
                     walk::#walk(self, node)
                 }
             });
             walks.push(quote! {
-                #[doc = concat!("Descend through the node of `", stringify!(#rule), "`.")]
+                #[doc = #descent]
                 pub fn #walk<'ast, I, V>(v: &mut V, node: &'ast #rule<I>)
                 where
                     I: #input,
@@ -5552,14 +5557,12 @@ mod tests {
         std::fs::read_to_string(dir.join(file)).expect("the file should be written")
     }
 
-    /// What the generator in this source tree writes for the spec, which is not
-    /// yet what this crate is built with.
+    /// What the generator in this source tree writes for the spec, which is also
+    /// what the crate is built with: the committed files under `src/generated` are
+    /// this code's output, and `tests/generated.rs` is what keeps them so.
     ///
-    /// `build.rs` runs the released generator, so the shipped front end carries
-    /// the shapes of that release; the allowances in `lib.rs` are for those, and
-    /// for nothing else. This test is what keeps that claim honest: it asks the
-    /// code in `src/` about the same spec and looks for the shapes the released
-    /// one writes.
+    /// The test of the shape below asks the code in `src/` about the same spec, so
+    /// it looks for what a run writes now rather than what an earlier release wrote.
     fn spec() -> Vec<Module> {
         let source = include_str!("../unsyn.us");
         let file = parse(source);

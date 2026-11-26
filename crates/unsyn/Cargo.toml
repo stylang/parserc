@@ -18,14 +18,6 @@ quote = "^1"
 [dev-dependencies]
 syn = { version = "^2", features = ["full"] }
 
-# The bootstrap: this crate's own front end is the code the released generator
-# writes for `unsyn.us`, so the release that introduces a change to *generated*
-# code cannot itself be built with that change — `build.rs` runs the version from
-# the registry, and the new output appears in the release after. See `build.rs`.
-[build-dependencies]
-unsyn = { version = "=0.14.0", default-features = false }
-proc-macro2 = "^1"
-
 # The crate is the build phase: the DSL front end and the generator that writes
 # a grammar from it. There is nothing to switch off, because a generated file
 # needs no unsyn at all — it names `parserc` items and nothing else, which is

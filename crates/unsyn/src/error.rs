@@ -3,18 +3,19 @@
 //! Two things meet in this module, and they are kept apart by where they come
 //! from:
 //!
-//! - [`generated`] is the file `build.rs` wrote from `unsyn.us`: the framework's
-//!   kind, and the family of rules a refusal is named after. It is included
-//!   rather than written, and nothing here decides its contents — the spec does.
+//! - [`generated`] is the file `unsyn-gen` wrote from `unsyn.us`: the framework's
+//!   kind, and the family of rules a refusal is named after. It is committed
+//!   rather than kept here, and nothing in this file decides its contents — the
+//!   spec does.
 //! - [`UnsynError`] is the report every pass returns: that generated error, wrapped
 //!   around the two families no grammar states — what a well formed token can still
 //!   denote wrongly ([`SemanticsKind`]), and what no code was written for
 //!   ([`BuildKind`]).
 //!
 //! The generated names are also re-exported here, because the code a build writes
-//! reaches its error at `super::error::{ParseError, SyntaxKind}` — as a sibling of
-//! the file it is written into, which is the one path a generator can know without
-//! being told. Inside this module the same items are spelled `generated::…`, which
+//! reaches its error at `super::error::{ParseError, SyntaxKind}` — as the module
+//! the generated siblings are mounted under, which is the one path a generator can
+//! know without being told. Inside this module the same items are spelled `generated::…`, which
 //! says where they come from.
 //!
 //! Every report also says which stage of [`unsyn`](crate) met the problem and which
@@ -38,15 +39,15 @@
 
 use parserc::{ControlFlow, ParseError as ParseErrorTrait, Span};
 
-/// What a build wrote for `unsyn.us`: the error a file of the language reports
-/// when it is read, and the family of rules a refusal of one is named after.
+/// What `src/generated/error.rs` holds, the file the generator wrote from
+/// `unsyn.us`: the error a file of the language reports when it is read, and the
+/// family of rules a refusal of one is named after.
 ///
 /// Both are generated, and both are the whole of what the spec says about
 /// failure: a combinator's own kind, and the rules whose productions point at
 /// themselves. Nothing here adds a name the file did not write.
-pub mod generated {
-    include!(concat!(env!("OUT_DIR"), "/unsyn/error.rs"));
-}
+#[path = "generated/error.rs"]
+pub mod generated;
 
 pub use generated::{ParseError, SyntaxKind};
 

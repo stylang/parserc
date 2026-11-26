@@ -50,16 +50,14 @@
 //!
 //! The mapping from a production to a Rust type, and the rules for naming what
 //! the mapping produces, are written down once in `README.md` beside this
-//! crate's sources. The `compiler` module's documents go on from there to how
-//! each is implemented.
+//! crate's sources. The documents of [`read`], [`semantic`] and [`codegen`] go on
+//! from there to how each is implemented.
 //!
 //! # One job, one feature
 //!
-//! The crate does one job, and the `compiler` feature says so: the DSL itself —
-//! the reader, the analyzer and the generator, in the stages its own module
-//! document lays out, over `quote` and `proc_macro2`.
-//!
-//! There is no second feature for a runtime, because there is no runtime to
+//! The crate does one job: the DSL itself — the reader, the analyzer and the
+//! generator, in the stages [`codegen`] lays out, over `quote` and `proc_macro2`.
+//! There is no feature for a runtime, because there is no runtime to
 //! ship. Two facts about a generated file make that plain:
 //!
 //! - what a `<NAME>` in a pattern reaches is the caller's link, and unsyn ships
@@ -76,13 +74,14 @@
 //!
 //! The spec of the language, written in the language itself, lives in
 //! `unsyn.us` at the root of this crate — and this crate is built from it. The
-//! front end (`lexer`, the nodes and the visitor) is not a hand-written file: it
-//! is what a build writes for the spec, into `OUT_DIR`, by the released
-//! generator. [`build.rs`](https://github.com/stylang/stylang/blob/main/crates/unsyn/build.rs)
-//! says how, and why the generator run there is the published one rather than
-//! the one in `src/` — a crate cannot compile the code that decides its own
-//! shape, so a change to what a build *writes* lands in the release after the one
-//! whose build ran the previous generator.
+//! front end (`lexer`, the nodes, the visitor and the error a file reports) is not
+//! a hand-written file: it is what the generator writes for the spec, into
+//! `src/generated`, where it is committed. [`unsyn-gen`] is the run that makes it,
+//! and there is no build script: a crate that generates itself from the tree it is
+//! in needs no earlier release of itself, so a change to what the generator *writes*
+//! lands in the same release as the change that made it.
+//!
+//! [`unsyn-gen`]: https://github.com/stylang/stylang/blob/main/crates/unsyn/src/bin/unsyn-gen.rs
 //!
 //! That is also why the front end carries no `impl` block and no hand-picked
 //! name: every type, field and variant below is what the productions say. What
@@ -99,11 +98,6 @@
 //! [dependencies]
 //! parserc = { version = "0.14", features = ["input", "syntax"] }
 //! ```
-//!
-//! One consequence of the build-dependency is worth knowing before typing a
-//! command: two packages named `unsyn` are in the graph — this one, and the
-//! pinned one the build runs — so a `-p unsyn` filter is ambiguous and cargo asks
-//! for a version, `cargo test -p unsyn@0.14.1`.
 #![cfg_attr(docsrs, feature(doc_cfg))]
 
 pub mod codegen;
@@ -114,38 +108,26 @@ pub mod read;
 pub mod scan;
 pub mod semantic;
 
-// The front end of the language, in the code a build wrote for `unsyn.us`. These
-// are not hand-maintained files: the spec at the root of this crate is the source
-// of every type below, and `build.rs` says how the released generator is the one
-// that wrote them. A `use super::input::UnsynInput` inside one of them is this
-// crate's own `input`, and a `super::lexer` is this crate's own `lexer` — the
-// siblings here are the siblings a build writes.
-//
-// `include!` rather than `#[path]` because a `path` attribute takes a literal
-// alone, and the directory a build writes into is known only once the build has
-// run.
+// The front end of the language, in the code the generator wrote for `unsyn.us`.
+// These are not hand-maintained files: the spec at the root of this crate is the
+// source of every type below, and `src/bin/unsyn-gen.rs` is what writes them,
+// into `src/generated`, by the generator this crate ships. A
+// `use super::input::UnsynInput` inside one of them is this crate's own `input`,
+// and a `super::lexer` is this crate's own `lexer` — mounted as siblings of the
+// crate root, the generated files are the siblings the generator writes them for.
 //
 // Only the error's own file is not mounted here: it lives inside `error`, as
 // `error::generated`, so that the generated error and the wrapper around it are
 // one module's two parts rather than two modules with nearly one name.
 //
-// No allowance is written on these modules. The released generator's output has
-// three known defects — an error import in a file that reports no refusal, a
-// character class spelled as its range where `char` names it, and field types
-// nested as tuples because the spec gave those groups no left side. The first two
-// are fixed in `src/codegen.rs`, each pinned by a test; the third is now carried
-// by the generated code itself, on the items that need it. Until this crate is
-// built by a generator holding those fixes, the output compiled here still warns,
-// and that warning is the honest record of a release being one behind its own
-// generator — silencing it here would hide it without fixing anything.
-pub mod lexer {
-    include!(concat!(env!("OUT_DIR"), "/unsyn/lexer.rs"));
-}
+// No allowance is written on these modules. What the generator has to say about a
+// shape it cannot name is said by the code itself, on the items that need it, so a
+// warning here is a defect of the generator rather than a debt of the crate.
+#[path = "generated/lexer.rs"]
+pub mod lexer;
 
-pub mod syntax {
-    include!(concat!(env!("OUT_DIR"), "/unsyn/syntax.rs"));
-}
+#[path = "generated/syntax.rs"]
+pub mod syntax;
 
-pub mod visit {
-    include!(concat!(env!("OUT_DIR"), "/unsyn/visit.rs"));
-}
+#[path = "generated/visit.rs"]
+pub mod visit;

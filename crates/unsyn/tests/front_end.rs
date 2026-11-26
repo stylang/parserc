@@ -1,12 +1,12 @@
-//! Reading with this crate's own front end, which is code a build wrote.
+//! Reading with this crate's own front end, which is generated code.
 //!
-//! The front end is no longer kept beside these tests as a file to compare: it
-//! is compiled into the crate by `build.rs`, from `unsyn.us`, by the released
-//! generator. So there is nothing here about whether two trees agree — the
-//! agreement is the build, and a mismatch in a name, a field or a bound is a
+//! The front end is not kept beside these tests as a file to compare: it is what
+//! the generator writes from `unsyn.us`, committed under `src/generated` and
+//! mounted by `src/lib.rs`. So there is nothing here about whether two trees
+//! agree — there is one tree, and a mismatch in a name, a field or a bound is a
 //! compile error rather than a test failure.
 //!
-//! What a build cannot tell is whether the parser it wrote *reads*. A rule that
+//! What a compile cannot tell is whether the parser it wrote *reads*. A rule that
 //! compiles and then takes the wrong span, or one character where the production
 //! bounds six, or a CST that drops the trivia between two tokens, is a correct
 //! program and a wrong parser. The tests here are the parts of that which the
@@ -27,7 +27,7 @@ use unsyn::{
 
 /// Reads the node `T` from the start of `source`.
 ///
-/// What reading reports is the error a build wrote; the `UnsynError` every pass
+/// What reading reports is the error the generator wrote; the `UnsynError` every pass
 /// returns wraps that together with the families of the analysis, so the reading
 /// failure is carried into it here, the way a pass that reads and then judges a
 /// file does with `?`.
