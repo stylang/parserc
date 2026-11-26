@@ -316,22 +316,22 @@ the build never runs.
 
 | refused | when |
 |---|---|
-| [`Keyword`](src/errors.rs) | a keyword of the language is used to name a rule, plain or written raw ([§2](#2-names-words-and-literals)) |
-| [`NameCollision`](src/errors.rs) | a name is defined twice — raw and plain spellings are one name |
-| [`DuplicateWhitespace`](src/errors.rs) | more than one `whitespace` declaration |
-| [`MissingWhitespace`](src/errors.rs) | the file declares no `whitespace` rule, and so has no separator to end a token with ([§1](#1-files-items-and-declarations)) |
-| [`UndefinedSymbol`](src/errors.rs) | a pattern names a rule the file never defines (a reference, a set member, or the target of a refusal) |
-| [`UnexpectedSyntax`](src/errors.rs) | a `lexer` rule names a `syntax` rule |
-| [`EmptySet`](src/errors.rs) | `[]`, or `~[]`, stands in a pattern |
-| [`WideSetMember`](src/errors.rs) | a set member that spells a word, ranges over a word, or names a rule answering wider than a character ([§4](#4-patterns)) |
-| [`EmptySetMember`](src/errors.rs) | a set member naming a rule that can be matched by nothing, which answers the set with no character to test ([§4](#4-patterns)) |
-| [`UnsatisfiableRefusal`](src/errors.rs) | a `~` whose operand can be matched by nothing — a name reaching a definition that is optional, repeated `{0,}` or `{,n}` — which begins everywhere and so leaves the refusal no character to take ([§4](#4-patterns)) |
-| [`NotAChar`](src/errors.rs) | a literal asked to be one character is not — the ends of a range, or an empty literal anywhere a character is required |
-| [`InvalidRange`](src/errors.rs) | a range whose lower end is above its upper |
-| [`InvalidCodePoint`](src/errors.rs) | a `U+…` or `\u{…}` that is no Unicode code point — past `U+10FFFF`, or a surrogate |
-| [`InvalidRepeat`](src/errors.rs) | a bound whose lower number is above its upper |
-| [`LeftRecursion`](src/errors.rs) | a definition that can begin a match of itself, advancing nothing — a node whose first operand is (or reaches) its own name |
-| [`SameOffsetRecursion`](src/errors.rs) | a node whose match at a position can only be decided by deciding the same node at the same position — a cycle that neither advances nor terminates, through optionals and empties |
+| [`Keyword`](src/error.rs) | a keyword of the language is used to name a rule, plain or written raw ([§2](#2-names-words-and-literals)) |
+| [`NameCollision`](src/error.rs) | a name is defined twice — raw and plain spellings are one name |
+| [`DuplicateWhitespace`](src/error.rs) | more than one `whitespace` declaration |
+| [`MissingWhitespace`](src/error.rs) | the file declares no `whitespace` rule, and so has no separator to end a token with ([§1](#1-files-items-and-declarations)) |
+| [`UndefinedSymbol`](src/error.rs) | a pattern names a rule the file never defines (a reference, a set member, or the target of a refusal) |
+| [`UnexpectedSyntax`](src/error.rs) | a `lexer` rule names a `syntax` rule |
+| [`EmptySet`](src/error.rs) | `[]`, or `~[]`, stands in a pattern |
+| [`WideSetMember`](src/error.rs) | a set member that spells a word, ranges over a word, or names a rule answering wider than a character ([§4](#4-patterns)) |
+| [`EmptySetMember`](src/error.rs) | a set member naming a rule that can be matched by nothing, which answers the set with no character to test ([§4](#4-patterns)) |
+| [`UnsatisfiableRefusal`](src/error.rs) | a `~` whose operand can be matched by nothing — a name reaching a definition that is optional, repeated `{0,}` or `{,n}` — which begins everywhere and so leaves the refusal no character to take ([§4](#4-patterns)) |
+| [`NotAChar`](src/error.rs) | a literal asked to be one character is not — the ends of a range, or an empty literal anywhere a character is required |
+| [`InvalidRange`](src/error.rs) | a range whose lower end is above its upper |
+| [`InvalidCodePoint`](src/error.rs) | a `U+…` or `\u{…}` that is no Unicode code point — past `U+10FFFF`, or a surrogate |
+| [`InvalidRepeat`](src/error.rs) | a bound whose lower number is above its upper |
+| [`LeftRecursion`](src/error.rs) | a definition that can begin a match of itself, advancing nothing — a node whose first operand is (or reaches) its own name |
+| [`SameOffsetRecursion`](src/error.rs) | a node whose match at a position can only be decided by deciding the same node at the same position — a cycle that neither advances nor terminates, through optionals and empties |
 
 The two code-point spellings are refused where they are read: a `U+…` of other
 than four hex digits, and a `\u{…}` whose digits do not close the escape. What is
@@ -352,9 +352,9 @@ build refused over (`BuildKind::External`, `Whitespace`, `Syntax`).
 
 A lint is a note on a file that *does* denote a grammar and says something it
 need not have said, or said twice. The two channels of a report are kept apart
-by what they imply ([`Diagnostics`](src/errors.rs)): the refusals of
+by what they imply ([`Diagnostics`](src/error.rs)): the refusals of
 [§6](#6-what-a-file-must-obey) reject a file; a lint
-travels with a build. Every lint is a [`LintKind`](src/errors.rs)
+travels with a build. Every lint is a [`LintKind`](src/error.rs)
 and the span of the construct
 that earned it, and there are six kinds. A lint carries no text of the file,
 either ([§6](#6-what-a-file-must-obey)): it holds at most one more span, the
@@ -364,12 +364,12 @@ lint itself holds is the span of each.
 
 | `LintKind` | fires where |
 |---|---|
-| [`DuplicateMember`](src/errors.rs) | a set member `m` denotes exactly what an earlier member of the same set already denotes: `[ 'a', 'a' ]`, `[ 'a', U+0061 ]`, `[ LF, LF ]` |
-| [`CoveredMember(e)`](src/errors.rs) | `m` denotes nothing that the earlier `e` does not — `m` is the redundant write: `[ 'a'-'d', 'b' ]`. The lint stands on `m` and holds the span of `e` |
-| [`CoversMember(e)`](src/errors.rs) | `m` denotes everything `e` does and more — the *earlier* member is the redundant one: `[ 'b', 'a'-'d' ]` |
-| [`OverlappingMember(e)`](src/errors.rs) | `m` and `e` share some values and each keeps some of its own: `[ 'a'-'b', 'b'-'c' ]` |
-| [`RedundantSeparator(d)`](src/errors.rs) | a `syntax` rule mentions the file's `whitespace` rule anywhere short of the whole of an alternative, where its generated separator takes that trivia whether it is named or not: `syntax A -> S 'x';` over `whitespace S -> …` — and one report per mention. The lint stands on the mention and holds the span of the declaration `d` that named the trivia |
-| [`UnnamedAlternative`](src/errors.rs) | an alternative of a root choice names no rule and reads no word, or a choice stands inside a group of a `syntax` rule — the table and every exemption are below |
+| [`DuplicateMember`](src/error.rs) | a set member `m` denotes exactly what an earlier member of the same set already denotes: `[ 'a', 'a' ]`, `[ 'a', U+0061 ]`, `[ LF, LF ]` |
+| [`CoveredMember(e)`](src/error.rs) | `m` denotes nothing that the earlier `e` does not — `m` is the redundant write: `[ 'a'-'d', 'b' ]`. The lint stands on `m` and holds the span of `e` |
+| [`CoversMember(e)`](src/error.rs) | `m` denotes everything `e` does and more — the *earlier* member is the redundant one: `[ 'b', 'a'-'d' ]` |
+| [`OverlappingMember(e)`](src/error.rs) | `m` and `e` share some values and each keeps some of its own: `[ 'a'-'b', 'b'-'c' ]` |
+| [`RedundantSeparator(d)`](src/error.rs) | a `syntax` rule mentions the file's `whitespace` rule anywhere short of the whole of an alternative, where its generated separator takes that trivia whether it is named or not: `syntax A -> S 'x';` over `whitespace S -> …` — and one report per mention. The lint stands on the mention and holds the span of the declaration `d` that named the trivia |
+| [`UnnamedAlternative`](src/error.rs) | an alternative of a root choice names no rule and reads no word, or a choice stands inside a group of a `syntax` rule — the table and every exemption are below |
 
 ### Set members compared as values
 
@@ -935,18 +935,18 @@ crate builds itself: `build.rs` says the error and the stream trait are
 ## 15. What the generator refuses
 
 The generator declines instead of approximating. Each refusal is an
-[`UnsynError::Build`](src/errors.rs) carrying one of six
-[`BuildKind`](src/errors.rs)s, and names the rule that
+[`UnsynError::Build`](src/error.rs) carrying one of six
+[`BuildKind`](src/error.rs)s, and names the rule that
 asked for it:
 
 | `BuildKind`            | refused when |
 |------------------------|-----------|
-| [`Name`](src/errors.rs) | a name the file wrote is one no Rust item can wear ([`is_item_name`](src/codegen.rs) fails) |
-| [`External`](src/errors.rs) | the pattern calls `<Ext>` and the build was never given a binding for `Ext` |
-| [`Whitespace`](src/errors.rs) | the `whitespace` rule's right side cannot be reduced to a test of one character |
-| [`Literal`](src/errors.rs) | a literal that spells no character where the code asked one |
-| [`Syntax`](src/errors.rs) | a right side no field can hold: a counted repetition of anything wider than a character, an operator inside a group, a name asked for its text where a tuple answers with types |
-| [`Output`](src/errors.rs) | a directory `to_dir` was given could not be made, or a file in it could not be written |
+| [`Name`](src/error.rs) | a name the file wrote is one no Rust item can wear ([`is_item_name`](src/codegen.rs) fails) |
+| [`External`](src/error.rs) | the pattern calls `<Ext>` and the build was never given a binding for `Ext` |
+| [`Whitespace`](src/error.rs) | the `whitespace` rule's right side cannot be reduced to a test of one character |
+| [`Literal`](src/error.rs) | a literal that spells no character where the code asked one |
+| [`Syntax`](src/error.rs) | a right side no field can hold: a counted repetition of anything wider than a character, an operator inside a group, a name asked for its text where a tuple answers with types |
+| [`Output`](src/error.rs) | a directory `to_dir` was given could not be made, or a file in it could not be written |
 
 The language-level refusals — the file denoting no grammar — are
 [§6](#6-what-a-file-must-obey), and they

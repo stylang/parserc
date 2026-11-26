@@ -49,7 +49,7 @@ use std::collections::{BTreeMap, BTreeSet, HashSet};
 
 use parserc::{Span, ToSpan, as_str};
 
-use super::errors::{Diagnostics, LintKind, SemanticsKind, UnsynError};
+use super::error::{Diagnostics, LintKind, SemanticsKind, UnsynError};
 use super::input::UnsynInput;
 use super::visit::{Visit, walk};
 use super::{codegen, lexer, read, syntax};
@@ -1940,7 +1940,7 @@ lexer B -> A | '/*' A;
                 .iter()
                 .filter(|lint| !matches!(lint.kind, LintKind::UnnamedAlternative))
                 .collect::<Vec<_>>(),
-            Vec::<&crate::errors::Lint>::new(),
+            Vec::<&crate::error::Lint>::new(),
             "the members of the two sets are no business of each other"
         );
     }

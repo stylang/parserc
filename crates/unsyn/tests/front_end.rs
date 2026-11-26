@@ -18,7 +18,7 @@ use parserc::{
     syntax::{Syntax, SyntaxInput as _},
 };
 use unsyn::{
-    errors::UnsynError,
+    error::UnsynError,
     input::TokenStream,
     lexer::{BlockComment, Ident, LitStr, LitUnicode, S, UnicodeEscape},
     syntax::{Crate, Item},

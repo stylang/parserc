@@ -16,7 +16,7 @@
 //! that can be snapshotted, and a length in the same units `split_to` counts — so
 //! the same function serves whatever stream a build is written against, whether
 //! it reports its failures as a [`Kind`](parserc::Kind) or as an
-//! [`UnsynError`](crate::errors::UnsynError).
+//! [`UnsynError`](crate::error::UnsynError).
 
 use parserc::{Input, Parser};
 

@@ -136,7 +136,7 @@
 //! - A part of a right side the production named nothing is named by its place —
 //!   `f1`, `f2` — beside the rule's own name where the operand is a name. A group
 //!   the spec never gave a left side is what the
-//!   [`UnnamedAlternative`](super::errors::LintKind::UnnamedAlternative) lint
+//!   [`UnnamedAlternative`](super::error::LintKind::UnnamedAlternative) lint
 //!   asks an author about, precisely so that the code need not fall back to a
 //!   place.
 //! - A single character of the described language is
@@ -155,7 +155,7 @@
 //! Because the crate builds itself, the family of rules a refusal is named after
 //! is this module's own output rather than a table someone maintains: a variant
 //! exists exactly where a production stood and pointed, under the name the rule is
-//! written under, and the wrapper in `src/errors.rs` carries that error beside the
+//! written under, and the wrapper in `src/error.rs` carries that error beside the
 //! families of the analysis. What a build cannot do is name a rule the file never
 //! declared, and what it must not do is invent a family the file never needed.
 //!
@@ -222,7 +222,7 @@ use super::input::UnsynInput;
 
 use super::{
     decode,
-    errors::{BuildKind, UnsynError},
+    error::{BuildKind, UnsynError},
     lexer, read, syntax,
 };
 
@@ -1932,7 +1932,7 @@ fn one_char(chars: Vec<char>) -> Option<char> {
 ///
 /// Whether a class of nothing can reach a build at all is the analyzer's
 /// decision, not this one: `[]` and `~[]` both earn
-/// [`EmptySet`](super::errors::SemanticsKind::EmptySet), which is fatal. The
+/// [`EmptySet`](super::error::SemanticsKind::EmptySet), which is fatal. The
 /// answer is written for the case nonetheless, so that a file which ever got
 /// past that gate without the refusal would still be given a test that means
 /// what the class means, and not a `matches!` of no arms, which is not Rust.
@@ -5008,7 +5008,7 @@ mod tests {
     use parserc::{Input, syntax::SyntaxInput};
 
     use super::*;
-    use crate::errors::{LintKind, SemanticsKind};
+    use crate::error::{LintKind, SemanticsKind};
     use crate::input::TokenStream as Spec;
     use crate::semantic;
 
@@ -5060,7 +5060,7 @@ mod tests {
     ///
     /// Unlike [`parse`], this does not insist the analysis found nothing: a
     /// probe of what a file earns in warnings needs the report, not an assertion.
-    fn analyzed(source: &str) -> crate::errors::Diagnostics {
+    fn analyzed(source: &str) -> crate::error::Diagnostics {
         let source = whole(source);
         let whole = Spec::from(source);
         let tree = {

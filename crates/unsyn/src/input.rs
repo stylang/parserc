@@ -24,7 +24,7 @@ use parserc::{AsBytes, AsStr, Find, Input, StartWith};
 ///
 /// The error a stream reports is the one a build wrote for the spec —
 /// [`ParseError`](crate::error::ParseError) — and not the
-/// [`UnsynError`](crate::errors::UnsynError) the
+/// [`UnsynError`](crate::error::UnsynError) the
 /// passes below collect, which is that error wrapped around the families no
 /// grammar states. A pass that both reads a file and judges it returns the
 /// wrapper, and `?` carries a reading failure into it on its own.

@@ -1,6 +1,23 @@
-//! The types used for `unsyn` diagnostic reports.
+//! The types used for `unsyn` diagnostic reports, and the error a build wrote.
 //!
-//! Every report says which stage of [`unsyn`](crate) met the problem and which
+//! Two things meet in this module, and they are kept apart by where they come
+//! from:
+//!
+//! - [`generated`] is the file `build.rs` wrote from `unsyn.us`: the framework's
+//!   kind, and the family of rules a refusal is named after. It is included
+//!   rather than written, and nothing here decides its contents — the spec does.
+//! - [`UnsynError`] is the report every pass returns: that generated error, wrapped
+//!   around the two families no grammar states — what a well formed token can still
+//!   denote wrongly ([`SemanticsKind`]), and what no code was written for
+//!   ([`BuildKind`]).
+//!
+//! The generated names are also re-exported here, because the code a build writes
+//! reaches its error at `super::error::{ParseError, SyntaxKind}` — as a sibling of
+//! the file it is written into, which is the one path a generator can know without
+//! being told. Inside this module the same items are spelled `generated::…`, which
+//! says where they come from.
+//!
+//! Every report also says which stage of [`unsyn`](crate) met the problem and which
 //! of two channels it belongs to:
 //!
 //! - an [`UnsynError`] means the file denotes nothing, or that a build found no
@@ -11,19 +28,6 @@
 //!
 //! [`Diagnostics`] is the pair of lists a pass writes both kinds of finding to.
 //!
-//! An [`UnsynError`] also says what the stage was looking for, and how far a
-//! parser may still go:
-//!
-//! - [`Parse`](UnsynError::Parse): what reading the file reported. This arm
-//!   carries the error a build wrote for the spec — see [`error`](crate::error) —
-//!   so a combinator's own failure and the family of rules a refusal is named
-//!   after are both generated, not listed here;
-//! - [`Semantics`](UnsynError::Semantics) and [`Build`](UnsynError::Build): the
-//!   two families no grammar states, which is why they are still written by hand.
-//!   A well formed token can still denote wrongly, and a shape of a production can
-//!   still have no code to answer it, and neither is a fact about one rule that a
-//!   production could say.
-//!
 //! Everything but the [`Semantics`](UnsynError::Semantics) and
 //! [`Build`](UnsynError::Build) arms carries a
 //! [`ControlFlow`]: [`Recovable`](ControlFlow::Recovable) means an enclosing
@@ -32,7 +36,19 @@
 //! hand-written families is fatal by definition: nothing further in the file can
 //! be trusted with it.
 
-use parserc::{ControlFlow, ParseError, Span};
+use parserc::{ControlFlow, ParseError as ParseErrorTrait, Span};
+
+/// What a build wrote for `unsyn.us`: the error a file of the language reports
+/// when it is read, and the family of rules a refusal of one is named after.
+///
+/// Both are generated, and both are the whole of what the spec says about
+/// failure: a combinator's own kind, and the rules whose productions point at
+/// themselves. Nothing here adds a name the file did not write.
+pub mod generated {
+    include!(concat!(env!("OUT_DIR"), "/unsyn/error.rs"));
+}
+
+pub use generated::{ParseError, SyntaxKind};
 
 /// Error for values that are well formed but meaningless.
 ///
@@ -328,11 +344,10 @@ pub enum BuildKind {
 /// Three phases meet here, and they are not all written by the same hand:
 ///
 /// - [`UnsynError::Parse`] carries what reading a file reports, and that enum is
-///   not written here — [`error`](crate::error) is the code a build wrote from
-///   `unsyn.us`, so its kind of combinator failure and its family of rules a
-///   refusal is named after arrive as the generated file declares them. A change
-///   to a production is a change to this arm, and nothing here has to be edited
-///   to follow it.
+///   [`generated`] — the code a build wrote from `unsyn.us`, so its kind of
+///   combinator failure and its family of rules a refusal is named after arrive as
+///   the generated file declares them. A change to a production is a change to
+///   this arm, and nothing here has to be edited to follow it.
 /// - [`UnsynError::Semantics`] carries what a well formed token or file can still
 ///   mean wrongly, which no grammar states because it is a fact about the whole
 ///   program rather than about one rule.
@@ -347,7 +362,7 @@ pub enum BuildKind {
 pub enum UnsynError {
     /// What reading the file reported: a combinator's own failure, or a refusal
     /// named after the rule whose production asked for it.
-    Parse(crate::error::ParseError),
+    Parse(generated::ParseError),
 
     /// A token or file that is well formed and denotes nothing.
     Semantics(SemanticsKind, Span),
@@ -356,7 +371,55 @@ pub enum UnsynError {
     Build(BuildKind, Span),
 }
 
-impl ParseError for UnsynError {
+/// The report of a reading failure is the generated enum's own words, told here
+/// rather than asked of it: the front end this crate ships was written by the
+/// released generator, which emits no `Display` for that error. The two arms are
+/// the contract of a build's error — the framework's kind, and a refusal named
+/// after a rule — and a spec changes which rules are named, never which arms
+/// there are.
+///
+/// A rule's name is printed through `Debug` for the same reason: the released
+/// generator writes no `Display` for the family of rules either.
+impl std::fmt::Display for UnsynError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            UnsynError::Parse(generated::ParseError::Kind(kind)) => std::fmt::Display::fmt(kind, f),
+            UnsynError::Parse(generated::ParseError::Syntax(kind, control_flow, span)) => {
+                write!(
+                    f,
+                    "syntax error: expect {kind:?}, {control_flow:?}, {span:?}"
+                )
+            }
+            UnsynError::Semantics(kind, span) => write!(f, "unexpect/invalid: {kind} at {span:?}"),
+            UnsynError::Build(kind, span) => write!(f, "build: {kind}, part at {span:?}"),
+        }
+    }
+}
+
+impl std::error::Error for UnsynError {}
+
+/// A combinator's failure is a reading failure, which the generated arm carries.
+///
+/// This is what lets `?` move a [`Kind`](parserc::Kind) out of a call into a pass
+/// that returns [`UnsynError`], exactly as the generated parser's own functions
+/// do.
+impl From<parserc::Kind> for UnsynError {
+    #[inline]
+    fn from(kind: parserc::Kind) -> Self {
+        Self::Parse(kind.into())
+    }
+}
+
+/// What a generated parser reports is a report of reading, which is what a pass
+/// that reads and then analyzes a file returns.
+impl From<generated::ParseError> for UnsynError {
+    #[inline]
+    fn from(err: generated::ParseError) -> Self {
+        Self::Parse(err)
+    }
+}
+
+impl parserc::ParseError for UnsynError {
     #[inline]
     fn to_span(&self) -> Span {
         match self {
@@ -385,56 +448,6 @@ impl ParseError for UnsynError {
     }
 }
 
-/// The report of a reading failure is the generated enum's own words, told here
-/// rather than asked of it: the front end this crate ships was written by the
-/// released generator, which emits no `Display` for that error. The two arms are
-/// the contract of a build's error — the framework's kind, and a refusal named
-/// after a rule — and a spec changes which rules are named, never which arms
-/// there are.
-///
-/// A rule's name is printed through `Debug` for the same reason: the released
-/// generator writes no `Display` for the family of rules either.
-impl std::fmt::Display for UnsynError {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            UnsynError::Parse(crate::error::ParseError::Kind(kind)) => {
-                std::fmt::Display::fmt(kind, f)
-            }
-            UnsynError::Parse(crate::error::ParseError::Syntax(kind, control_flow, span)) => {
-                write!(
-                    f,
-                    "syntax error: expect {kind:?}, {control_flow:?}, {span:?}"
-                )
-            }
-            UnsynError::Semantics(kind, span) => write!(f, "unexpect/invalid: {kind} at {span:?}"),
-            UnsynError::Build(kind, span) => write!(f, "build: {kind}, part at {span:?}"),
-        }
-    }
-}
-
-impl std::error::Error for UnsynError {}
-
-/// A combinator's failure is a reading failure, which the generated arm carries.
-///
-/// This is what lets `?` move a [`Kind`](parserc::Kind) out of a call into a pass
-/// that returns [`UnsynError`], exactly as the generated parser's own functions
-/// do.
-impl From<parserc::Kind> for UnsynError {
-    #[inline]
-    fn from(kind: parserc::Kind) -> Self {
-        Self::Parse(kind.into())
-    }
-}
-
-/// What a generated parser reports is a report of reading, which is what a pass
-/// that reads and then analyzes a file returns.
-impl From<crate::error::ParseError> for UnsynError {
-    #[inline]
-    fn from(err: crate::error::ParseError) -> Self {
-        Self::Parse(err)
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use parserc::{ControlFlow, Kind, ParseError, Span};
@@ -448,8 +461,8 @@ mod tests {
         // The arm a build wrote: a rule's name, and the two facts about the
         // position the refusal stands at.
         assert_eq!(
-            UnsynError::Parse(crate::error::ParseError::Syntax(
-                crate::error::SyntaxKind::LitUnicode,
+            UnsynError::Parse(generated::ParseError::Syntax(
+                generated::SyntaxKind::LitUnicode,
                 ControlFlow::Fatal,
                 Span::None,
             ))
@@ -484,7 +497,7 @@ mod tests {
         // the code and the span it carried: the wrapper says nothing of its own
         // about a failure it did not judge.
         assert!(
-            matches!(error, UnsynError::Parse(crate::error::ParseError::Kind(_))),
+            matches!(error, UnsynError::Parse(generated::ParseError::Kind(_))),
             "{error:?}"
         );
         assert_eq!(error.to_string(), "Error from `next_if` combinator");
@@ -500,7 +513,7 @@ mod tests {
         // reading kind is the generated enum, which the wrapper carries and does
         // not flatten — a refusal named after a rule of the spec stays in the
         // family the spec wrote.
-        let read = UnsynError::from(crate::error::ParseError::Kind(Kind::Next(
+        let read = UnsynError::from(generated::ParseError::Kind(Kind::Next(
             ControlFlow::Incomplete,
             Span::Range(4..4),
         )));
@@ -515,7 +528,7 @@ mod tests {
         // stays as it was.
         assert_eq!(
             read.into_fatal(),
-            UnsynError::Parse(crate::error::ParseError::Kind(Kind::Next(
+            UnsynError::Parse(generated::ParseError::Kind(Kind::Next(
                 ControlFlow::Fatal,
                 Span::Range(4..4),
             )))
@@ -550,26 +563,26 @@ mod tests {
         let span = Span::Range(2..3);
 
         assert_eq!(
-            UnsynError::Parse(crate::error::ParseError::Syntax(
-                crate::error::SyntaxKind::UnicodeEscape,
+            UnsynError::Parse(generated::ParseError::Syntax(
+                generated::SyntaxKind::UnicodeEscape,
                 ControlFlow::Incomplete,
                 span.clone(),
             ))
             .into_fatal(),
-            UnsynError::Parse(crate::error::ParseError::Syntax(
-                crate::error::SyntaxKind::UnicodeEscape,
+            UnsynError::Parse(generated::ParseError::Syntax(
+                generated::SyntaxKind::UnicodeEscape,
                 ControlFlow::Fatal,
                 span.clone(),
             ))
         );
 
         assert_eq!(
-            UnsynError::Parse(crate::error::ParseError::Kind(Kind::Keyword(
+            UnsynError::Parse(generated::ParseError::Kind(Kind::Keyword(
                 ControlFlow::Recovable,
                 span.clone(),
             )))
             .into_fatal(),
-            UnsynError::Parse(crate::error::ParseError::Kind(Kind::Keyword(
+            UnsynError::Parse(generated::ParseError::Kind(Kind::Keyword(
                 ControlFlow::Fatal,
                 span,
             )))
@@ -581,8 +594,8 @@ mod tests {
         // The wrapper exists so that a pass can return one error type; it must not
         // flatten what a build wrote. A refusal named after a rule of the spec
         // arrives holding that rule, and says so when it is read back.
-        let refusal = crate::error::ParseError::Syntax(
-            crate::error::SyntaxKind::NonKeywordIdent,
+        let refusal = generated::ParseError::Syntax(
+            generated::SyntaxKind::NonKeywordIdent,
             ControlFlow::Fatal,
             Span::Range(30..46),
         );
@@ -593,8 +606,8 @@ mod tests {
         assert_eq!(wrapped.control_flow(), ControlFlow::Fatal);
         assert_eq!(
             wrapped,
-            UnsynError::Parse(crate::error::ParseError::Syntax(
-                crate::error::SyntaxKind::NonKeywordIdent,
+            UnsynError::Parse(generated::ParseError::Syntax(
+                generated::SyntaxKind::NonKeywordIdent,
                 ControlFlow::Fatal,
                 Span::Range(30..46),
             ))

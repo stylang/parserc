@@ -108,7 +108,7 @@
 
 pub mod codegen;
 pub mod decode;
-pub mod errors;
+pub mod error;
 pub mod input;
 pub mod read;
 pub mod scan;
@@ -119,27 +119,25 @@ pub mod semantic;
 // of every type below, and `build.rs` says how the released generator is the one
 // that wrote them. A `use super::input::UnsynInput` inside one of them is this
 // crate's own `input`, and a `super::lexer` is this crate's own `lexer` — the
-// four are siblings here exactly as the files of a build's output are siblings
-// wherever else one is written.
+// siblings here are the siblings a build writes.
 //
 // `include!` rather than `#[path]` because a `path` attribute takes a literal
 // alone, and the directory a build writes into is known only once the build has
 // run.
 //
-// No allowance is written here, on purpose. The released generator's output has
+// Only the error's own file is not mounted here: it lives inside `error`, as
+// `error::generated`, so that the generated error and the wrapper around it are
+// one module's two parts rather than two modules with nearly one name.
+//
+// No allowance is written on these modules. The released generator's output has
 // three known defects — an error import in a file that reports no refusal, a
 // character class spelled as its range where `char` names it, and field types
 // nested as tuples because the spec gave those groups no left side. The first two
-// are fixed in `src/codegen.rs`, and a test beside each one pins the fix; the
-// third is now carried by the generated code itself, on the items that need it.
-// Until this crate is built by a generator that contains those fixes, the output
-// compiled here still warns, and that warning is the honest record of a release
-// being one behind its own generator — silencing it in this file would hide it
-// without fixing anything.
-pub mod error {
-    include!(concat!(env!("OUT_DIR"), "/unsyn/error.rs"));
-}
-
+// are fixed in `src/codegen.rs`, each pinned by a test; the third is now carried
+// by the generated code itself, on the items that need it. Until this crate is
+// built by a generator holding those fixes, the output compiled here still warns,
+// and that warning is the honest record of a release being one behind its own
+// generator — silencing it here would hide it without fixing anything.
 pub mod lexer {
     include!(concat!(env!("OUT_DIR"), "/unsyn/lexer.rs"));
 }

@@ -27,7 +27,7 @@
 //! what reading a file reports, a combinator's own failure and a refusal named
 //! after a rule of the spec. What the analysis adds — a token well formed and
 //! meaningless, a shape no code answers — is not derivable from a grammar, so
-//! `src/errors.rs` wraps the generated error together with those families into the
+//! `src/error.rs` wraps the generated error together with those families into the
 //! one type every pass returns.
 //!
 //! [`input_at`]: unsyn::codegen::Builder::input_at
@@ -70,7 +70,7 @@ fn main() {
         //
         // The error is not. A build writes it — the framework's kind and the
         // family of rules a refusal is named after, both from the spec — and
-        // `src/errors.rs` wraps that together with the families of the analysis,
+        // `src/error.rs` wraps that together with the families of the analysis,
         // which no production states. It is named `ParseError` rather than after
         // the language because the wrapper is the crate's error, and this is the
         // phase of it that reading a file produces.
