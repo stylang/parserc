@@ -9,7 +9,7 @@ version.workspace = true
 
 [dependencies]
 unicode-ident = "1.0.22"
-parserc = { path = "../parserc", version = "^0.13", default-features = false, features = ["input", "syntax"] }
+parserc = { path = "../parserc", version = "^0.14", default-features = false, features = ["input", "syntax"] }
 serde = { version = "1.0.228", optional = true }
 thiserror = "2.0.17"
 proc-macro2 = "^1"
