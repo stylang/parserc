@@ -3,11 +3,11 @@
 //! `unsyn.us` is read by the parser a build wrote for it. The tree that parser
 //! built is then handed to the crate's own analysis and the crate's own
 //! generator — the same sources `src/` compiles, reached here by path — and the
-//! code that comes out is compared with the file whose parser went in. Equal
-//! output is what "the two trees are one tree" means when it means anything;
-//! [`tests/two_trees.rs`](../../tests/two_trees.rs) can only show that they
-//! read the same text to the same spans, which a behaviour can share while its
-//! types differ.
+//! code that comes out is compared, file against file, with the files whose
+//! parser went in. Equal output is what "the two trees are one tree" means when
+//! it means anything; [`tests/two_trees.rs`](../../tests/two_trees.rs) can only
+//! show that they read the same text to the same spans, which a behaviour can
+//! share while its types differ.
 //!
 //! This binary is behind the `bootstrap` feature; `required-features` means an
 //! explicit `--example bootstrap` without it errors rather than silently doing
@@ -30,7 +30,7 @@
 //! Nothing is being hidden. The lint fires because of where the code was
 //! compiled, not because the API is unused — the same items are live in the lib
 //! and are exercised by `src/`'s own tests and by `two_trees.rs`. The generated
-//! file carries the same allowance in its own header for the same reason: a
+//! files carry the same allowance in their own headers for the same reason: a
 //! build writes every rule's node and descent whether or not one particular
 //! program asks for them.
 #![allow(dead_code)]
@@ -50,29 +50,28 @@ pub use scan::scan_ident_or_keyword;
 // resolve here only if this harness gives them the same depth they have there.
 // Mirroring `src/` means mirroring its shape, not merely its file names.
 
-/// The nodes, the parsers and the visitor a build wrote for `unsyn.us`.
+/// The code a build wrote for `unsyn.us`, in the files it wrote it into.
 ///
-/// One file, because a build writes one file. The slots below are what let that
-/// one file stand in for the parts the hand front end was cut into.
-#[path = "../../tests/generated/unsyn_us.rs"]
-pub mod generated;
+/// Four of the five, because this build was told the error stands in the crate
+/// rather than asked to write one: the analysis compiled below reports families
+/// no production of the spec states.
+///
+/// The visitor here is the one the build wrote, not the one this crate ships, and
+/// the hand `visit` is therefore not compiled again: `semantic` reaches its tree
+/// through `super::visit`, so what the analysis runs on is the generated descent
+/// — which is the third thing this binary proves, beside the parser and the
+/// generator.
+#[path = "../../tests/generated/unsyn_us/input.rs"]
+pub mod input;
 
-/// A terminal, in the generated telling. The split of terminals from nodes
-/// carries nothing a tree can tell; the hand file is cut that way, so the
-/// slots are cut that way.
-pub mod lexer {
-    pub use crate::generated::*;
-}
+#[path = "../../tests/generated/unsyn_us/lexer.rs"]
+pub mod lexer;
 
-/// A node of the tree, in the same telling.
-pub mod syntax {
-    pub use crate::generated::*;
-}
+#[path = "../../tests/generated/unsyn_us/syntax.rs"]
+pub mod syntax;
 
-/// The stream the generated file names: the trait it emitted, and its alias.
-pub mod input {
-    pub use crate::generated::*;
-}
+#[path = "../../tests/generated/unsyn_us/visit.rs"]
+pub mod visit;
 
 /// The reports say nothing about which tree they were handed, and must be
 /// compiled exactly once: the sources reached by path report what a token
@@ -85,8 +84,8 @@ pub use ::unsyn::errors;
 
 /// The three phases that name nodes of the front end are compiled again here,
 /// so that `crate::syntax` and `crate::lexer` inside them mean the tree under
-/// test rather than the hand one. The same is true of `visit`, whose every walk
-/// names a node, and of `decode`, which names the literal whose digits it reads.
+/// test rather than the hand one. `decode` is too, which names the literal whose
+/// digits it reads.
 #[path = "../../src/read.rs"]
 pub mod read;
 
@@ -96,17 +95,31 @@ pub mod semantic;
 #[path = "../../src/codegen.rs"]
 pub mod codegen;
 
-#[path = "../../src/visit.rs"]
-pub mod visit;
-
 #[path = "../../src/decode.rs"]
 pub mod decode;
 
 /// The spec, in the language it describes.
 const SPEC: &str = include_str!("../../unsyn.us");
 
-/// The code a build last wrote for it, kept in the crate.
-const KEPT: &str = include_str!("../../tests/generated/unsyn_us.rs");
+/// The code a build last wrote for it, kept in the crate, per file.
+const KEPT: [(&str, &str); 4] = [
+    (
+        "input.rs",
+        include_str!("../../tests/generated/unsyn_us/input.rs"),
+    ),
+    (
+        "lexer.rs",
+        include_str!("../../tests/generated/unsyn_us/lexer.rs"),
+    ),
+    (
+        "syntax.rs",
+        include_str!("../../tests/generated/unsyn_us/syntax.rs"),
+    ),
+    (
+        "visit.rs",
+        include_str!("../../tests/generated/unsyn_us/visit.rs"),
+    ),
+];
 
 fn main() {
     use codegen::Builder;
@@ -137,22 +150,22 @@ fn main() {
 
     // A build holds what it generates from, so this hands over a copy and keeps
     // the tree it parsed for the checks above.
-    let code = Builder::new(whole.clone(), tree.clone())
+    let modules = Builder::new(whole.clone(), tree.clone())
         .external(
             "IdentOrKeyword",
             quote::quote! { crate::scan_ident_or_keyword },
         )
-        // The file is written into this crate, beside the analysis whose
-        // families its error carries, so it reaches the crate's own error
+        // The files are written into this crate, beside the analysis whose
+        // families its error carries, so they reach the crate's own error
         // instead of emitting a second one.
         .error_at("UnsynError", quote::quote! { ::unsyn::errors })
-        .build()
+        .modules()
         .expect("the spec, read by its own parser, builds");
 
-    // The comparison. What the file says about itself is not part of the code
-    // it is: the kept file carries a header of doc comments and `allow`s that
-    // no build writes, so both sides are reduced to their items before they are
-    // compared, exactly as `tests/unsyn_us.rs` does.
+    // The comparison, file against file. What a file says about itself is not
+    // part of the code it is: each carries a header of doc comments and
+    // `allow`s that no build writes, so both sides are reduced to their items
+    // before they are compared, exactly as `tests/unsyn_us.rs` does.
     let items = |code: &str| -> Vec<String> {
         let mut file = syn::parse_file(code).expect("the code should be Rust");
         file.attrs.clear();
@@ -198,31 +211,39 @@ fn main() {
         norm(file.to_token_stream())
     };
 
-    let same = items(KEPT) == items(&code.to_string());
+    // One pass per file, with the file named where they part: a difference in
+    // `lexer.rs` is not a difference in `syntax.rs`, and the first divergent
+    // token says little about which to open.
+    let mut differs: Option<(String, String, String)> = None;
 
-    if !same {
-        // Print the first divergence rather than only the verdict: "differs"
-        // without a location says nothing an edit can act on.
-        let a = items(KEPT);
-        let b = items(&code.to_string());
-        let at = a
+    for module in &modules {
+        let kept = KEPT
             .iter()
-            .zip(&b)
-            .position(|(x, y)| x != y)
-            .unwrap_or_else(|| a.len().min(b.len()));
-        println!(
-            "first difference at token {at} (kept has {}, built has {})",
-            a.len(),
-            b.len()
-        );
-        println!(
-            "kept : {:?}",
-            &a[at.saturating_sub(3)..(at + 6).min(a.len())]
-        );
-        println!(
-            "built: {:?}",
-            &b[at.saturating_sub(3)..(at + 6).min(b.len())]
-        );
+            .find(|(name, _)| *name == module.file)
+            .map(|(_, code)| *code)
+            .unwrap_or_else(|| panic!("no kept file named {}", module.file));
+
+        let a = items(kept);
+        let b = items(&module.code.to_string());
+
+        if a != b {
+            let at = a
+                .iter()
+                .zip(&b)
+                .position(|(x, y)| x != y)
+                .unwrap_or_else(|| a.len().min(b.len()));
+
+            differed(&mut differs, module.file, at, &a, &b);
+            break;
+        }
+    }
+
+    let same = differs.is_none();
+
+    if let Some((file, kept, built)) = &differs {
+        println!("{file} differs");
+        println!("kept : {kept}");
+        println!("built: {built}");
     }
 
     println!(
@@ -232,6 +253,25 @@ fn main() {
 
     assert!(
         same,
-        "the generator did not write back the file it was read from"
+        "the generator did not write back the files it was read from"
     );
+}
+
+/// The report of where two files part: the token they first disagree at, and a
+/// window of the text on each side of it. Nothing is said when they agree, which
+/// is what lets the caller stop at the first file that differs.
+fn differed(
+    slot: &mut Option<(String, String, String)>,
+    file: &str,
+    at: usize,
+    kept: &[String],
+    built: &[String],
+) {
+    let window = |side: &[String]| side[at.saturating_sub(3)..(at + 6).min(side.len())].join(" ");
+
+    *slot = Some((
+        file.to_owned(),
+        format!("…{}… ({} tokens)", window(kept), kept.len()),
+        format!("…{}… ({} tokens)", window(built), built.len()),
+    ));
 }

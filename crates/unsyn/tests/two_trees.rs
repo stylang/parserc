@@ -450,15 +450,17 @@ fn a_name_written_raw_is_two_parts_in_both_trees() {
 /// silently stopped covering.
 #[test]
 fn the_parity_reaches_every_rule_of_either_tree() {
+    // The visitor is a file of its own, since it descends through both kinds of
+    // rule.
     let kept = std::fs::read_to_string(concat!(
         env!("CARGO_MANIFEST_DIR"),
-        "/tests/generated/unsyn_us.rs"
+        "/tests/generated/unsyn_us/visit.rs"
     ))
     .expect("the kept file should be readable");
 
     let file = syn::parse_str::<syn::File>(&kept).expect("the kept file is Rust");
 
-    // Every hook the visitor the generated file ships declares.
+    // Every hook the visitor the generated file declares. declares.
     let trait_hooks = file
         .items
         .iter()

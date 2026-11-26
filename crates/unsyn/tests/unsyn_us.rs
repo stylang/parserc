@@ -1,34 +1,39 @@
-//! The code the generator writes for `unsyn.us`, kept in the crate as a file of
-//! its own so that it is compiled rather than only printed.
+//! The code the generator writes for `unsyn.us`, kept in the crate as files of
+//! their own so that it is compiled rather than only printed.
 //!
-//! [`generated/unsyn_us.rs`](generated) is the half of the spec a build writes
-//! today — the `whitespace` rule and the `lexer` rules, whose nodes are the text
-//! they read — and the test here rebuilds it and asks whether the two are the
-//! same code. It is the only place a generated file is checked to *mean* what the
-//! generator was asked for: a file that does not compile, or that reads a rule the
-//! spec did not write, is caught here and not in whoever comes to depend on it.
+//! [`generated/unsyn_us.rs`](generated) gathers the three files a build writes —
+//! `input.rs`, `lexer.rs` and `syntax.rs`, under `generated/unsyn_us/` — and the
+//! tests here rebuild them and ask whether the two are the same code, file for
+//! file. It is the only place generated code is checked to *mean* what the
+//! generator was asked for: a file that does not compile, or that reads a rule
+//! the spec did not write, is caught here and not in whoever comes to depend on
+//! it.
 //!
-//! Reading the file is one test; running the code it holds is another, and
+//! Reading the files is one test; running the code they hold is another, and
 //! [`and_it_reads`] does that.
 //!
-//! Only the terminals are in it. A `syntax` production makes a node of the tree
-//! rather than a run of the text, and no code is written for such a node yet, so a
-//! build of the whole spec is refused rather than half-written; see the
-//! [module documentation](unsyn::codegen) of the generator.
+//! No `error.rs` is among them. This crate's analysis reports what a well formed
+//! token still denotes wrongly and what no code answers, and those families are
+//! the DSL's own rather than anything the spec declares, so the build was told
+//! where the error stands instead of asked to write one.
 
 use std::path::Path;
 use std::str::FromStr;
 
 use parserc::ToSpan;
 use quote::ToTokens;
-use unsyn::{codegen::Builder, input::TokenStream, semantic, syntax};
+use unsyn::{
+    codegen::{Builder, Module},
+    input::TokenStream,
+    semantic, syntax,
+};
 
 /// The code of the spec, kept beside this test so that it is compiled with it.
 #[path = "generated/unsyn_us.rs"]
 mod generated;
 
-/// The path of the file the code of the spec is kept in.
-const GENERATED: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/tests/generated/unsyn_us.rs");
+/// The directory the files of the spec are kept in.
+const GENERATED: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/tests/generated/unsyn_us");
 
 /// The scan the generated file binds `<IdentOrKeyword>` to, re-exported at
 /// this crate's root, which is the path the binding reaches.
@@ -37,51 +42,13 @@ mod scan;
 
 pub use scan::scan_ident_or_keyword;
 
-/// The code of a grammar of another language, kept beside this test so that the
-/// half of a build a file of its own writes is compiled rather than only
-/// printed.
-///
-/// The spec above is told where its error stands, because it is kept inside the
-/// crate whose analysis goes with it. Nothing of a build is checked by that
-/// file: the error a build *writes*, the family of rules it names refusals
-/// after, and the bound that ties a stream to both are reached only here, where
-/// a build was given no path and so had to write them.
-#[path = "generated/tiny.rs"]
-mod tiny;
-
-/// The path of the file the code of that grammar is kept in.
-const TINY_GENERATED: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/tests/generated/tiny.rs");
-
-/// A grammar that names two rules in its refusals, and asks nothing of whoever
-/// builds it: no external, no error written elsewhere.
-///
-/// `Inner` is a node and not one run of characters, which is what leaves a
-/// bound on it to a function of its own rather than to a combinator that
-/// counts; `Word` removes one node over another, the other place a refusal is
-/// told after a rule. Both names are what `SyntaxKind` is asked to hold.
-const TINY: &str = "whitespace W -> [' '];
-lexer A -> 'a';
-lexer B -> 'b';
-lexer Inner -> A B;
-lexer Word -> Inner except A;
-lexer Run -> 'x' Inner{2};
-";
-
-/// The code of that grammar, as an unconfigured build writes it.
-fn code_of_tiny() -> String {
-    Builder::from_source(TINY)
-        .expect("the grammar should be a file of the language")
-        .build()
-        .expect("the grammar should be generated whole")
-        .to_string()
-}
-
-/// The code of the terminals `unsyn.us` declares.
+/// The code of the terminals and the nodes `unsyn.us` declares, as the files a
+/// build writes them into.
 ///
 /// The one external the spec calls is bound here rather than by anything the
 /// generator knows: `IdentOrKeyword` is the name a file of this language asks
 /// its caller for, and a build answers it with the scan above.
-fn code_of_the_spec() -> String {
+fn modules_of_the_spec() -> Vec<Module> {
     let source = include_str!("../unsyn.us");
 
     // Reading the spec is the builder's own work now: the stream, the tree and
@@ -94,7 +61,7 @@ fn code_of_the_spec() -> String {
             "IdentOrKeyword",
             proc_macro2::TokenStream::from_str("crate::scan_ident_or_keyword").unwrap(),
         )
-        // The kept file stands inside this crate, beside the analysis that
+        // The kept files stand inside this crate, beside the analysis that
         // reports what a token denotes wrongly and what no code answers. A
         // second error written here would be a different enum from the one the
         // stream of the crate reports, so the build reaches the crate's own.
@@ -102,9 +69,8 @@ fn code_of_the_spec() -> String {
             "UnsynError",
             proc_macro2::TokenStream::from_str("::unsyn::errors").unwrap(),
         )
-        .build()
+        .modules()
         .expect("unsyn.us should be generated whole")
-        .to_string()
 }
 
 /// The code as text, of a file laid out however `cargo fmt` likes it.
@@ -176,42 +142,32 @@ fn items_of(code: &str) -> proc_macro2::TokenStream {
     file.to_token_stream()
 }
 
-/// Whether the file the code of the spec is kept in is the code a build writes
-/// for the spec.
+/// Whether the files the code is kept in are the code the generator writes,
+/// each against its own.
 #[test]
 fn the_kept_file_is_the_code_of_the_spec() {
-    let kept = std::fs::read_to_string(GENERATED).expect("the generated file should be kept");
+    let modules = modules_of_the_spec();
+    let kept = ["input.rs", "lexer.rs", "syntax.rs", "visit.rs"];
 
     assert_eq!(
-        as_code(items_of(&kept)),
-        as_code(items_of(&code_of_the_spec())),
-        "the code kept in {} is not the code of the spec; \
-         run `cargo test -p unsyn --all-features --test unsyn_us the_generated_file_of_the_spec \
-         -- --ignored` and then `cargo fmt` to rewrite it",
-        GENERATED
+        modules.iter().map(|module| module.file).collect::<Vec<_>>(),
+        kept,
+        "which files a build of the spec writes is what the keeping is made of",
     );
-}
 
-/// Whether the file a grammar of its own is kept in is the code a build writes
-/// when it is told nothing.
-///
-/// The point of keeping a second file is the second clause of a build: the
-/// error, the family of rules a refusal is named after and the bound that ties
-/// a stream to both. The file of the spec reaches an error written elsewhere,
-/// so none of that is compiled there — and an error no stream reports is worth
-/// nothing.
-#[test]
-fn the_kept_file_is_the_code_of_a_grammar_of_its_own() {
-    let kept = std::fs::read_to_string(TINY_GENERATED).expect("the generated file should be kept");
+    for module in modules {
+        let path = Path::new(GENERATED).join(module.file);
+        let kept = std::fs::read_to_string(&path).expect("the generated file should be kept");
 
-    assert_eq!(
-        as_code(items_of(&kept)),
-        as_code(items_of(&code_of_tiny())),
-        "the code kept in {} is not the code of the grammar; \
-         run `cargo test -p unsyn --test unsyn_us the_generated_file_of_a_grammar_of_its_own \
-         -- --ignored` and then `cargo fmt` to rewrite it",
-        TINY_GENERATED
-    );
+        assert_eq!(
+            as_code(items_of(&kept)),
+            as_code(items_of(&module.code.to_string())),
+            "the code kept in {} is not the code of the spec; run \
+             `cargo test -p unsyn --test unsyn_us the_generated_files_of_the_spec -- --ignored` \
+             and then `cargo fmt` to rewrite it",
+            path.display(),
+        );
+    }
 }
 
 /// Reading with the code the generator wrote, rather than only writing it.
@@ -583,16 +539,125 @@ fn a_build_aimed_at_another_crate_names_that_crate() {
     assert!(!code.contains("unsyn"), "{code}");
 }
 
-/// Rewrites the file the code is kept in, for when the generator changed.
+/// Whether a build of the spec writes the four files, and each holds what its
+/// kind of code is.
 ///
-/// The file is written as the code comes out of the generator, in one line; run
-/// `cargo fmt` afterwards to lay it out.
-///
-/// The header the file is kept in belongs to the keeping and not to the code, so
-/// it says what the code will not: that a set the spec spells as a run of
-/// characters is written as that run, which is what the lint about ASCII ranges
-/// asks for instead, and that not every rule of the spec is read by anything here
-/// yet.
+/// The kept file is one module, which is what a build hands back when it was
+/// given no directory; the same code split into files has to say the same thing
+/// and reach its neighbours for it. Both are asked here of the spec itself, and
+/// not of a grammar of two rules, because the spec is the file whose parts a
+/// crate is made of: the separator, the externals, and the rules that nest.
+#[test]
+fn a_build_of_the_spec_writes_one_file_per_kind_of_code() {
+    let dir = std::path::Path::new(env!("CARGO_TARGET_TMPDIR")).join("spec-split");
+    let _ = std::fs::remove_dir_all(&dir);
+
+    let source = include_str!("../unsyn.us");
+    let flat = Builder::from_source(source)
+        .expect("unsyn.us should be a file of the language")
+        .project("unsyn")
+        .external(
+            "IdentOrKeyword",
+            proc_macro2::TokenStream::from_str("crate::scan_ident_or_keyword").unwrap(),
+        )
+        .to_dir(dir.clone())
+        .build()
+        .expect("unsyn.us should be generated whole")
+        .to_string();
+
+    let file = |name: &str| {
+        std::fs::read_to_string(dir.join(name)).unwrap_or_else(|_| panic!("{name} written"))
+    };
+
+    // Five files, in emit mode: no path was said for the stream or the error.
+    let mut names = std::fs::read_dir(&dir)
+        .expect("the directory should be readable")
+        .map(|entry| {
+            entry
+                .expect("an entry")
+                .file_name()
+                .to_string_lossy()
+                .into_owned()
+        })
+        .collect::<Vec<_>>();
+
+    names.sort();
+    assert_eq!(
+        names,
+        ["error.rs", "input.rs", "lexer.rs", "syntax.rs", "visit.rs"]
+    );
+
+    // The language names the two items that are no rule of it, and each file
+    // reaches the neighbour that defines them.
+    let input = file("input.rs");
+
+    assert!(input.contains("pub trait UnsynInput :"), "{input}");
+    assert!(
+        input.contains("use super :: error :: UnsynError ;"),
+        "{input}"
+    );
+    assert!(
+        file("error.rs").contains("pub enum UnsynError"),
+        "{}",
+        file("error.rs")
+    );
+
+    // The terminals are one file and the nodes another. A file of a build
+    // reaches nothing of the crate that ran it, since it is written to stand
+    // wherever its own language stands.
+    let lexer = file("lexer.rs");
+
+    assert!(
+        lexer.contains("use super :: input :: UnsynInput ;"),
+        "{lexer}"
+    );
+    assert!(lexer.contains("pub struct LitStr"), "{lexer}");
+    assert!(!lexer.contains("pub struct Stmt"), "{lexer}");
+
+    let syntax = file("syntax.rs");
+
+    assert!(syntax.contains("pub struct Stmt"), "{syntax}");
+    // Every terminal a node is read out of is imported by name, and no more than
+    // that: a name no node wears is no import of this file's.
+    assert!(syntax.contains("use super :: lexer ::"), "{syntax}");
+
+    // The visitor is a file of its own, since it descends through both kinds of
+    // rule and belongs to neither of the files that holds them.
+    let visit = file("visit.rs");
+
+    assert!(visit.contains("pub trait Visit"), "{visit}");
+    assert!(visit.contains("use super :: lexer ::"), "{visit}");
+    assert!(visit.contains("use super :: syntax ::"), "{visit}");
+    assert!(!syntax.contains("pub trait Visit"), "{syntax}");
+
+    // The whole of the code is the files without their imports: the split moves
+    // no item and writes no item twice. Compared as a set, because one stream
+    // keeps the order the file declared its rules in, across both kinds, where
+    // each file holds one kind in that order.
+    let without_imports = |code: &str| {
+        let mut items = syn::parse_file(code)
+            .expect("the file should be Rust")
+            .items
+            .into_iter()
+            .filter(|item| !matches!(item, syn::Item::Use(_)))
+            .map(|item| quote::quote! { #item }.to_string())
+            .collect::<Vec<_>>();
+
+        items.sort();
+        items
+    };
+
+    let mut split = Vec::new();
+
+    for code in [&input, &file("error.rs"), &lexer, &syntax, &visit] {
+        split.extend(without_imports(code));
+    }
+
+    split.sort();
+
+    assert_eq!(split, without_imports(&flat));
+}
+
 /// A kept file: the words that say what the keeping is, then the code as the
 /// generator wrote it, in one line.
 ///
@@ -602,54 +667,40 @@ fn kept_file(header: &str, code: &str) -> String {
     format!("{header}{code}\n")
 }
 
-/// Rewrites the file the code is kept in, for when the generator changed.
-///
-/// The header the file is kept in belongs to the keeping and not to the code, so
-/// it says what the code will not: that a set the spec spells as a run of
-/// characters is written as that run, which is what the lint about ASCII ranges
-/// asks for instead, and that not every rule of the spec is read by anything here
-/// yet.
-#[test]
-#[ignore = "rewrites a file the repository keeps; run with --ignored"]
-fn the_generated_file_of_the_spec() {
-    std::fs::write(
-        Path::new(GENERATED),
-        kept_file(
-            "//! The code of `unsyn.us`, as the generator writes it.\n\
-             //!\n\
-             //! This file is generated: see `tests/unsyn_us.rs`. Do not edit it.\n\
-             #![allow(\n    dead_code,\n    clippy::manual_is_ascii_check,\n    \
-             clippy::needless_borrow,\n    clippy::type_complexity,\n    \
-             clippy::enum_variant_names\n)]\n",
-            &code_of_the_spec(),
-        ),
-    )
-    .expect("the file should be written");
+/// The header of a kept file, read back so that the keeping says what it said
+/// rather than what this test remembers of it: the document lines and the
+/// `#![allow(..)]` list, up to and including the line that closes the list.
+fn header_of(kept: &str) -> String {
+    match kept.find("\n)]\n") {
+        Some(at) => kept[..at + 4].to_owned(),
+        None => {
+            kept.lines()
+                .take_while(|line| line.starts_with("//!"))
+                .collect::<Vec<_>>()
+                .join("\n")
+                + "\n"
+        }
+    }
 }
 
-/// Rewrites the file the code of a grammar of its own is kept in.
+/// Rewrites the files the code is kept in, for when the generator changed.
 ///
-/// The header says what the keeping is for: the file stands on its own, which
-/// is the one thing the file of the spec does not do.
+/// The file written for the first time gets no header, which is what the
+/// keeping — and not a build — is made of; run this twice, or write the header
+/// once by hand, to get one.
 #[test]
-#[ignore = "rewrites a file the repository keeps; run with --ignored"]
-fn the_generated_file_of_a_grammar_of_its_own() {
-    std::fs::write(
-        Path::new(TINY_GENERATED),
-        kept_file(
-            "//! The code of a grammar of another language, as a build writes it when\n\
-             //! it is told nothing.\n\
-             //!\n\
-             //! The stream trait, the error and the family of rules a refusal is\n\
-             //! named after are all written here, because no caller said where they\n\
-             //! stand — which is the half of a build that the file of `unsyn.us`\n\
-             //! leaves untested, that file being kept inside the crate whose error it\n\
-             //! reaches.\n\
-             //!\n\
-             //! This file is generated: see `tests/unsyn_us.rs`. Do not edit it.\n\
-             #![allow(dead_code, clippy::enum_variant_names)]\n",
-            &code_of_tiny(),
-        ),
-    )
-    .expect("the file should be written");
+#[ignore = "rewrites files the repository keeps; run with --ignored"]
+fn the_generated_files_of_the_spec() {
+    for module in modules_of_the_spec() {
+        let path = Path::new(GENERATED).join(module.file);
+        let kept = std::fs::read_to_string(&path).unwrap_or_default();
+        let header = if kept.is_empty() {
+            String::new()
+        } else {
+            header_of(&kept)
+        };
+
+        std::fs::write(&path, kept_file(&header, &module.code.to_string()))
+            .expect("the file should be written");
+    }
 }

@@ -459,6 +459,10 @@ pub enum BuildKind {
     /// the definition of the rule whose shape it is.
     #[error("the syntax rule defined at {0:?} holds a shape no code is written for")]
     Syntax(Span),
+    /// A directory a build was told could not be made, or a file in it could not
+    /// be written. The path is the caller's own, which is where it is read from.
+    #[error("a build could not write the directory it was given")]
+    Output,
 }
 
 /// Error information container for `unsyn` parsing.

@@ -11,7 +11,7 @@ what it is
 warned about. **[Part II](#part-ii--the-build) is the build**: how a production
 becomes a Rust type, how the results are named, what the generator refuses, and
 what the derive reads. Both are written from the code as it stands
-([`src/compiler/`](src/compiler/)) and from the file it writes for the spec
+([`src/`](src/)) and from the file it writes for the spec
 itself ([`tests/generated/unsyn_us.rs`](tests/generated/unsyn_us.rs)), not from
 intention. Where the two disagree the code is wrong, not this file.
 
@@ -316,22 +316,22 @@ the build never runs.
 
 | refused | when |
 |---|---|
-| [`Keyword`](src/compiler/errors.rs) | a keyword of the language is used to name a rule, plain or written raw ([§2](#2-names-words-and-literals)) |
-| [`NameCollision`](src/compiler/errors.rs) | a name is defined twice — raw and plain spellings are one name |
-| [`DuplicateWhitespace`](src/compiler/errors.rs) | more than one `whitespace` declaration |
-| [`MissingWhitespace`](src/compiler/errors.rs) | the file declares no `whitespace` rule, and so has no separator to end a token with ([§1](#1-files-items-and-declarations)) |
-| [`UndefinedSymbol`](src/compiler/errors.rs) | a pattern names a rule the file never defines (a reference, a set member, or the target of a refusal) |
-| [`UnexpectedSyntax`](src/compiler/errors.rs) | a `lexer` rule names a `syntax` rule |
-| [`EmptySet`](src/compiler/errors.rs) | `[]`, or `~[]`, stands in a pattern |
-| [`WideSetMember`](src/compiler/errors.rs) | a set member that spells a word, ranges over a word, or names a rule answering wider than a character ([§4](#4-patterns)) |
-| [`EmptySetMember`](src/compiler/errors.rs) | a set member naming a rule that can be matched by nothing, which answers the set with no character to test ([§4](#4-patterns)) |
-| [`UnsatisfiableRefusal`](src/compiler/errors.rs) | a `~` whose operand can be matched by nothing — a name reaching a definition that is optional, repeated `{0,}` or `{,n}` — which begins everywhere and so leaves the refusal no character to take ([§4](#4-patterns)) |
-| [`NotAChar`](src/compiler/errors.rs) | a literal asked to be one character is not — the ends of a range, or an empty literal anywhere a character is required |
-| [`InvalidRange`](src/compiler/errors.rs) | a range whose lower end is above its upper |
-| [`InvalidCodePoint`](src/compiler/errors.rs) | a `U+…` or `\u{…}` that is no Unicode code point — past `U+10FFFF`, or a surrogate |
-| [`InvalidRepeat`](src/compiler/errors.rs) | a bound whose lower number is above its upper |
-| [`LeftRecursion`](src/compiler/errors.rs) | a definition that can begin a match of itself, advancing nothing — a node whose first operand is (or reaches) its own name |
-| [`SameOffsetRecursion`](src/compiler/errors.rs) | a node whose match at a position can only be decided by deciding the same node at the same position — a cycle that neither advances nor terminates, through optionals and empties |
+| [`Keyword`](src/errors.rs) | a keyword of the language is used to name a rule, plain or written raw ([§2](#2-names-words-and-literals)) |
+| [`NameCollision`](src/errors.rs) | a name is defined twice — raw and plain spellings are one name |
+| [`DuplicateWhitespace`](src/errors.rs) | more than one `whitespace` declaration |
+| [`MissingWhitespace`](src/errors.rs) | the file declares no `whitespace` rule, and so has no separator to end a token with ([§1](#1-files-items-and-declarations)) |
+| [`UndefinedSymbol`](src/errors.rs) | a pattern names a rule the file never defines (a reference, a set member, or the target of a refusal) |
+| [`UnexpectedSyntax`](src/errors.rs) | a `lexer` rule names a `syntax` rule |
+| [`EmptySet`](src/errors.rs) | `[]`, or `~[]`, stands in a pattern |
+| [`WideSetMember`](src/errors.rs) | a set member that spells a word, ranges over a word, or names a rule answering wider than a character ([§4](#4-patterns)) |
+| [`EmptySetMember`](src/errors.rs) | a set member naming a rule that can be matched by nothing, which answers the set with no character to test ([§4](#4-patterns)) |
+| [`UnsatisfiableRefusal`](src/errors.rs) | a `~` whose operand can be matched by nothing — a name reaching a definition that is optional, repeated `{0,}` or `{,n}` — which begins everywhere and so leaves the refusal no character to take ([§4](#4-patterns)) |
+| [`NotAChar`](src/errors.rs) | a literal asked to be one character is not — the ends of a range, or an empty literal anywhere a character is required |
+| [`InvalidRange`](src/errors.rs) | a range whose lower end is above its upper |
+| [`InvalidCodePoint`](src/errors.rs) | a `U+…` or `\u{…}` that is no Unicode code point — past `U+10FFFF`, or a surrogate |
+| [`InvalidRepeat`](src/errors.rs) | a bound whose lower number is above its upper |
+| [`LeftRecursion`](src/errors.rs) | a definition that can begin a match of itself, advancing nothing — a node whose first operand is (or reaches) its own name |
+| [`SameOffsetRecursion`](src/errors.rs) | a node whose match at a position can only be decided by deciding the same node at the same position — a cycle that neither advances nor terminates, through optionals and empties |
 
 The two code-point spellings are refused where they are read: a `U+…` of other
 than four hex digits, and a `\u{…}` whose digits do not close the escape. What is
@@ -352,9 +352,9 @@ build refused over (`BuildKind::External`, `Whitespace`, `Syntax`).
 
 A lint is a note on a file that *does* denote a grammar and says something it
 need not have said, or said twice. The two channels of a report are kept apart
-by what they imply ([`Diagnostics`](src/compiler/errors.rs)): the refusals of
+by what they imply ([`Diagnostics`](src/errors.rs)): the refusals of
 [§6](#6-what-a-file-must-obey) reject a file; a lint
-travels with a build. Every lint is a [`LintKind`](src/compiler/errors.rs)
+travels with a build. Every lint is a [`LintKind`](src/errors.rs)
 and the span of the construct
 that earned it, and there are six kinds. A lint carries no text of the file,
 either ([§6](#6-what-a-file-must-obey)): it holds at most one more span, the
@@ -364,12 +364,12 @@ lint itself holds is the span of each.
 
 | `LintKind` | fires where |
 |---|---|
-| [`DuplicateMember`](src/compiler/errors.rs) | a set member `m` denotes exactly what an earlier member of the same set already denotes: `[ 'a', 'a' ]`, `[ 'a', U+0061 ]`, `[ LF, LF ]` |
-| [`CoveredMember(e)`](src/compiler/errors.rs) | `m` denotes nothing that the earlier `e` does not — `m` is the redundant write: `[ 'a'-'d', 'b' ]`. The lint stands on `m` and holds the span of `e` |
-| [`CoversMember(e)`](src/compiler/errors.rs) | `m` denotes everything `e` does and more — the *earlier* member is the redundant one: `[ 'b', 'a'-'d' ]` |
-| [`OverlappingMember(e)`](src/compiler/errors.rs) | `m` and `e` share some values and each keeps some of its own: `[ 'a'-'b', 'b'-'c' ]` |
-| [`RedundantSeparator(d)`](src/compiler/errors.rs) | a `syntax` rule mentions the file's `whitespace` rule anywhere short of the whole of an alternative, where its generated separator takes that trivia whether it is named or not: `syntax A -> S 'x';` over `whitespace S -> …` — and one report per mention. The lint stands on the mention and holds the span of the declaration `d` that named the trivia |
-| [`UnnamedAlternative`](src/compiler/errors.rs) | an alternative of a root choice names no rule and reads no word, or a choice stands inside a group of a `syntax` rule — the table and every exemption are below |
+| [`DuplicateMember`](src/errors.rs) | a set member `m` denotes exactly what an earlier member of the same set already denotes: `[ 'a', 'a' ]`, `[ 'a', U+0061 ]`, `[ LF, LF ]` |
+| [`CoveredMember(e)`](src/errors.rs) | `m` denotes nothing that the earlier `e` does not — `m` is the redundant write: `[ 'a'-'d', 'b' ]`. The lint stands on `m` and holds the span of `e` |
+| [`CoversMember(e)`](src/errors.rs) | `m` denotes everything `e` does and more — the *earlier* member is the redundant one: `[ 'b', 'a'-'d' ]` |
+| [`OverlappingMember(e)`](src/errors.rs) | `m` and `e` share some values and each keeps some of its own: `[ 'a'-'b', 'b'-'c' ]` |
+| [`RedundantSeparator(d)`](src/errors.rs) | a `syntax` rule mentions the file's `whitespace` rule anywhere short of the whole of an alternative, where its generated separator takes that trivia whether it is named or not: `syntax A -> S 'x';` over `whitespace S -> …` — and one report per mention. The lint stands on the mention and holds the span of the declaration `d` that named the trivia |
+| [`UnnamedAlternative`](src/errors.rs) | an alternative of a root choice names no rule and reads no word, or a choice stands inside a group of a `syntax` rule — the table and every exemption are below |
 
 ### Set members compared as values
 
@@ -404,7 +404,7 @@ names the trivia as the tree's own field, and no lint touches it — `syntax A -
 second ask. A suffix or a `concat` on the mention does not dissolve it: `S*`
 and `S concat 'x'` both ask for a run the separator takes anyway, and each
 mention in the rule is told once on its own. The name is
-matched through [`external_key`](src/compiler/codegen.rs), so a rule
+matched through [`external_key`](src/codegen.rs), so a rule
 written `r#S` is the separator the
 file names just as plainly as one written `S`.
 
@@ -645,7 +645,7 @@ Two consequences worth stating because they are load-bearing:
   node, which is the second position of
   [§8.2](#82-how-the-rest-of-the-file-can-overrule-a-lexer-rule). The table
   that says which
-  names settle to characters is [`denotations`](src/compiler/codegen.rs),
+  names settle to characters is [`denotations`](src/codegen.rs),
   and the analyzer reads it
   before the generator is ever asked for code.
 
@@ -709,7 +709,7 @@ Both halves are pinned by
 `r#gen` and `gen` are **one name**: every lookup inside the compiler — the
 collision check, the recursion check, the external table, the shape fixpoint —
 keys on the name stripped of its sigil
-([`external_key`](src/compiler/codegen.rs)). Only the spelling a
+([`external_key`](src/codegen.rs)). Only the spelling a
 node and a diagnostic wear keeps the sigil.
 
 The type parameter is always `I`, and every path is always rooted at
@@ -794,7 +794,7 @@ Then two things can still leave a variant unnamed, and both are decided over the
 **whole** choice, not per alternative:
 
 - the word is not one an item can wear
-  ([`is_item_name`](src/compiler/codegen.rs)), or
+  ([`is_item_name`](src/codegen.rs)), or
 - an earlier alternative already wore it.
 
 An unnamed variant is called by its place: **`F1`, `F2`, …** — one-based, and by
@@ -802,7 +802,7 @@ the alternative's position in the choice, independent of any field numbering.
 `Suffix -> '*' | '?' | '+' | Repeat` gives `F1`, `F2`, `F3`, `Repeat`.
 
 Naming is computed **once for the whole choice** by
-[`variant_names`](src/compiler/codegen.rs), and both
+[`variant_names`](src/codegen.rs), and both
 the generator and the lint read that one answer, so a warning can neither
 promise a name the code declines to write nor stay silent about one it does.
 `variant_offers` is the same pass with the settling removed — what the author
@@ -822,7 +822,10 @@ The build emits a `Visit` trait and a `walk` module in the shape of
 per rule that became a [**node**](#1-files-items-and-declarations), each
 descending through a default `walk_*`
 unless a visitor overrides it, plus one `visit_text` for the leaf every descent
-ends at.
+ends at. Written to a directory, this is `visit.rs`: a file apart from the two
+that hold the rules, because it descends through both kinds — and the analysis
+of a tree is written against this interface, which is what a build owes whoever
+runs it rather than a thing the hand tree keeps to itself.
 
 The hooks are derived from the shapes the generator already committed to, not
 from the source text again, so the visitor is a second view of the same decision
@@ -843,16 +846,16 @@ findable by its place.
 
 ### Where the hand-written tree differs
 
-[`src/compiler/lexer.rs`](src/compiler/lexer.rs) and
-[`src/compiler/syntax.rs`](src/compiler/syntax.rs) are written by hand and tuned
+[`src/lexer.rs`](src/lexer.rs) and
+[`src/syntax.rs`](src/syntax.rs) are written by hand and tuned
 where a generated file is merely correct. Both hold **types and parsers and no
 `impl` block**: every reading of the tree —
-[`elements`](src/compiler/read.rs), [`branches`](src/compiler/read.rs),
-[`is_single`](src/compiler/read.rs), [`members`](src/compiler/read.rs),
-[`decl`](src/compiler/read.rs), and with it the
-[`Decl`](src/compiler/read.rs) that says which of the three words declares what
+[`elements`](src/read.rs), [`branches`](src/read.rs),
+[`is_single`](src/read.rs), [`members`](src/read.rs),
+[`decl`](src/read.rs), and with it the
+[`Decl`](src/read.rs) that says which of the three words declares what
 —
-is a free function in [`src/compiler/read.rs`](src/compiler/read.rs). A build of
+is a free function in [`src/read.rs`](src/read.rs). A build of
 some *other* language cannot know what its nodes will be asked, so it says
 nothing; the analysis above it reads them instead. Three differences bear on
 this
@@ -880,14 +883,37 @@ A file of the DSL is compiled into a front end that stands on its own, so a
 build writes what that front end is read with rather than reaching for anything
 of the crate that ran it:
 
-| written | holds |
-|---------|-------|
-| the stream trait, its alias, and the `impl` tying the two together | the bound every type carries, and the one run of characters a token is read out of ([§9](#9-right-side--shape)) |
-| the **error** | one arm carrying a `Kind` of the framework, and one naming a refusal after a rule |
-| the **family of rules** | the rules whose own code points at itself, and nothing else |
+| file | holds |
+|------|-------|
+| `input.rs` | the stream trait, the alias of a stream read through it, and the `impl` that ties the two |
+| `error.rs` | the error (one arm carrying a `Kind` of the framework, one naming a refusal after a rule) and the family of rules beside it |
+| `lexer.rs` | the terminals, the separator with them, and the `read_` functions they asked for |
+| `syntax.rs` | the nodes of the tree |
+| `visit.rs` | the visitor that walks them both |
 
-The last two rows are the whole of what a build can say about errors, and they
-are both said from the file:
+`Builder::to_dir` is what turns a build into those files: with no directory
+said, `build` hands back one stream and the code references its own items by
+name; with one said, each file imports what it reads of its neighbours
+(`use super::input::…`, `use super::error::{…}`, `use super::lexer::{…}`) and a
+file is left out where the caller said the thing it would hold stands elsewhere —
+no `input.rs` for a stream trait given a path to, no `error.rs` for an error
+given one. [`modules`](src/codegen.rs) is the same act without the filesystem:
+the parts, named, for a caller that keeps them in a repository or compares them
+with what it kept last.
+
+An import holds no name the file does not wear: the nodes import the terminals
+their fields are read out of, and no others, since a build is compiled by
+whoever consumes it and an unused import is a warning there.
+
+`Builder::project` names the language, and the two items that are no rule of it
+are named for it: `calc_lang` is compiled against `CalcLangInput` and reports
+`CalcLangError`. A grammar of its own says so; an unconfigured build writes what
+this crate ships, which is what lets the file of `unsyn.us` stand in for the
+hand front end.
+
+What the code is written from is the file and nothing else. The last two rows of
+the table above are the whole of what a build can say about errors, and both are
+said from the productions:
 
 - a **refusal of a rule** is told after the rule the production stood in. There
   are exactly two places a rule knows that: an `except` whose target took the
@@ -915,17 +941,18 @@ must agree with.
 ## 15. What the generator refuses
 
 The generator declines instead of approximating. Each refusal is an
-[`UnsynError::Build`](src/compiler/errors.rs) carrying one of five
-[`BuildKind`](src/compiler/errors.rs)s, and names the rule that
+[`UnsynError::Build`](src/errors.rs) carrying one of six
+[`BuildKind`](src/errors.rs)s, and names the rule that
 asked for it:
 
 | `BuildKind`            | refused when |
 |------------------------|-----------|
-| [`Name`](src/compiler/errors.rs) | a name the file wrote is one no Rust item can wear ([`is_item_name`](src/compiler/codegen.rs) fails) |
-| [`External`](src/compiler/errors.rs) | the pattern calls `<Ext>` and the build was never given a binding for `Ext` |
-| [`Whitespace`](src/compiler/errors.rs) | the `whitespace` rule's right side cannot be reduced to a test of one character |
-| [`Literal`](src/compiler/errors.rs) | a literal that spells no character where the code asked one |
-| [`Syntax`](src/compiler/errors.rs) | a right side no field can hold: a counted repetition of anything wider than a character, an operator inside a group, a name asked for its text where a tuple answers with types |
+| [`Name`](src/errors.rs) | a name the file wrote is one no Rust item can wear ([`is_item_name`](src/codegen.rs) fails) |
+| [`External`](src/errors.rs) | the pattern calls `<Ext>` and the build was never given a binding for `Ext` |
+| [`Whitespace`](src/errors.rs) | the `whitespace` rule's right side cannot be reduced to a test of one character |
+| [`Literal`](src/errors.rs) | a literal that spells no character where the code asked one |
+| [`Syntax`](src/errors.rs) | a right side no field can hold: a counted repetition of anything wider than a character, an operator inside a group, a name asked for its text where a tuple answers with types |
+| [`Output`](src/errors.rs) | a directory `to_dir` was given could not be made, or a file in it could not be written |
 
 The language-level refusals — the file denoting no grammar — are
 [§6](#6-what-a-file-must-obey), and they
@@ -933,7 +960,7 @@ run first: a build is only ever asked of an analyzed file, and a precondition
 this module states rather than re-checks is that a rule reaching a name the
 file never declares was refused there, not here.
 
-[`Builder::external`](src/compiler/codegen.rs) is the **only** way anything
+[`Builder::external`](src/codegen.rs) is the **only** way anything
 outside the file enters a
 build. The generator holds no table of what `<XID_Start>` means and never will:
 `<…>` is an external link, resolved by whoever runs the build, and it is
@@ -1048,19 +1075,19 @@ therefore restricted: `input = Type` on an item only, `crucial` and
 The fastest check of any claim above is to regenerate and diff:
 
 ```sh
-cargo run -p unsyn --features compiler --example regen_unsyn_us
+cargo run -p unsyn --example regen_unsyn_us
 cargo fmt --all
-git --no-pager diff crates/unsyn/tests/generated/unsyn_us.rs
+git --no-pager diff crates/unsyn/tests/generated/unsyn_us/
 ```
 
-[`tests/unsyn_us.rs`](tests/unsyn_us.rs) pins that the kept file *is* the code
+[`tests/unsyn_us.rs`](tests/unsyn_us.rs) pins that the kept files *are* the code
 of
-the spec and then reads the spec with it;
+the spec, each against its own, and then reads the spec with them;
 [`tests/two_trees.rs`](tests/two_trees.rs) compares the generated tree against
 the
-hand-written one in [`src/compiler/lexer.rs`](src/compiler/lexer.rs) and
-[`src/compiler/syntax.rs`](src/compiler/syntax.rs), which both ship without a
-single `impl` block because [`src/compiler/read.rs`](src/compiler/read.rs) is
+hand-written one in [`src/lexer.rs`](src/lexer.rs) and
+[`src/syntax.rs`](src/syntax.rs), which both ship without a
+single `impl` block because [`src/read.rs`](src/read.rs) is
 what
 reads a tree.
 

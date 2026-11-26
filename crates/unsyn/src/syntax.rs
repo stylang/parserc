@@ -641,7 +641,11 @@ where
     /// The run between the `->` and the pattern.
     pub f4: Option<S<I>>,
     /// The pattern the definition gives its node.
-    pub expr: Box<Expr<I>>,
+    ///
+    /// Bare rather than boxed: nothing an `Expr` reaches ever reaches back to a
+    /// `Stmt`, so the pair of rules stands on no cycle of containment, which is
+    /// the only cause a box of this tree has.
+    pub expr: Expr<I>,
     /// The run before the `;`.
     pub f5: Option<S<I>>,
     /// The `;` that ends the definition.

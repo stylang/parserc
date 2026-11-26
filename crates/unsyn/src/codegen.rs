@@ -169,6 +169,16 @@
 //! states them: a caller whose analysis has them says where they stand, and
 //! the file reaches that error instead of writing one.
 //!
+//! Two items of that code name the language rather than a rule of it, and
+//! [`project`](Builder::project) is what names them: a build of `calc_lang`
+//! writes `CalcLangInput` and `CalcLangError` where an unconfigured one writes
+//! what this crate ships. [`to_dir`](Builder::to_dir) says which directory the
+//! code is written into, and [`build`](Builder::build) then writes one file per
+//! kind of code — `input.rs`, `error.rs`, `lexer.rs`, `syntax.rs`, and
+//! `visit.rs`, the visitor standing apart because it descends through both kinds
+//! of rule — each importing what it reads of its neighbours. A file is left out
+//! where the caller said the thing it holds stands elsewhere.
+//!
 //! # What the generated code asks of its crate
 //!
 //! Every reference it writes is rooted at `::parserc`, so the crate that holds a
@@ -199,6 +209,7 @@
 //! answers, and they are the last line rather than the first.
 
 use std::collections::{HashMap, HashSet, VecDeque};
+use std::path::{Path, PathBuf};
 
 use parserc::{Span, ToSpan, as_str};
 use proc_macro2::{Ident, Literal, TokenStream, TokenTree};
@@ -249,6 +260,13 @@ where
     /// Where the stream trait is found, when the file is to import it rather
     /// than write it. `None` — the default — means the build emits the trait.
     input_path: Option<TokenStream>,
+    /// The name of the language being compiled, which names what a build writes
+    /// beside the rules: its stream is `<Name>Input` and its error is
+    /// `<Name>Error`. `None` leaves the two named as this crate names them,
+    /// which is what the file of `unsyn.us` is kept as.
+    /// The directory [`build`](Self::build) writes its files into. `None` — the
+    /// default — means it writes none, and hands back the whole stream.
+    dir: Option<PathBuf>,
 }
 
 impl<I> Builder<I>
@@ -279,7 +297,34 @@ where
             error_name: String::from("UnsynError"),
             error_path: None,
             input_path: None,
+            dir: None,
         }
+    }
+
+    /// Names the language being compiled, and so the two items a build writes
+    /// that are no rule of it: the trait every written type is bounded by,
+    /// `<Name>Input`, and the error its refusals report, `<Name>Error`.
+    ///
+    /// The name is worn the way a rule's is: sigil and all, and a name no item
+    /// can wear is refused where it is written rather than mended. Saying this
+    /// is the same as saying [`input_name`](Self::input_name) and
+    /// [`error_name`](Self::error_name) at once, and a name said after this one
+    /// stands: a language whose stream or error is called otherwise says so.
+    #[inline]
+    pub fn project(mut self, name: &str) -> Self {
+        let pascal = pascal_case(name);
+
+        self.input_name = format!("{pascal}Input");
+        self.error_name = format!("{pascal}Error");
+        self
+    }
+
+    /// Names the error the generated code reports, as [`project`](Self::project)
+    /// would have, but without saying where it is found.
+    #[inline]
+    pub fn error_name(mut self, name: &str) -> Self {
+        self.error_name = name.to_owned();
+        self
     }
 
     /// Names the trait the generated rules are written against.
@@ -361,15 +406,67 @@ where
     /// The tokens are the items of a module in the order the file declares them,
     /// with the function a rule needed beside the rule that needed it; they say
     /// nothing about which file they came from, so a caller may write them into a
-    /// file of its own choosing.
+    /// file of its own choosing. A caller that wants the parts rather than the
+    /// whole says a directory with [`to_dir`](Self::to_dir), and this writes them.
     ///
     /// # Errors
     ///
     /// An [`UnsynError::Build`] says which rule asked for code there is none of. The
     /// precondition is a file the analyzer found nothing in; a rule that reaches a
     /// name the file never declares, for instance, is refused there and not here,
-    /// and the code written for it then names a type that is not.
+    /// and the code written for it then names a type that is not. A directory
+    /// nothing could be written into is [`BuildKind::Output`].
     pub fn build(self) -> Result<TokenStream, UnsynError> {
+        let dir = self.dir.clone();
+        let pieces = self.pieces()?;
+        let flat = pieces
+            .items
+            .iter()
+            .flat_map(|(_, items)| items.clone())
+            .collect::<Vec<_>>();
+        let input_defs = &pieces.input_defs;
+        let error_defs = &pieces.error_defs;
+        let visit = &pieces.visit;
+
+        if let Some(dir) = dir {
+            pieces.write_to(&dir)?;
+        }
+
+        Ok(quote! {
+            #(#input_defs)* #(#error_defs)* #(#flat)* #visit
+        })
+    }
+
+    /// Says which directory a build writes its files into, which is what a build
+    /// script of a crate wants: `OUT_DIR`, and a `mod` declaration of the crate
+    /// for each file.
+    ///
+    /// [`build`](Self::build) then writes `input.rs`, `error.rs`, `lexer.rs` and
+    /// `syntax.rs` there, each importing what it reads of its neighbours, and a
+    /// file is left out where the caller said the thing it would hold stands
+    /// elsewhere. The text is the code as the generator wrote it, in one line:
+    /// laying it out is the job of `cargo fmt`, and nothing of `cargo:` is
+    /// printed, since that belongs to whoever knows the build being told about.
+    #[inline]
+    pub fn to_dir<P: Into<PathBuf>>(mut self, dir: P) -> Self {
+        self.dir = Some(dir.into());
+        self
+    }
+
+    /// The files a build writes, and the code of each: `input.rs`, `error.rs`,
+    /// `lexer.rs`, `syntax.rs`, in that order, with a file left out where the
+    /// caller said the thing it holds stands elsewhere.
+    ///
+    /// This is what [`to_dir`](Self::to_dir) and [`build`](Self::build) write;
+    /// held apart from the filesystem because a caller that keeps the code in a
+    /// repository, or compares it with what it kept last, wants the parts.
+    pub fn modules(self) -> Result<Vec<Module>, UnsynError> {
+        Ok(self.pieces()?.modules())
+    }
+
+    /// The parts a build is made of, which both one stream and a directory of
+    /// files are assembled from.
+    fn pieces(self) -> Result<Pieces, UnsynError> {
         let denotations = denotations(&self.source, &self.file);
         let nodes = node_rules(&self.source, &self.file);
         let trivia = trivia_rule(&self.source, &self.file);
@@ -405,25 +502,39 @@ where
         };
 
         // The stream trait, the alias of the file's own name for a stream, and
-        // the error the rules are written against all go before them: every
-        // type a build writes is generic over a name those definitions give,
-        // and a name a file neither defines nor imports is no name at all.
+        // the error the rules are written against all go before the rules:
+        // every type a build writes is generic over a name those definitions
+        // give, and a name a file neither defines nor imports is no name at all.
         //
         // The error comes after the rules have been written, because which
         // rules it is able to name is what their code asked of it — and an item
         // of Rust may stand below the items that use it.
         let input_path = self.input_path.clone();
+        let error_path = self.error_path.clone();
         let input = generator.input.clone();
         let error = generator.error.clone();
-        let error_path = self.error_path.clone();
         let bounds = self.input_bounds.clone();
         let defs = input_defs(&input, &input_path, &error, &bounds)?;
         let items = generator.crate_of()?;
         let visit = generator.visit_items();
+        let lexers = generator.rule_names(Part::Lexer);
+        let syntaxes = generator.rule_names(Part::Syntax);
         let named = std::mem::take(&mut generator.named);
         let errors = error_defs(&named, &error, &error_path)?;
 
-        Ok(quote! { #(#defs)* #(#errors)* #items #visit })
+        Ok(Pieces {
+            input_defs: defs,
+            error_defs: errors,
+            named: !named.is_empty(),
+            input,
+            error,
+            input_path,
+            error_path,
+            items,
+            visit,
+            lexers,
+            syntaxes,
+        })
     }
 }
 
@@ -474,6 +585,300 @@ const INPUT_BOUNDS: [&str; 9] = [
     "::core::fmt::Debug",
     "::core::cmp::PartialEq",
 ];
+
+/// One file a build writes.
+///
+/// Held apart from the directory it may be written into because a caller that
+/// keeps the code in its own repository, or compares it with what it kept last,
+/// wants the parts without the filesystem.
+#[derive(Debug, Clone)]
+pub struct Module {
+    /// The name of the file, with its suffix: `lexer.rs`, `syntax.rs`,
+    /// `input.rs`, `error.rs`.
+    pub file: &'static str,
+    /// The code of it, the imports of its neighbours included.
+    pub code: TokenStream,
+}
+
+/// Which of the files a build writes one part of the code belongs to.
+///
+/// For a rule the word the definition opens with says so and nothing else does:
+/// a terminal is `lexer.rs`, with the separator among them because it is read
+/// the same way, and a node of the tree is `syntax.rs`. The visitor is no rule,
+/// and stands apart because it walks both kinds.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Part {
+    Lexer,
+    Syntax,
+    Visit,
+}
+
+impl Part {
+    /// The file the code of one definition belongs to.
+    fn of<I: UnsynInput>(stmt: &syntax::Stmt<I>) -> Self {
+        match read::decl(stmt) {
+            Decl::Syntax => Part::Syntax,
+            Decl::Lexer | Decl::Whitespace => Part::Lexer,
+        }
+    }
+
+    /// The name of the file a build writes this part into.
+    fn file(self) -> &'static str {
+        match self {
+            Part::Lexer => "lexer.rs",
+            Part::Syntax => "syntax.rs",
+            Part::Visit => "visit.rs",
+        }
+    }
+
+    /// Whether the code of this part reports a refusal, which is whether it has
+    /// cause to reach the error and the family of rules beside it.
+    fn reports(self) -> bool {
+        !matches!(self, Part::Visit)
+    }
+}
+
+/// The parts a build is made of, which is one stream or a directory of files
+/// with the same code in them.
+struct Pieces {
+    /// The trait of a stream, its alias and the impl that ties them — or, where
+    /// the caller said the trait stands elsewhere, the one import of it.
+    input_defs: Vec<TokenStream>,
+    /// The family of rules, the error, and what the framework asks of it.
+    error_defs: Vec<TokenStream>,
+    /// Whether the code named any rule at all, which is whether the family of
+    /// rules is reached, and so whether a file has cause to import it.
+    named: bool,
+    /// The bound every written type carries.
+    input: TokenStream,
+    /// The error a refusal reports, as a path.
+    error: TokenStream,
+    /// Where the caller said the stream trait stands, when it said at all.
+    input_path: Option<TokenStream>,
+    /// Where the caller said the error stands, when it said at all.
+    error_path: Option<TokenStream>,
+    /// The items of each rule, in the order the file declares them, with the
+    /// file each belongs to.
+    items: Vec<(Part, Vec<TokenStream>)>,
+    /// The visitor of the tree, which is a file of its own: it walks both kinds
+    /// of rule, so it belongs to neither of the two that hold them.
+    visit: TokenStream,
+    /// The names of the terminals, which the file of nodes and the visitor both
+    /// reach across to.
+    lexers: Vec<Ident>,
+    /// The names of the nodes, which only the visitor reaches across to: a node
+    /// is read by the file that holds it and by nothing beside.
+    syntaxes: Vec<Ident>,
+}
+
+impl Pieces {
+    /// Writes each file there is of, into a directory made if it is not there.
+    fn write_to(&self, dir: &Path) -> Result<(), UnsynError> {
+        let refused = |_: std::io::Error| UnsynError::Build(BuildKind::Output, Span::None);
+
+        std::fs::create_dir_all(dir).map_err(refused)?;
+
+        for module in self.modules() {
+            let code = format!("{}\n", module.code);
+
+            std::fs::write(dir.join(module.file), code).map_err(refused)?;
+        }
+
+        Ok(())
+    }
+
+    /// The files a build writes, each with what it needs to import of its
+    /// neighbours before it.
+    ///
+    /// A file is left out where there is nothing to write: no `input.rs` and no
+    /// `error.rs` when the caller said either of the two stands elsewhere, since
+    /// then the code only reaches a path and defines nothing.
+    fn modules(&self) -> Vec<Module> {
+        let mut files = Vec::new();
+
+        if self.input_path.is_none() {
+            let input_defs = &self.input_defs;
+            let uses = self.reaches_input();
+
+            files.push(Module {
+                file: "input.rs",
+                code: quote! { #(#uses)* #(#input_defs)* },
+            });
+        }
+
+        if self.error_path.is_none() {
+            let error_defs = &self.error_defs;
+
+            files.push(Module {
+                file: "error.rs",
+                code: quote! { #(#error_defs)* },
+            });
+        }
+
+        for part in [Part::Lexer, Part::Syntax] {
+            let uses = self.reaches(part);
+            let items = self
+                .items
+                .iter()
+                .filter(|(where_, _)| *where_ == part)
+                .flat_map(|(_, items)| items.clone())
+                .collect::<Vec<_>>();
+
+            files.push(Module {
+                file: part.file(),
+                code: quote! { #(#uses)* #(#items)* },
+            });
+        }
+
+        // The visitor is a file of its own because it is neither kind: it walks
+        // the terminals and the nodes alike, and a build writes it last because
+        // it descends through what the two of them define.
+        let uses = self.reaches(Part::Visit);
+        let visit = &self.visit;
+
+        files.push(Module {
+            file: Part::Visit.file(),
+            code: quote! { #(#uses)* #visit },
+        });
+
+        files
+    }
+
+    /// What `input.rs` reaches: the error a stream reports, which the trait
+    /// names in its own clause and its alias binds.
+    fn reaches_input(&self) -> Vec<TokenStream> {
+        match &self.error_path {
+            // Named by an absolute path already, which is what a file that
+            // writes no error has to reach it by.
+            Some(_) => Vec::new(),
+            None => {
+                let error = &self.error;
+
+                vec![quote! { use super::error::#error; }]
+            }
+        }
+    }
+
+    /// What one file of the written code reaches: the bound of every type it
+    /// writes, the error a refusal reports where the code names one, and the
+    /// rules of the other files it reads — the nodes those of the terminals, and
+    /// the visitor both kinds.
+    fn reaches(&self, part: Part) -> Vec<TokenStream> {
+        let mut uses = Vec::new();
+
+        match &self.input_path {
+            Some(path) => uses.push(input_import(path, &self.input)),
+            None => {
+                let input = &self.input;
+
+                uses.push(quote! { use super::input::#input; });
+            }
+        }
+
+        if self.error_path.is_none() && self.named && part.reports() {
+            let error = &self.error;
+
+            uses.push(quote! {
+                #[rustfmt::skip]
+                use super::error::{#error, SyntaxKind};
+            });
+        }
+
+        if part == Part::Syntax {
+            let mentioned = mentioned(&self.lexers, &self.items, Part::Syntax);
+
+            if !mentioned.is_empty() {
+                uses.push(quote! {
+                    #[rustfmt::skip]
+                    use super::lexer::{#(#mentioned),*};
+                });
+            }
+        }
+
+        if part == Part::Visit {
+            let lexers = &self.lexers;
+            let syntaxes = &self.syntaxes;
+
+            // A list of names broken over lines is what a formatter adds a final
+            // comma to, and the formatter sorts one it leaves alone — so the line
+            // stands as written, as the walk of the visitor's own import does.
+            if !lexers.is_empty() {
+                uses.push(quote! {
+                    #[rustfmt::skip]
+                    use super::lexer::{#(#lexers),*};
+                });
+            }
+
+            if !syntaxes.is_empty() {
+                uses.push(quote! {
+                    #[rustfmt::skip]
+                    use super::syntax::{#(#syntaxes),*};
+                });
+            }
+        }
+
+        uses
+    }
+}
+
+/// The names of one part that the code of another is written with, which is
+/// what an import of a neighbour has to hold: no name more, since a file of a
+/// build is compiled by whoever consumes it and an unused import is a warning
+/// there; and no name less, since the code says it and nothing else defines it.
+///
+/// The order is the order the names were declared in, which is the order the
+/// list of them is written in everywhere else.
+fn mentioned(names: &[Ident], items: &[(Part, Vec<TokenStream>)], part: Part) -> Vec<Ident> {
+    let mut words = HashSet::new();
+
+    for (where_, code) in items {
+        if *where_ != part {
+            continue;
+        }
+
+        for tokens in code {
+            collect_idents(&mut words, tokens.clone());
+        }
+    }
+
+    names
+        .iter()
+        .filter(|name| words.contains(&name.to_string()))
+        .cloned()
+        .collect()
+}
+
+/// Every identifier a token stream is written with, groups included, since a
+/// field type hides inside the attribute that reads it.
+fn collect_idents(words: &mut HashSet<String>, tokens: TokenStream) {
+    for tree in tokens {
+        match tree {
+            TokenTree::Ident(name) => {
+                words.insert(name.to_string());
+            }
+            TokenTree::Group(group) => collect_idents(words, group.stream()),
+            _ => {}
+        }
+    }
+}
+
+/// The name of a language, worn by an item of Rust: the words it is written
+/// with, each begun as a name is, run together. A name of one word is touched
+/// at its first letter alone, which is what leaves `unsyn` and `Unsyn` one
+/// answer.
+fn pascal_case(name: &str) -> String {
+    name.split(['_', '-', ' '])
+        .filter(|word| !word.is_empty())
+        .map(|word| {
+            let mut letters = word.chars();
+
+            match letters.next() {
+                Some(first) => first.to_uppercase().collect::<String>() + letters.as_str(),
+                None => String::new(),
+            }
+        })
+        .collect()
+}
 
 /// The items that put the stream in the file: the trait and the alias it is
 /// read through, or — where the caller said the trait is written elsewhere —
@@ -1679,19 +2084,40 @@ where
     I: UnsynInput,
 {
     /// The items of a whole file.
-    fn crate_of(&mut self) -> Result<TokenStream, UnsynError> {
+    /// The code of the whole file: the items of each rule, filed by which of
+    /// the two files of nodes a build writes them into.
+    fn crate_of(&mut self) -> Result<Vec<(Part, Vec<TokenStream>)>, UnsynError> {
         let file = self.file;
-        let mut items = Vec::new();
+        let mut parts = Vec::new();
 
         for item in &file.item {
             let syntax::Item::Stmt(stmt) = item else {
                 continue;
             };
 
-            items.extend(self.stmt(stmt)?);
+            parts.push((Part::of(stmt), self.stmt(stmt)?));
         }
 
-        Ok(quote! { #(#items)* })
+        Ok(parts)
+    }
+
+    /// The names of the rules of one file, in the order the file declares them,
+    /// which is what the neighbour's list of imports is made of.
+    fn rule_names(&self, part: Part) -> Vec<Ident> {
+        self.file
+            .item
+            .iter()
+            .filter_map(|item| {
+                let syntax::Item::Stmt(stmt) = item else {
+                    return None;
+                };
+
+                Part::of(stmt)
+                    .eq(&part)
+                    .then(|| as_str(self.source, &stmt.ident).to_owned())
+            })
+            .filter_map(|text| item_name(&text, Span::None).ok())
+            .collect()
     }
 
     /// The code of one definition: the functions its pattern asked for, and the
@@ -4951,6 +5377,173 @@ mod tests {
             &soup,
             quote! { pub enum UnsynError { Kind (:: parserc :: Kind) , Syntax (SyntaxKind , :: parserc :: ControlFlow , :: parserc :: Span) , } }
         ));
+    }
+
+    /// A directory a build is told to write into, made fresh for the test that
+    /// asks for it.
+    fn out_dir(name: &str) -> PathBuf {
+        let dir = std::env::temp_dir().join("unsyn-codegen").join(name);
+
+        std::fs::create_dir_all(&dir).expect("a temporary directory should be made");
+
+        dir
+    }
+
+    /// The names of the files written under `dir`.
+    fn written(dir: &Path) -> Vec<String> {
+        let mut names = std::fs::read_dir(dir)
+            .expect("the directory should be readable")
+            .map(|entry| {
+                entry
+                    .expect("an entry of a directory")
+                    .file_name()
+                    .to_string_lossy()
+                    .into_owned()
+            })
+            .collect::<Vec<_>>();
+
+        names.sort();
+        names
+    }
+
+    /// The code of one file a build wrote.
+    fn written_as(dir: &Path, file: &str) -> String {
+        std::fs::read_to_string(dir.join(file)).expect("the file should be written")
+    }
+
+    #[test]
+    fn a_directory_a_build_is_given_holds_one_file_per_kind_of_code() {
+        let dir = out_dir("four-files");
+        let source = whole("lexer A -> 'a'; lexer B -> 'b'; lexer C -> A except B; syntax D -> C;");
+        let file = parse(source);
+        let whole = Spec::from(source);
+
+        builder(&whole, &file)
+            .to_dir(dir.clone())
+            .build()
+            .expect("the file should be generated");
+
+        assert_eq!(
+            written(&dir),
+            ["error.rs", "input.rs", "lexer.rs", "syntax.rs", "visit.rs"]
+        );
+
+        // A file of nodes reaches its neighbours by name, since what it is
+        // bounded by and what it reports are written beside it and not in it.
+        let lexer = written_as(&dir, "lexer.rs");
+
+        assert!(
+            lexer.contains("use super :: input :: UnsynInput ;"),
+            "{lexer}"
+        );
+        // Both names the code of a terminal reaches for: the enum a refusal
+        // reports, and the family of rules it is named after.
+        assert!(
+            lexer.contains("use super :: error :: { UnsynError , SyntaxKind } ;"),
+            "{lexer}"
+        );
+        assert!(lexer.contains("pub struct A < I >"), "{lexer}");
+        assert!(!lexer.contains("pub struct D < I >"), "{lexer}");
+
+        // The nodes reach the terminals they are read out of, and only those:
+        // `A` and `B` are named by no node, so they are in no import of theirs.
+        let syntax = written_as(&dir, "syntax.rs");
+
+        assert!(syntax.contains("use super :: lexer :: { C } ;"), "{syntax}");
+        assert!(syntax.contains("pub struct D < I >"), "{syntax}");
+        assert!(!syntax.contains("pub trait Visit"), "{syntax}");
+
+        // The visitor is a file of its own, since it walks both kinds and so
+        // belongs to neither: it reaches the terminals and the nodes alike.
+        let visit = written_as(&dir, "visit.rs");
+
+        assert!(visit.contains("pub trait Visit < 'ast , I >"), "{visit}");
+        assert!(visit.contains("pub mod walk"), "{visit}");
+        assert!(
+            visit.contains("use super :: lexer :: { A , B , C , _WS } ;"),
+            "{visit}"
+        );
+        assert!(visit.contains("use super :: syntax :: { D } ;"), "{visit}");
+        assert!(!visit.contains("use super :: error"), "{visit}");
+
+        // The stream is named for the error it reports, and the error reaches
+        // for nothing of its neighbours at all.
+        let input = written_as(&dir, "input.rs");
+
+        assert!(
+            input.contains("use super :: error :: UnsynError ;"),
+            "{input}"
+        );
+        assert!(input.contains("pub trait UnsynInput :"), "{input}");
+        assert!(written_as(&dir, "error.rs").starts_with(
+            "# [derive (Debug , PartialEq , Eq , Clone , Copy)] pub enum SyntaxKind { C }"
+        ));
+    }
+
+    #[test]
+    fn a_stream_of_code_needs_no_import_of_a_neighbour() {
+        // The whole of a build in one module is one namespace: what a file of
+        // that module reaches across to is already there.
+        let soup = code("lexer A -> 'a'; lexer B -> 'b'; lexer C -> A except B; syntax D -> C;");
+
+        assert!(!soup.contains("use super :: input"), "{soup}");
+        assert!(!soup.contains("use super :: error"), "{soup}");
+        assert!(!soup.contains("use super :: lexer"), "{soup}");
+    }
+
+    #[test]
+    fn a_build_told_where_the_error_stands_writes_no_file_of_it() {
+        let dir = out_dir("error-elsewhere");
+        let source = whole("lexer A -> 'a'; lexer B -> 'b'; lexer C -> A except B;");
+        let file = parse(source);
+        let whole = Spec::from(source);
+
+        builder(&whole, &file)
+            .error_at("GrammarError", quote! { ::other :: grammar })
+            .to_dir(dir.clone())
+            .build()
+            .expect("the file should be generated");
+
+        assert_eq!(
+            written(&dir),
+            ["input.rs", "lexer.rs", "syntax.rs", "visit.rs"]
+        );
+
+        // Nothing of the error is written, and nothing of it is imported: the
+        // path the caller gave is the path the code reports under.
+        let lexer = written_as(&dir, "lexer.rs");
+
+        assert!(!lexer.contains("use super :: error"), "{lexer}");
+        assert!(lexer.contains(":: other :: grammar :: GrammarError :: Syntax (:: other :: grammar :: SyntaxKind :: C"), "{lexer}");
+    }
+
+    #[test]
+    fn the_name_of_the_language_names_the_stream_and_the_error() {
+        let source = whole("lexer A -> 'a'; lexer B -> 'b'; lexer C -> A except B;");
+        let file = parse(source);
+        let whole = Spec::from(source);
+
+        let soup = builder(&whole, &file)
+            .project("calc_lang")
+            .build()
+            .expect("the file should be generated")
+            .to_string();
+
+        // Both names are prefixed by the language, in its own telling of a
+        // name: words run together and begun as an item is.
+        assert!(soup.contains("pub trait CalcLangInput :"), "{soup}");
+        assert!(soup.contains("pub enum CalcLangError"), "{soup}");
+        assert!(soup.contains("I : CalcLangInput"), "{soup}");
+        assert!(
+            soup.contains("CalcLangError :: Syntax (SyntaxKind :: C"),
+            "{soup}"
+        );
+        // The alias of a stream is not named for the language, which is the one
+        // thing a build of a grammar says of a stream however it is called.
+        assert!(soup.contains("pub type TokenStream < 'a > = :: parserc :: chars :: TokenStream < 'a , CalcLangError > ;"), "{soup}");
+        // Nothing of this crate survives the naming.
+        assert!(!soup.contains("UnsynInput"), "{soup}");
+        assert!(!soup.contains("UnsynError"), "{soup}");
     }
 
     #[test]
