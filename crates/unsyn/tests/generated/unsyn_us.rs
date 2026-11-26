@@ -75,12 +75,11 @@ where
                 .is_some()
                 && rest.is_empty()
             {
-                return Err(::parserc::Kind::Syntax(
-                    "NonKeywordIdent",
+                return Err(::unsyn::errors::UnsynError::Syntax(
+                    ::unsyn::errors::SyntaxKind::NonKeywordIdent,
                     ::parserc::ControlFlow::Fatal,
                     taken.to_span(),
-                )
-                .into());
+                ));
             }
         }
         Ok(())
@@ -225,12 +224,11 @@ where
         taken.push(one);
     }
     if taken.is_empty() {
-        return Err(::parserc::Kind::Syntax(
-            "UnicodeEscape",
+        return Err(::unsyn::errors::UnsynError::Syntax(
+            ::unsyn::errors::SyntaxKind::UnicodeEscape,
             ::parserc::ControlFlow::Recovable,
             input.to_span(),
-        )
-        .into());
+        ));
     }
     Ok(taken)
 }
@@ -288,12 +286,11 @@ where
         taken.push(one);
     }
     if taken.len() < 4usize {
-        return Err(::parserc::Kind::Syntax(
-            "LitUnicode",
+        return Err(::unsyn::errors::UnsynError::Syntax(
+            ::unsyn::errors::SyntaxKind::LitUnicode,
             ::parserc::ControlFlow::Recovable,
             input.to_span(),
-        )
-        .into());
+        ));
     }
     Ok(taken)
 }

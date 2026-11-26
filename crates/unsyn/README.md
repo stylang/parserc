@@ -39,9 +39,10 @@ The language's own grammar, written in the language, is
 11. [Field names](#11-field-names)
 12. [Variant names](#12-variant-names)
 13. [Visitor](#13-visitor)
-14. [What the generator refuses](#14-what-the-generator-refuses)
-15. [What the derive accepts](#15-what-the-derive-accepts)
-16. [Reading this back](#16-reading-this-back)
+14. [What a build writes beside the rules](#14-what-a-build-writes-beside-the-rules)
+15. [What the generator refuses](#15-what-the-generator-refuses)
+16. [What the derive accepts](#16-what-the-derive-accepts)
+17. [Reading this back](#17-reading-this-back)
 
 ---
 
@@ -161,7 +162,7 @@ levels.
 | written | reads |
 |---|---|
 | `Name` | a reference: the whole of the named rule's match — a terminal reads one token, a node reads its structure |
-| `<Ext>` | an external: a run of characters the *caller of the build* binds `Ext` to; the name needs no definition in the file, and nothing here may say what it matches ([§14](#14-what-the-generator-refuses)) |
+| `<Ext>` | an external: a run of characters the *caller of the build* binds `Ext` to; the name needs no definition in the file, and nothing here may say what it matches ([§15](#15-what-the-generator-refuses)) |
 | `'a'` | the character |
 | `'abc'` | the word, one item at a time and as a whole |
 | `U+000A` | the code point |
@@ -873,7 +874,45 @@ document, and the first two are reasons everything above should be read as the
 
 ---
 
-## 14. What the generator refuses
+## 14. What a build writes beside the rules
+
+A file of the DSL is compiled into a front end that stands on its own, so a
+build writes what that front end is read with rather than reaching for anything
+of the crate that ran it:
+
+| written | holds |
+|---------|-------|
+| the stream trait, its alias, and the `impl` tying the two together | the bound every type carries, and the one run of characters a token is read out of ([§9](#9-right-side--shape)) |
+| the **error** | one arm carrying a `Kind` of the framework, and one naming a refusal after a rule |
+| the **family of rules** | the rules whose own code points at itself, and nothing else |
+
+The last two rows are the whole of what a build can say about errors, and they
+are both said from the file:
+
+- a **refusal of a rule** is told after the rule the production stood in. There
+  are exactly two places a rule knows that: an `except` whose target took the
+  whole of the run it was written over, and a repetition of a reference that
+  came short of the bound the production asked for. The variant is named as the
+  rule's type is named, by [§10](#10-type-names), and the variants are written
+  in the order the file declares the rules in.
+- a **refusal of a combinator** — a character that is not the one asked for, a
+  probe that met what it was to refuse — is told as the combinator's own, in the
+  arm the `Kind` is carried in. The file says nothing wider about a position
+  that begins no token, and a build invents no name for it.
+
+What a build does **not** write is the families of an *analysis*: what a well
+formed token can still denote wrongly, what was said twice, and what no code
+answers. Those are rules of the DSL and of whoever analyzes the tree it builds,
+and no production of the file being compiled states them, so writing them would
+be saying what the file never said. A caller whose analysis has them says so
+with `Builder::error_at`, naming the error and where it stands, and
+then the file reaches that error instead of writing one — which is exactly how
+the kept file of `unsyn.us` is built, since it lives beside the analysis it
+must agree with.
+
+---
+
+## 15. What the generator refuses
 
 The generator declines instead of approximating. Each refusal is an
 [`UnsynError::Build`](src/compiler/errors.rs) carrying one of five
@@ -902,7 +941,7 @@ meaningless to the generator, the analyzer and the lint alike.
 
 ---
 
-## 15. What the derive accepts
+## 16. What the derive accepts
 
 Everything above is what the generator *writes*; this is what the derive it
 writes against *reads*, and the two are deliberately the same vocabulary.
@@ -1004,7 +1043,7 @@ therefore restricted: `input = Type` on an item only, `crucial` and
 
 ---
 
-## 16. Reading this back
+## 17. Reading this back
 
 The fastest check of any claim above is to regenerate and diff:
 

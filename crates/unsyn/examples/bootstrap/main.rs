@@ -75,10 +75,12 @@ pub mod input {
 }
 
 /// The reports say nothing about which tree they were handed, and must be
-/// compiled exactly once: the stream the generated file names carries
-/// `Error = ::unsyn::errors::UnsynError` written into it in absolute path, so a
-/// second copy here would be a different enum that the generated `UnsynInput`
-/// refuses to accept. `errors` therefore stays a re-export.
+/// compiled exactly once: the sources reached by path report what a token
+/// denotes wrongly and what no code answers, which are the DSL's own families
+/// and live in the crate's `errors`. The build below is therefore told where
+/// the error stands rather than left to write one: a second enum here would be
+/// a different error than the one the generated `UnsynInput` names in its own
+/// `Error =` clause, and the copied sources would not accept it.
 pub use ::unsyn::errors;
 
 /// The three phases that name nodes of the front end are compiled again here,
@@ -140,6 +142,10 @@ fn main() {
             "IdentOrKeyword",
             quote::quote! { crate::scan_ident_or_keyword },
         )
+        // The file is written into this crate, beside the analysis whose
+        // families its error carries, so it reaches the crate's own error
+        // instead of emitting a second one.
+        .error_at("UnsynError", quote::quote! { ::unsyn::errors })
         .build()
         .expect("the spec, read by its own parser, builds");
 

@@ -139,13 +139,35 @@
 //!   earns a type of its own is a punctuator the spec gives a rule — `Star`,
 //!   `Question` and `Plus` — and each of those holds one `Char`, so the two trees
 //!   agree on both the type that carries the character and the span it covers.
-//!   What a refusal names when it reports a character no rule named is the
-//!   character itself, which is what [`Kind::Syntax`](parserc::Kind) carries.
-//! - A refusal the generated code reports is a [`Kind`](parserc::Kind) of the
-//!   combinator that met it, where the hand-written file names what it expected
-//!   with its own [`UnsynError`] variants. Naming them
-//!   is a table the caller of a build would have to supply, in the same way that
-//!   it supplies the externals.
+//!   What meets such a character is the combinator's own refusal, which says
+//!   what was asked of the position and not what stood in it.
+//! - A refusal of a *rule* is named after the rule the production stood in,
+//!   which is what the family of rules a build writes holds: only the rules
+//!   whose code points at itself, in the order the file declares them. A
+//!   refusal of a combinator — a character that is not the one asked for, a
+//!   probe that met what it refused — is told as the combinator's own, in the
+//!   arm the framework's kind is carried in, because the file says nothing
+//!   wider about it.
+//! - The two trees agree on that family of rules, and nowhere else. The kept
+//!   file is built to reach this crate's error, so every rule the code of a
+//!   build names must already be a variant of
+//!   [`SyntaxKind`](super::errors::SyntaxKind), worn under the name the rule
+//!   is written under. The hand file names the *words* it expects besides
+//!   those, from the tables of [`PunctKind`](super::errors::PunctKind) and
+//!   [`KeywordKind`](super::errors::KeywordKind) that no file can be asked to
+//!   write: a build leaves a word to the combinator that met it.
+//!
+//! # What a build writes beside the rules
+//!
+//! The stream trait, the alias of a stream read through it, the error and the
+//! family of rules a refusal is named after are all written by a build, as
+//! [`input_at`](Builder::input_at) and [`error_at`](Builder::error_at) say
+//! otherwise — and what they are written from is the file and nothing else, so
+//! a build of a grammar of another language reaches no name of this crate.
+//! The families of an *analysis* (what a well formed token can still denote
+//! wrongly, and what no code answers) are not written, because no production
+//! states them: a caller whose analysis has them says where they stand, and
+//! the file reaches that error instead of writing one.
 //!
 //! # What the generated code asks of its crate
 //!
@@ -220,13 +242,10 @@ where
     input_bounds: Vec<String>,
     /// The name the generated code gives its error.
     error_name: String,
-    /// The path the error is found at, which the file imports it from. The
-    /// error families of the analysis — what a well formed token can still
-    /// denote wrongly, what was said twice, what no code answers — are the
-    /// DSL's own rules and no target grammar states them, so they are carried
-    /// from here rather than invented. The lexical families a build *could*
-    /// derive are not yet emitted; see BOOTSTRAP_LOG.md D3/D6.
-    errors_at: TokenStream,
+    /// Where the error is found, when the file is to import it rather than
+    /// write it. `None` — the default — means the build emits the error, the
+    /// same way it emits the stream trait.
+    error_path: Option<TokenStream>,
     /// Where the stream trait is found, when the file is to import it rather
     /// than write it. `None` — the default — means the build emits the trait.
     input_path: Option<TokenStream>,
@@ -258,7 +277,7 @@ where
             // build writing the trait the crate ships.
             input_bounds: INPUT_BOUNDS.iter().map(|bound| bound.to_string()).collect(),
             error_name: String::from("UnsynError"),
-            errors_at: quote! { ::unsyn::errors },
+            error_path: None,
             input_path: None,
         }
     }
@@ -286,20 +305,22 @@ where
         self
     }
 
-    /// Names the error the generated code reports, and where it is found.
+    /// Names the error the generated code reports and says where it is found,
+    /// as a path the file reaches rather than writes. By default there is none:
+    /// a build emits the error itself, beside the stream trait it emits.
     ///
     /// The stream trait and the `TokenStream` alias name this type in their
-    /// clauses, so the two are one decision. The families of an analysis —
-    /// what a well formed token can still denote wrongly, what was said twice,
-    /// what no code answers — are the DSL's own rules, which no target grammar
-    /// states, so they are carried from `path` rather than invented.
+    /// clauses, so the two are one decision. Saying it writes no error is
+    /// saying it writes no family of rules either: a refusal a rule is named
+    /// after is reached through the same path, and the rules the code names are
+    /// therefore part of what the file was told to find.
     #[inline]
     pub fn error_at<P>(mut self, name: &str, path: P) -> Self
     where
         P: ToTokens,
     {
         self.error_name = name.to_owned();
-        self.errors_at = path.to_token_stream();
+        self.error_path = Some(path.to_token_stream());
         self
     }
 
@@ -366,6 +387,13 @@ where
             // a builder configured with something no item can be called says
             // so here rather than at the first bound it is written into.
             input: item_name(&self.input_name, Span::None)?.to_token_stream(),
+            // The name the code reports a refusal under, and the name of the
+            // family of rules it can name a refusal after: one pair of paths,
+            // so that a build which writes the error and a build which was told
+            // where it stands differ nowhere else.
+            error: error_ref(&self.error_path, &self.error_name)?,
+            syntax_kind: syntax_kind_ref(&self.error_path),
+            named: Vec::new(),
             taken: HashSet::new(),
             helpers: Vec::new(),
             seq: 0,
@@ -380,16 +408,22 @@ where
         // the error the rules are written against all go before them: every
         // type a build writes is generic over a name those definitions give,
         // and a name a file neither defines nor imports is no name at all.
+        //
+        // The error comes after the rules have been written, because which
+        // rules it is able to name is what their code asked of it — and an item
+        // of Rust may stand below the items that use it.
         let input_path = self.input_path.clone();
         let input = generator.input.clone();
-        let error = item_name(&self.error_name, Span::None)?.to_token_stream();
-        let errors_at = self.errors_at.clone();
+        let error = generator.error.clone();
+        let error_path = self.error_path.clone();
         let bounds = self.input_bounds.clone();
-        let defs = input_defs(&input, &input_path, &errors_at, &error, &bounds)?;
+        let defs = input_defs(&input, &input_path, &error, &bounds)?;
         let items = generator.crate_of()?;
         let visit = generator.visit_items();
+        let named = std::mem::take(&mut generator.named);
+        let errors = error_defs(&named, &error, &error_path)?;
 
-        Ok(quote! { #(#defs)* #items #visit })
+        Ok(quote! { #(#defs)* #(#errors)* #items #visit })
     }
 }
 
@@ -453,7 +487,6 @@ const INPUT_BOUNDS: [&str; 9] = [
 fn input_defs(
     input: &TokenStream,
     path: &Option<TokenStream>,
-    errors_at: &TokenStream,
     error: &TokenStream,
     bounds: &[String],
 ) -> Result<Vec<TokenStream>, UnsynError> {
@@ -463,8 +496,6 @@ fn input_defs(
     if let Some(path) = path {
         return Ok(vec![input_import(path, input)]);
     }
-
-    let error_type = quote! { #errors_at::#error };
 
     let bounds = bounds
         .iter()
@@ -476,11 +507,121 @@ fn input_defs(
         .collect::<Result<Vec<TokenStream>, _>>()?;
 
     Ok(vec![quote! {
-        pub trait #input: ::parserc::Input<Item = char, Error = #error_type> #(+ #bounds)* {}
+        pub trait #input: ::parserc::Input<Item = char, Error = #error> #(+ #bounds)* {}
 
-        pub type TokenStream<'a> = ::parserc::chars::TokenStream<'a, #error_type>;
+        pub type TokenStream<'a> = ::parserc::chars::TokenStream<'a, #error>;
 
         impl<'a> #input for TokenStream<'a> {}
+    }])
+}
+
+/// The path the code reports a refusal under: the name the file is given,
+/// reached through the path it was told the error stands at when it was told
+/// one, and standing on its own in the file when the build writes it.
+fn error_ref(path: &Option<TokenStream>, name: &str) -> Result<TokenStream, UnsynError> {
+    let name = item_name(name, Span::None)?.to_token_stream();
+
+    Ok(match path {
+        Some(path) => quote! { #path::#name },
+        None => name,
+    })
+}
+
+/// The path of the family of rules a refusal is named after, which stands
+/// beside the error itself: written in the file with it, or found where the
+/// error was said to be.
+fn syntax_kind_ref(path: &Option<TokenStream>) -> TokenStream {
+    match path {
+        Some(path) => quote! { #path::SyntaxKind },
+        None => quote! { SyntaxKind },
+    }
+}
+
+/// The items that put the error in the file: the family of rules the code can
+/// name a refusal after, the error itself, and what the framework asks of an
+/// error so that a stream may report it.
+///
+/// `named` is the rules the code of the file pointed at, in the order the file
+/// declares them, and it is the whole of what the family holds: a build names a
+/// refusal after a rule because the production says which rule stands at the
+/// place, and it invents no family beside that.
+///
+/// The families of an *analysis* are not here — what a well formed token can
+/// still denote wrongly, and what no code was written for are rules of the DSL
+/// and of whoever analyzes the tree, which no production states. A build that
+/// wrote them would be saying what the file never said; a caller whose analysis
+/// has them says where they stand with [`error_at`](Builder::error_at) instead,
+/// and the file reaches the error it was told about.
+///
+/// No item is documented: `rustfmt` rewrites a document of more than one line
+/// into one attribute per line, and the file a build writes into the crate is a
+/// file `rustfmt` has been over, so the tokens kept would not be the tokens a
+/// build writes. What each is for is said here, beside the code that writes it.
+fn error_defs(
+    named: &[String],
+    error: &TokenStream,
+    path: &Option<TokenStream>,
+) -> Result<Vec<TokenStream>, UnsynError> {
+    // A file told where its error stands writes none of it: the enum and the
+    // family of rules it names are already written there, and a second copy
+    // would be a different error that the stream it names refuses to report.
+    if path.is_some() {
+        return Ok(Vec::new());
+    }
+
+    let variants = named
+        .iter()
+        .map(|rule| item_name(rule, Span::None).map(|name| name.to_token_stream()))
+        .collect::<Result<Vec<TokenStream>, _>>()?;
+
+    let kind = syntax_kind_ref(path);
+
+    Ok(vec![quote! {
+        #[derive(Debug, PartialEq, Eq, Clone, Copy)]
+        pub enum SyntaxKind {
+            #(#variants),*
+        }
+
+        #[derive(Debug, PartialEq, Eq, Clone)]
+        pub enum #error {
+            Kind(::parserc::Kind),
+            Syntax(#kind, ::parserc::ControlFlow, ::parserc::Span),
+        }
+
+        impl ::core::convert::From<::parserc::Kind> for #error {
+            #[inline]
+            fn from(kind: ::parserc::Kind) -> Self {
+                Self::Kind(kind)
+            }
+        }
+
+        impl ::parserc::ParseError for #error {
+            #[inline]
+            fn to_span(&self) -> ::parserc::Span {
+                match self {
+                    #error::Kind(kind) => kind.to_span(),
+                    #error::Syntax(_, _, span) => span.clone(),
+                }
+            }
+
+            #[inline]
+            fn control_flow(&self) -> ::parserc::ControlFlow {
+                match self {
+                    #error::Kind(kind) => kind.control_flow(),
+                    #error::Syntax(_, control_flow, _) => *control_flow,
+                }
+            }
+
+            #[inline]
+            fn into_fatal(self) -> Self {
+                match self {
+                    #error::Kind(kind) => Self::Kind(kind.into_fatal()),
+                    #error::Syntax(kind, _, span) => {
+                        Self::Syntax(kind, ::parserc::ControlFlow::Fatal, span)
+                    }
+                }
+            }
+        }
     }])
 }
 
@@ -1501,6 +1642,15 @@ where
     /// The bound every written type carries: the name the builder was given for
     /// the stream, which the file imports under that name.
     input: TokenStream,
+    /// The path the code reports a refusal under, whether the build wrote the
+    /// error or was told where it stands.
+    error: TokenStream,
+    /// The path of the family of rules a refusal of this file's own is named
+    /// after, beside the error it belongs to.
+    syntax_kind: TokenStream,
+    /// The rules whose code has named a refusal after itself, in the order the
+    /// file declares them, which is what the emitted family holds.
+    named: Vec<String>,
     /// The names of the functions the module has been given already.
     taken: HashSet<String>,
     /// The functions the rule being written has asked for, in the order asked.
@@ -1933,7 +2083,7 @@ where
                 Some((0, None)) => (quote! { ::std::vec::Vec<#ty<I>> }, None),
                 Some((0, Some(1))) => (quote! { ::core::option::Option<#held> }, None),
                 Some((at_least, at_most)) => {
-                    let read = self.bounded_reader(&ty, at_least, at_most);
+                    let read = self.bounded_reader(&ty, at_least, at_most)?;
 
                     (
                         quote! { ::std::vec::Vec<#ty<I>> },
@@ -2014,7 +2164,12 @@ where
 
     /// The function that reads one reference repeated a bounded number of
     /// times, and hands back the nodes it took.
-    fn bounded_reader(&mut self, ty: &Ident, at_least: usize, at_most: Option<usize>) -> Ident {
+    fn bounded_reader(
+        &mut self,
+        ty: &Ident,
+        at_least: usize,
+        at_most: Option<usize>,
+    ) -> Result<Ident, UnsynError> {
         let input = self.input.clone();
         let seq = self.seq;
         self.seq += 1;
@@ -2049,8 +2204,6 @@ where
             },
         };
 
-        let rule = self.rule.clone();
-
         // A lower bound of one is asked as the emptiness it is, which is what
         // reads clearly and what a lint asks for; a bound above one is the
         // comparison it has to stay.
@@ -2059,6 +2212,8 @@ where
         } else {
             quote! { taken.len() < #at_least }
         };
+
+        let refusal = self.named_refusal("Recovable", quote! { input.to_span() })?;
 
         self.helpers.push(quote! {
             fn #read<I>(
@@ -2076,19 +2231,43 @@ where
                 // Fewer than the bound asked for is the repetition itself
                 // missing, told at the place the reading of it stands.
                 if #too_few {
-                    return Err(::parserc::Kind::Syntax(
-                        #rule,
-                        ::parserc::ControlFlow::Recovable,
-                        input.to_span(),
-                    )
-                    .into());
+                    return Err(#refusal);
                 }
 
                 Ok(taken)
             }
         });
 
-        read
+        Ok(read)
+    }
+
+    /// The error of a refusal the code names after the rule it stands in, and
+    /// the record that the rule was named — which is the whole of what the
+    /// emitted family of rules holds.
+    ///
+    /// A rule is named only where the production says which rule stands at the
+    /// place: an `except` whose target took the whole of what it was written
+    /// over, and a repetition that came short of the bound it asked for. A
+    /// refusal of a combinator is told as the combinator's own, since the file
+    /// says nothing wider about it, and a build invents no family beside what
+    /// the file says.
+    ///
+    /// The order is the order the file declares, which is the order the walk
+    /// reaches, so that the same file is written the same way twice.
+    fn named_refusal(&mut self, flow: &str, span: TokenStream) -> Result<TokenStream, UnsynError> {
+        let variant = item_name(&self.rule, Span::None)?;
+
+        if !self.named.contains(&self.rule) {
+            self.named.push(self.rule.clone());
+        }
+
+        let flow = format_ident!("{}", flow);
+        let error = self.error.clone();
+        let kind = self.syntax_kind.clone();
+
+        Ok(quote! {
+            #error::Syntax(#kind::#variant, ::parserc::ControlFlow::#flow, #span)
+        })
     }
 
     /// The name of the next field that has none of its own.
@@ -2576,7 +2755,7 @@ where
                 }
 
                 let ty = field.ty.clone();
-                let read = self.refusal_reader(&ty, token_field.ty);
+                let read = self.refusal_reader(&ty, token_field.ty)?;
 
                 Ok(vec![Field {
                     name: field.name,
@@ -2590,7 +2769,11 @@ where
     /// The function that reads one field and refuses it where the text beside it
     /// is all of what the field took: the probe is run over a copy, and what it
     /// reads is taken from nothing.
-    fn refusal_reader(&mut self, ty: &TokenStream, probe: TokenStream) -> Ident {
+    fn refusal_reader(
+        &mut self,
+        ty: &TokenStream,
+        probe: TokenStream,
+    ) -> Result<Ident, UnsynError> {
         let input = self.input.clone();
         let seq = self.seq;
         self.seq += 1;
@@ -2601,7 +2784,7 @@ where
             seq + 1
         ));
 
-        let rule = self.rule.clone();
+        let refusal = self.named_refusal("Fatal", quote! { value.to_span() })?;
 
         let body = quote! {
             let mut whole = input.clone();
@@ -2616,12 +2799,7 @@ where
                 .is_some()
                 && rest.is_empty()
             {
-                return Err(::parserc::Kind::Syntax(
-                    #rule,
-                    ::parserc::ControlFlow::Fatal,
-                    value.to_span(),
-                )
-                .into());
+                return Err(#refusal);
             }
 
             Ok(value)
@@ -2641,7 +2819,7 @@ where
             }
         });
 
-        read
+        Ok(read)
     }
 
     /// The fields one operand that stands alone writes: one, unless it is a
@@ -3210,26 +3388,27 @@ where
                 f4: tokens,
                 ..
             } => {
-                let rule = self.rule.clone();
                 let left = self.code_of_atom(target)?;
                 let left = self.expr_of(left)?;
+                // What is removed is asked of the text the operand read, and an
+                // operand written as a node of the tree answers with that node
+                // rather than with the run it took — so the reading of its text
+                // is asked of the framework here, exactly as a fold asks it.
+                let left = self.as_text(left, self.atom_yields_node(target));
                 let right = self.code_of_atom(tokens)?;
                 let right = self.expr_of(right)?;
 
-                // What is removed is asked of the text the operand read and of
-                // nothing else, and only a removal that takes all of it refuses.
+                let refusal = self.named_refusal("Fatal", quote! { taken.to_span() })?;
+
+                // Only a removal that takes all of the run leaves nothing for
+                // the rule to hold.
                 Ok(Code::Stmt(vec![quote! {
                     let taken = #left.parse(input)?;
 
                     {
                         let mut rest = taken.clone();
                         if #right.ok().parse(&mut rest)?.is_some() && rest.is_empty() {
-                            return Err(::parserc::Kind::Syntax(
-                                #rule,
-                                ::parserc::ControlFlow::Fatal,
-                                taken.to_span(),
-                            )
-                            .into());
+                            return Err(#refusal);
                         }
                     }
                 }]))
@@ -4675,8 +4854,130 @@ mod tests {
         assert!(soup.contains("< A < I > as :: parserc :: syntax :: Syntax < I >> :: into_parser () . map (| node | node . 0) . parse (input) ?"));
         assert!(soup.contains("let mut rest = taken . clone ()"));
         assert!(soup.contains("rest . is_empty ()"));
-        assert!(soup.contains(
-            "Err (:: parserc :: Kind :: Syntax (\"C\" , :: parserc :: ControlFlow :: Fatal , taken . to_span () ,) . into ())"
+        // The refusal is named after the rule the file wrote it in, which is
+        // the rule the code of `C` can point at and say what stands there.
+        assert!(has(
+            &soup,
+            quote! { Err(UnsynError::Syntax(SyntaxKind::C, ::parserc::ControlFlow::Fatal, taken.to_span())) }
+        ));
+    }
+
+    #[test]
+    fn a_short_repetition_is_named_after_the_rule_that_asked_for_it() {
+        // A repetition of a reference held as the nodes it took is a `read_` of
+        // its own, and what it reports when the run comes short is the rule
+        // whose production wrote the bound.
+        let soup = code("lexer A -> 'a' 'b'; lexer C -> 'x' A{2};");
+
+        assert!(
+            has(
+                &soup,
+                quote! { Err(UnsynError::Syntax(SyntaxKind::C, ::parserc::ControlFlow::Recovable, input.to_span())) }
+            ),
+            "{soup}"
+        );
+    }
+
+    #[test]
+    fn the_error_is_written_beside_the_rules_with_the_family_of_rules_it_names() {
+        let soup =
+            code("lexer A -> 'a'; lexer B -> 'b'; lexer C -> A except B; lexer D -> 'x' C{2};");
+
+        // The enum is what a stream reports, so the trait says so of itself.
+        assert!(has(
+            &soup,
+            quote! { pub trait UnsynInput: ::parserc::Input<Item = char, Error = UnsynError> }
+        ));
+        assert!(has(
+            &soup,
+            quote! {
+                #[derive(Debug, PartialEq, Eq, Clone)]
+                pub enum UnsynError {
+                    Kind(::parserc::Kind),
+                    Syntax(SyntaxKind, ::parserc::ControlFlow, ::parserc::Span),
+                }
+            }
+        ));
+        // The family holds the rules the code pointed at and nothing besides:
+        // no variant is invented for a rule whose code names no refusal, and
+        // the order is the order the file declares them in.
+        assert!(
+            has(
+                &soup,
+                quote! {
+                    #[derive(Debug, PartialEq, Eq, Clone, Copy)]
+                    pub enum SyntaxKind { C, D }
+                }
+            ),
+            "{soup}"
+        );
+        // What the framework asks of an error, since a stream holds it.
+        assert!(has(
+            &soup,
+            quote! { impl ::core::convert::From<::parserc::Kind> for UnsynError }
+        ));
+        assert!(has(
+            &soup,
+            quote! { impl ::parserc::ParseError for UnsynError }
+        ));
+        assert!(
+            !soup.contains("unsyn"),
+            "a build writes no name of its own: {soup}"
+        );
+    }
+
+    #[test]
+    fn a_family_of_one_names_the_rule_and_no_other() {
+        // The rules that name no refusal are no variant of it, however many
+        // them the file declares.
+        let soup = code("lexer A -> 'a'; lexer B -> 'b'; lexer C -> A except B;");
+
+        assert!(has(
+            &soup,
+            quote! { #[derive(Debug, PartialEq, Eq, Clone, Copy)] pub enum SyntaxKind { C } }
+        ));
+        assert!(!soup.contains("SyntaxKind::A"), "{soup}");
+    }
+
+    #[test]
+    fn a_file_that_names_no_rule_writes_an_empty_family() {
+        let soup = code("lexer A -> 'a';");
+
+        assert!(has(
+            &soup,
+            quote! { #[derive(Debug, PartialEq, Eq, Clone, Copy)] pub enum SyntaxKind {} }
+        ));
+        assert!(has(
+            &soup,
+            quote! { pub enum UnsynError { Kind (:: parserc :: Kind) , Syntax (SyntaxKind , :: parserc :: ControlFlow , :: parserc :: Span) , } }
+        ));
+    }
+
+    #[test]
+    fn a_build_told_where_the_error_stands_writes_none_of_it() {
+        // The error and the family of rules beside it are written once: a file
+        // reaching an error already written writes no second copy, which would
+        // be a different error from the one its own stream reports.
+        let soup = {
+            let source = whole("lexer A -> 'a'; lexer B -> 'b'; lexer C -> A except B;");
+            let file = parse(source);
+            let whole = Spec::from(source);
+
+            builder(&whole, &file)
+                .error_at("GrammarError", quote! { ::other :: grammar })
+                .build()
+                .expect("the file should be generated")
+                .to_string()
+        };
+
+        assert!(!soup.contains("pub enum GrammarError"), "{soup}");
+        assert!(!soup.contains("pub enum SyntaxKind"), "{soup}");
+        assert!(!soup.contains("impl :: parserc :: ParseError"), "{soup}");
+        // The bound of every written type is the name the builder was given,
+        // and the refusal reaches the family through the same path.
+        assert!(has(
+            &soup,
+            quote! { Err(::other::grammar::GrammarError::Syntax(::other::grammar::SyntaxKind::C, ::parserc::ControlFlow::Fatal, taken.to_span())) }
         ));
     }
 

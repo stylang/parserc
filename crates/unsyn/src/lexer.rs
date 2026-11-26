@@ -364,7 +364,7 @@ where
     I: UnsynInput,
 {
     /// The `U+` that opens the literal.
-    #[parserc(keyword = "U+", map_err = SyntaxKind::Unicode.map())]
+    #[parserc(keyword = "U+", map_err = SyntaxKind::LitUnicode.map())]
     pub f1: I,
     /// The four digits that spell the code point.
     #[parserc(read_lit_unicode_digits)]

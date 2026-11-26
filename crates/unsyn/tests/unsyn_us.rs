@@ -37,6 +37,45 @@ mod scan;
 
 pub use scan::scan_ident_or_keyword;
 
+/// The code of a grammar of another language, kept beside this test so that the
+/// half of a build a file of its own writes is compiled rather than only
+/// printed.
+///
+/// The spec above is told where its error stands, because it is kept inside the
+/// crate whose analysis goes with it. Nothing of a build is checked by that
+/// file: the error a build *writes*, the family of rules it names refusals
+/// after, and the bound that ties a stream to both are reached only here, where
+/// a build was given no path and so had to write them.
+#[path = "generated/tiny.rs"]
+mod tiny;
+
+/// The path of the file the code of that grammar is kept in.
+const TINY_GENERATED: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/tests/generated/tiny.rs");
+
+/// A grammar that names two rules in its refusals, and asks nothing of whoever
+/// builds it: no external, no error written elsewhere.
+///
+/// `Inner` is a node and not one run of characters, which is what leaves a
+/// bound on it to a function of its own rather than to a combinator that
+/// counts; `Word` removes one node over another, the other place a refusal is
+/// told after a rule. Both names are what `SyntaxKind` is asked to hold.
+const TINY: &str = "whitespace W -> [' '];
+lexer A -> 'a';
+lexer B -> 'b';
+lexer Inner -> A B;
+lexer Word -> Inner except A;
+lexer Run -> 'x' Inner{2};
+";
+
+/// The code of that grammar, as an unconfigured build writes it.
+fn code_of_tiny() -> String {
+    Builder::from_source(TINY)
+        .expect("the grammar should be a file of the language")
+        .build()
+        .expect("the grammar should be generated whole")
+        .to_string()
+}
+
 /// The code of the terminals `unsyn.us` declares.
 ///
 /// The one external the spec calls is bound here rather than by anything the
@@ -54,6 +93,14 @@ fn code_of_the_spec() -> String {
         .external(
             "IdentOrKeyword",
             proc_macro2::TokenStream::from_str("crate::scan_ident_or_keyword").unwrap(),
+        )
+        // The kept file stands inside this crate, beside the analysis that
+        // reports what a token denotes wrongly and what no code answers. A
+        // second error written here would be a different enum from the one the
+        // stream of the crate reports, so the build reaches the crate's own.
+        .error_at(
+            "UnsynError",
+            proc_macro2::TokenStream::from_str("::unsyn::errors").unwrap(),
         )
         .build()
         .expect("unsyn.us should be generated whole")
@@ -115,32 +162,55 @@ fn as_code(tokens: proc_macro2::TokenStream) -> String {
         .join(" ")
 }
 
-/// Whether the file the code is kept in is the code the generator writes.
+/// The code of a kept file, without the words that say what the file is.
 ///
-/// The two are compared as tokens rather than as text, and only their items are
-/// compared: the words that say what the file is belong to the keeping of it and
-/// not to the code. How it is laid out is the business of `cargo fmt`.
+/// The two files are compared as tokens rather than as text, and only their
+/// items are compared: the header belongs to the keeping of a file and not to
+/// the code, and how the code is laid out is the business of `cargo fmt`.
+fn items_of(code: &str) -> proc_macro2::TokenStream {
+    let mut file = syn::parse_file(code).expect("the code should be Rust");
+
+    file.attrs.clear();
+    file.shebang = None;
+
+    file.to_token_stream()
+}
+
+/// Whether the file the code of the spec is kept in is the code a build writes
+/// for the spec.
 #[test]
 fn the_kept_file_is_the_code_of_the_spec() {
     let kept = std::fs::read_to_string(GENERATED).expect("the generated file should be kept");
 
-    let items = |code: &str| {
-        let mut file = syn::parse_file(code).expect("the code should be Rust");
-
-        // What the file says it is is not part of the code it is.
-        file.attrs.clear();
-        file.shebang = None;
-
-        file.to_token_stream()
-    };
-
     assert_eq!(
-        as_code(items(&kept)),
-        as_code(items(&code_of_the_spec())),
+        as_code(items_of(&kept)),
+        as_code(items_of(&code_of_the_spec())),
         "the code kept in {} is not the code of the spec; \
          run `cargo test -p unsyn --all-features --test unsyn_us the_generated_file_of_the_spec \
          -- --ignored` and then `cargo fmt` to rewrite it",
         GENERATED
+    );
+}
+
+/// Whether the file a grammar of its own is kept in is the code a build writes
+/// when it is told nothing.
+///
+/// The point of keeping a second file is the second clause of a build: the
+/// error, the family of rules a refusal is named after and the bound that ties
+/// a stream to both. The file of the spec reaches an error written elsewhere,
+/// so none of that is compiled there — and an error no stream reports is worth
+/// nothing.
+#[test]
+fn the_kept_file_is_the_code_of_a_grammar_of_its_own() {
+    let kept = std::fs::read_to_string(TINY_GENERATED).expect("the generated file should be kept");
+
+    assert_eq!(
+        as_code(items_of(&kept)),
+        as_code(items_of(&code_of_tiny())),
+        "the code kept in {} is not the code of the grammar; \
+         run `cargo test -p unsyn --test unsyn_us the_generated_file_of_a_grammar_of_its_own \
+         -- --ignored` and then `cargo fmt` to rewrite it",
+        TINY_GENERATED
     );
 }
 
@@ -523,24 +593,62 @@ fn a_build_aimed_at_another_crate_names_that_crate() {
 /// characters is written as that run, which is what the lint about ASCII ranges
 /// asks for instead, and that not every rule of the spec is read by anything here
 /// yet.
+/// A kept file: the words that say what the keeping is, then the code as the
+/// generator wrote it, in one line.
+///
+/// `cargo fmt` lays the file out afterwards, which is why the code is written
+/// as it comes from a build rather than as it is read.
+fn kept_file(header: &str, code: &str) -> String {
+    format!("{header}{code}\n")
+}
+
+/// Rewrites the file the code is kept in, for when the generator changed.
+///
+/// The header the file is kept in belongs to the keeping and not to the code, so
+/// it says what the code will not: that a set the spec spells as a run of
+/// characters is written as that run, which is what the lint about ASCII ranges
+/// asks for instead, and that not every rule of the spec is read by anything here
+/// yet.
 #[test]
 #[ignore = "rewrites a file the repository keeps; run with --ignored"]
 fn the_generated_file_of_the_spec() {
     std::fs::write(
         Path::new(GENERATED),
-        format!(
+        kept_file(
             "//! The code of `unsyn.us`, as the generator writes it.\n\
-                 //!\n\
-                 //! This file is generated: see `tests/unsyn_us.rs`. Do not edit it.\n\
-                 #![allow(
-    dead_code,
-    clippy::manual_is_ascii_check,
-    clippy::needless_borrow,
-    clippy::type_complexity,
-    clippy::enum_variant_names
-)]\n\
-                 {}\n",
-            code_of_the_spec()
+             //!\n\
+             //! This file is generated: see `tests/unsyn_us.rs`. Do not edit it.\n\
+             #![allow(\n    dead_code,\n    clippy::manual_is_ascii_check,\n    \
+             clippy::needless_borrow,\n    clippy::type_complexity,\n    \
+             clippy::enum_variant_names\n)]\n",
+            &code_of_the_spec(),
+        ),
+    )
+    .expect("the file should be written");
+}
+
+/// Rewrites the file the code of a grammar of its own is kept in.
+///
+/// The header says what the keeping is for: the file stands on its own, which
+/// is the one thing the file of the spec does not do.
+#[test]
+#[ignore = "rewrites a file the repository keeps; run with --ignored"]
+fn the_generated_file_of_a_grammar_of_its_own() {
+    std::fs::write(
+        Path::new(TINY_GENERATED),
+        kept_file(
+            "//! The code of a grammar of another language, as a build writes it when\n\
+             //! it is told nothing.\n\
+             //!\n\
+             //! The stream trait, the error and the family of rules a refusal is\n\
+             //! named after are all written here, because no caller said where they\n\
+             //! stand — which is the half of a build that the file of `unsyn.us`\n\
+             //! leaves untested, that file being kept inside the crate whose error it\n\
+             //! reaches.\n\
+             //!\n\
+             //! This file is generated: see `tests/unsyn_us.rs`. Do not edit it.\n\
+             #![allow(dead_code, clippy::enum_variant_names)]\n",
+            &code_of_tiny(),
         ),
     )
     .expect("the file should be written");

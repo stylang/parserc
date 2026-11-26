@@ -56,6 +56,13 @@ fn main() {
             "IdentOrKeyword",
             proc_macro2::TokenStream::from_str("crate::scan_ident_or_keyword").unwrap(),
         )
+        // The kept file stands inside this crate, beside the analysis that
+        // reports what a token denotes wrongly and what no code answers, so it
+        // reaches the crate's own error rather than writing a second one.
+        .error_at(
+            "UnsynError",
+            proc_macro2::TokenStream::from_str("::unsyn::errors").unwrap(),
+        )
         .build()
         .expect("unsyn.us should be generated whole")
         .to_string();

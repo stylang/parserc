@@ -112,10 +112,15 @@ impl KeywordKind {
 /// the expression forms of a node definition. The one exception is
 /// [`SyntaxKind::Eof`], which a whole file reports when it cannot be read to its
 /// end.
+///
+/// A variant is named after the rule it stands for, which is what the code a
+/// build writes for `unsyn.us` reaches this family for: a refusal there is
+/// named after the rule whose production wrote it, and the kept file lives in
+/// this crate, so the names below are part of what a build is trusted to find.
 #[derive(Debug, thiserror::Error, PartialEq, Eq, Clone, Copy)]
 pub enum SyntaxKind {
     #[error("unicode literal")]
-    Unicode,
+    LitUnicode,
     #[error("single quote")]
     QuoteEscape,
     #[error("ascii escape")]
@@ -124,6 +129,10 @@ pub enum SyntaxKind {
     StrContent,
     #[error("ident")]
     Ident,
+    /// A name that is none of the words of the language, which is what a
+    /// definition asks for after the word that opens it.
+    #[error("non-keyword ident")]
+    NonKeywordIdent,
     #[error("block comment")]
     BlockComment,
     #[error("outer line document")]
