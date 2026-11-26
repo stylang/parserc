@@ -31,10 +31,10 @@ use super::syntax::{Expr, ExprNoTopAlt, Set, SetItem, Stmt};
 /// The pair `ExprNoTopAlt+` writes: the operand `+` asks for at least one of,
 /// then every operand the text offers after it, each with the run before it.
 ///
-/// The same shape is [`crate::syntax::Branch`] in the hand tree; it is
-/// spelled out here rather than named from there because a build writes no type
-/// for a shape no rule named, and the passes below read whichever tree they are
-/// handed.
+/// The same shape a spec writes for the rule `ExprNoTopAlt+`, spelled out here
+/// rather than named from the tree: a build writes no type for a shape no rule
+/// gave a left side of its own, and the passes below are written against
+/// whichever tree they are handed — this crate's generated one included.
 pub type Branch<I> = (
     Box<ExprNoTopAlt<I>>,
     Vec<(Option<S<I>>, Box<ExprNoTopAlt<I>>)>,

@@ -13,8 +13,12 @@
 //! An error also says what the stage was looking for, and how far the parser may
 //! still go:
 //!
-//! - [`PunctKind`]: a punctuation token, [`KeywordKind`]: a keyword;
-//! - [`SyntaxKind`]: a composite token or node built out of them;
+//! - [`PunctKind`]: a punctuation token, [`KeywordKind`]: a keyword — both worn
+//!   by the passes that read a file by hand, since a build leaves a word to the
+//!   combinator that met it;
+//! - [`SyntaxKind`]: a composite token or node built out of them. It is also the
+//!   family a build names a refusal after, so every rule the generated front end
+//!   points at is a variant of this enum; see [`codegen`](crate::codegen).
 //! - [`SemanticsKind`]: a token that is well formed but meaningless, and every
 //!   rule the grammar itself cannot state (see [`crate::semantic`]).
 //!

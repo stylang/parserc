@@ -844,36 +844,30 @@ cosmetic: `walk_set` descends into `(inner).0`, `(inner).2` and `(inner).3`
 because those are what the fields were written as, and a nameless field is only
 findable by its place.
 
-### Where the hand-written tree differs
+### What the crate adds by hand
 
-[`src/lexer.rs`](src/lexer.rs) and
-[`src/syntax.rs`](src/syntax.rs) are written by hand and tuned
-where a generated file is merely correct. Both hold **types and parsers and no
-`impl` block**: every reading of the tree —
-[`elements`](src/read.rs), [`branches`](src/read.rs),
-[`is_single`](src/read.rs), [`members`](src/read.rs),
-[`decl`](src/read.rs), and with it the
-[`Decl`](src/read.rs) that says which of the three words declares what
-—
-is a free function in [`src/read.rs`](src/read.rs). A build of
-some *other* language cannot know what its nodes will be asked, so it says
-nothing; the analysis above it reads them instead. Three differences bear on
-this
-document, and the first two are reasons everything above should be read as the
-**generated** rule:
+The tree above is generated — by this crate's own build, from `unsyn.us`. What
+`src/` keeps by hand is the reading of it and what is said about it: every
+question asked of a node ([`elements`](src/read.rs), [`branches`](src/read.rs),
+[`is_single`](src/read.rs), [`members`](src/read.rs), [`decl`](src/read.rs) and
+the `Decl` that says which of the three words declares what) is a free function
+in [`src/read.rs`](src/read.rs), never an `impl` block on a type.
 
-- **a single character is a different type at each level of implementation.**
-  The generated code holds `Char<I, '~'>`, wearing the character in its type.
-  The hand file holds no `Char` anywhere, and names each punctuator as a type of
-  its own — `Tilde`, `Star`, `Question`, `Plus`, `Or`, `Lt`, `Gt`, `ParenStart`,
-  … — through `syntax_terminal!`, which is what lets a hand-written refusal say
-  *which* punctuator it expected. The two trees agree on the span and disagree
-  on the type that carries it.
-- **field and variant names.** The generator has only the file to go by, so it
-  says `f1`, `f2` and the rule's own name; the hand file names what a part holds
-  — `open`, `head`, `tail`, `marker`, `body`.
-  [§11](#11-field-names) is therefore the generator's
-  rule and not the hand file's.
+That is not a style rule but a consequence of what a build knows. A build of some
+*other* language cannot guess what its nodes will be asked, so it writes no
+method; the analysis above the tree reads them instead, and this crate is the
+first caller held to that rule — its front end is generated, so a reading that
+needed a hand-written `impl` would fail the build rather than pass a comparison.
+
+Two things the generated code does, which a hand-written tree would have tuned
+away, are worth knowing when reading a build's output:
+
+- **a single character is `Char<I, '~'>`**, the character worn in the type. That
+  is what lets a refusal and a field agree on the span the character covers.
+- **a part the file named nothing is named by its place** — `f1`, `f2` — beside
+  the rule's own name where the operand is a name. [§11](#11-field-names) and
+  [§12](#12-variant-names) are the rule, with no hand-written file exempt from
+  it: the lints there are what an author is told to write instead.
 
 ---
 
@@ -932,9 +926,9 @@ answers. Those are rules of the DSL and of whoever analyzes the tree it builds,
 and no production of the file being compiled states them, so writing them would
 be saying what the file never said. A caller whose analysis has them says so
 with `Builder::error_at`, naming the error and where it stands, and
-then the file reaches that error instead of writing one — which is exactly how
-the kept file of `unsyn.us` is built, since it lives beside the analysis it
-must agree with.
+then the file reaches that error instead of writing one — which is how this
+crate builds itself: `build.rs` says the error and the stream trait are
+`crate::errors` and `crate::input`, and only three of the five files are written.
 
 ---
 
@@ -1072,28 +1066,26 @@ therefore restricted: `input = Type` on an item only, `crucial` and
 
 ## 17. Reading this back
 
-The fastest check of any claim above is to regenerate and diff:
+The claims above about what a build writes are not checked by comparing a kept
+file with a fresh one: this crate is built from its own spec, so the check is the
+build.
 
 ```sh
-cargo run -p unsyn --example regen_unsyn_us
-cargo fmt --all
-git --no-pager diff crates/unsyn/tests/generated/unsyn_us/
+cargo build -p unsyn@0.14.1
+cat target/debug/build/unsyn-*/out/unsyn/lexer.rs
 ```
 
-[`tests/unsyn_us.rs`](tests/unsyn_us.rs) pins that the kept files *are* the code
-of
-the spec, each against its own, and then reads the spec with them;
-[`tests/two_trees.rs`](tests/two_trees.rs) compares the generated tree against
-the
-hand-written one in [`src/lexer.rs`](src/lexer.rs) and
-[`src/syntax.rs`](src/syntax.rs), which both ship without a
-single `impl` block because [`src/read.rs`](src/read.rs) is
-what
-reads a tree.
+If the generator wrote a name, a field or a bound that the passes below are not
+written against, the crate does not compile — which is a sharper verdict than a
+test comparing two trees, and it is why the hand-written front end is gone.
 
-The hand-written side still lags the spec on the parts of a pattern the spec
-gave a left side of their own, and it is
-[`tests/two_trees.rs`](tests/two_trees.rs) that keeps the list honest: its
-parity check records what the two trees say, and the test beside it names every
-rule the comparison reaches on one side and not the other — so a rule the hand
-tree has yet to give a type of its own is said, not silently agreed with.
+What a build cannot tell is whether the parser it wrote *reads*: a rule that
+compiles and then bounds six digits where the spec says one to six, or drops the
+trivia between two tokens, is a correct program and a wrong parser. That is
+[`tests/front_end.rs`](tests/front_end.rs), which reads the spec with the shipped
+front end and asks the tree for the one property a CST owes its source — that a
+walk hands over every character exactly once.
+
+The passes that read the tree are [`src/read.rs`](src/read.rs) (which holds every
+reading of it, so that no node type carries an `impl` of its own),
+[`src/semantic.rs`](src/semantic.rs) and [`src/codegen.rs`](src/codegen.rs).

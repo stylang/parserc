@@ -75,33 +75,93 @@
 //! configured, not by items unsyn happens to keep.
 //!
 //! The spec of the language, written in the language itself, lives in
-//! `unsyn.us` at the root of this crate, and `tests/unsyn_us.rs` runs the
-//! reader, the analyzer and the generator over it, from source text to the code
-//! of a parser and back to reading with it.
+//! `unsyn.us` at the root of this crate — and this crate is built from it. The
+//! front end (`lexer`, the nodes and the visitor) is not a hand-written file: it
+//! is what a build writes for the spec, into `OUT_DIR`, by the released
+//! generator. [`build.rs`](https://github.com/stylang/stylang/blob/main/crates/unsyn/build.rs)
+//! says how, and why the generator run there is the published one rather than
+//! the one in `src/` — a crate cannot compile the code that decides its own
+//! shape, so a change to what a build *writes* lands in the release after the one
+//! whose build ran the previous generator.
 //!
-//! A crate that keeps a generated file and never produces one therefore needs
-//! no unsyn at all: `parserc`, with the two features a generated file names,
-//! and nothing else. `quote` and `proc-macro2` stay out of its tree, since only
-//! the writing of a spec reaches for them:
+//! That is also why the front end carries no `impl` block and no hand-picked
+//! name: every type, field and variant below is what the productions say. What
+//! the crate adds by hand is the reading of that tree
+//! ([`read`]), what it denotes ([`semantic`]), and what becomes of it
+//! ([`codegen`]).
+//!
+//! A crate that keeps a generated file and never produces one therefore needs no
+//! unsyn at all: `parserc`, with the two features a generated file names, and
+//! nothing else. `quote` and `proc-macro2` stay out of its tree, since only the
+//! writing of a spec reaches for them:
 //!
 //! ```toml
 //! [dependencies]
-//! parserc = { version = "0.13", features = ["input", "syntax"] }
+//! parserc = { version = "0.14", features = ["input", "syntax"] }
 //! ```
 //!
-//! A build without the `compiler` feature has pages that point at items it does
-//! not hold: the two phases point at each other, and the generator's own
-//! documentation names the types a file it writes will call. Those links are
-//! allowed to break in that case rather than written twice, since nothing about
-//! the build changes, only what the documentation can show.
+//! One consequence of the build-dependency is worth knowing before typing a
+//! command: two packages named `unsyn` are in the graph — this one, and the
+//! pinned one the build runs — so a `-p unsyn` filter is ambiguous and cargo asks
+//! for a version, `cargo test -p unsyn@0.14.1`.
 #![cfg_attr(docsrs, feature(doc_cfg))]
 
 pub mod codegen;
 pub mod decode;
 pub mod errors;
 pub mod input;
-pub mod lexer;
 pub mod read;
+pub mod scan;
 pub mod semantic;
-pub mod syntax;
-pub mod visit;
+
+// The front end of the language, in the code a build wrote for `unsyn.us`. These
+// are not hand-maintained files: the spec at the root of this crate is the source
+// of every type below, and `build.rs` says how the released generator is the one
+// that wrote them. A `use super::input::UnsynInput` inside one of them is this
+// crate's own `input`, and a `super::lexer` is this crate's own `lexer` — the
+// three are siblings here exactly as the files of a build's output are siblings
+// wherever else one is written.
+//
+// `include!` rather than `#[path]` because a `path` attribute takes a literal
+// alone, and the directory a build writes into is known only once the build has
+// run.
+//
+// What the allowances are for, and why they are here rather than in the
+// generated files: a build writes code, and an `allow` is a statement about the
+// file that holds it. This crate holds the output as its own front end, so this
+// crate says what it tolerates — a rule's character class is written as one test
+// of a range, which is what `clippy` would rather had been a named method, and a
+// build writes every rule's node and descent whether or not this crate's passes
+// reach them. A caller that keeps the same output elsewhere decides for itself.
+#[allow(
+    dead_code,
+    clippy::manual_is_ascii_check,
+    clippy::needless_borrow,
+    clippy::type_complexity,
+    clippy::enum_variant_names
+)]
+pub mod lexer {
+    include!(concat!(env!("OUT_DIR"), "/unsyn/lexer.rs"));
+}
+
+#[allow(
+    dead_code,
+    clippy::manual_is_ascii_check,
+    clippy::needless_borrow,
+    clippy::type_complexity,
+    clippy::enum_variant_names
+)]
+pub mod syntax {
+    include!(concat!(env!("OUT_DIR"), "/unsyn/syntax.rs"));
+}
+
+#[allow(
+    dead_code,
+    clippy::manual_is_ascii_check,
+    clippy::needless_borrow,
+    clippy::type_complexity,
+    clippy::enum_variant_names
+)]
+pub mod visit {
+    include!(concat!(env!("OUT_DIR"), "/unsyn/visit.rs"));
+}

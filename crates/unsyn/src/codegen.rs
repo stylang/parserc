@@ -119,43 +119,44 @@
 //!
 //! [`syn`]: https://docs.rs/syn/latest/syn/visit/index.html
 //!
-//! # Where the generated code differs from this crate's own
+//! # What the generated code is written from
 //!
-//! [`lexer`] is written by hand and is tuned where a generated file
-//! is merely correct. The differences that remain are deliberate:
+//! This crate's own front end is output of this module: `build.rs` runs a
+//! released generator over `unsyn.us`, and the `lexer`, `syntax` and `visit`
+//! modules of this crate are that output. So nothing below is a difference
+//! between two trees — there is one tree, and what a build cannot see is the
+//! test. A name, a field or a bound this module writes wrong is a compile error
+//! in the crate that consumes the output, which is the reason the passes read
+//! the tree through free functions in the [`read`] module rather than methods on
+//! it.
 //!
-//! - The hand file gives the parts of a rule names that say what they hold —
-//!   `open`, `head`, `tail` — where the generator has only the file to go by and
-//!   says `f1`, `f2`, and the rule's own name. A group of a right side that the
-//!   spec never named used to be answered the same way, by the hand file naming
-//!   it anyway; those are now rules of `unsyn.us` where a reader of a pattern
-//!   matches on them, and text where nobody does, which is what the
+//! Three decisions in the output are worth naming, because each is a rule taken
+//! from the file and nothing else:
+//!
+//! - A part of a right side the production named nothing is named by its place —
+//!   `f1`, `f2` — beside the rule's own name where the operand is a name. A group
+//!   the spec never gave a left side is what the
 //!   [`UnnamedAlternative`](super::errors::LintKind::UnnamedAlternative) lint
-//!   asks of the author of a file either way.
-//! - A single character of the described language is a field of
-//!   [`Char`](parserc::syntax::Char) in a generated `syntax` node, wearing the
-//!   character in its type. A punctuator that the production names no rule for
-//!   is the same shape here: `Char<I, '~'>` for `~`, `Char<I, '|'>` for `|`. What
-//!   earns a type of its own is a punctuator the spec gives a rule — `Star`,
-//!   `Question` and `Plus` — and each of those holds one `Char`, so the two trees
-//!   agree on both the type that carries the character and the span it covers.
-//!   What meets such a character is the combinator's own refusal, which says
-//!   what was asked of the position and not what stood in it.
-//! - A refusal of a *rule* is named after the rule the production stood in,
-//!   which is what the family of rules a build writes holds: only the rules
-//!   whose code points at itself, in the order the file declares them. A
-//!   refusal of a combinator — a character that is not the one asked for, a
-//!   probe that met what it refused — is told as the combinator's own, in the
-//!   arm the framework's kind is carried in, because the file says nothing
-//!   wider about it.
-//! - The two trees agree on that family of rules, and nowhere else. The kept
-//!   file is built to reach this crate's error, so every rule the code of a
-//!   build names must already be a variant of
-//!   [`SyntaxKind`](super::errors::SyntaxKind), worn under the name the rule
-//!   is written under. The hand file names the *words* it expects besides
-//!   those, from the tables of [`PunctKind`](super::errors::PunctKind) and
-//!   [`KeywordKind`](super::errors::KeywordKind) that no file can be asked to
-//!   write: a build leaves a word to the combinator that met it.
+//!   asks an author about, precisely so that the code need not fall back to a
+//!   place.
+//! - A single character of the described language is
+//!   [`Char`](parserc::syntax::Char), wearing the character in its type, so that
+//!   the field and the span it covers cannot disagree. What meets such a
+//!   character is the combinator's own refusal, which says what was asked of the
+//!   position and not what stood in it.
+//! - A refusal of a *rule* is named after the rule the production stood in, and
+//!   that is the whole of the family a build writes: only the rules whose code
+//!   points at itself, in the order the file declares them — an `except` that
+//!   took all of the run it was written over, and a repetition that came short of
+//!   its bound. A refusal of a combinator is told as the combinator's own, in the
+//!   arm the framework's kind is carried in, because the file says nothing wider
+//!   about a position that begins no token.
+//!
+//! Because the crate builds itself, every rule this module names in a refusal
+//! must already be a variant of [`SyntaxKind`](super::errors::SyntaxKind), worn
+//! under the name the rule is written under: the build reaches this crate's
+//! error rather than writing one, and a variant it asks for that the enum does
+//! not hold is a compile error here, not a silent string.
 //!
 //! # What a build writes beside the rules
 //!
@@ -339,8 +340,13 @@ where
         self
     }
 
-    /// Says where the input trait is found, as a path the file imports rather
-    /// than writes. By default there is none: a build emits the trait itself.
+    /// Says where the input trait is found, as the path **of the trait itself**,
+    /// which the file imports rather than writes: `crate::input::UnsynInput`, not
+    /// `crate::input`. By default there is none: a build emits the trait itself.
+    ///
+    /// [`error_at`](Self::error_at) is named by the module the error is found in
+    /// instead, because its own name is given along with it. Where the two agree
+    /// is that a build writes no definition of a thing it was told the path of.
     #[inline]
     pub fn input_at<P>(mut self, path: P) -> Self
     where
@@ -2623,7 +2629,8 @@ where
                     // The `break` carries its semicolon because that is how
                     // `rustfmt` writes it, and the file this code is kept in is
                     // a file `rustfmt` has been over: tokens formatting changes
-                    // would make the kept file say something a build does not.
+                    // would make the code a build writes say something another
+                    // build does not.
                     let Some(one) = #each else { break; };
                     taken.push(one);
                 }
@@ -3981,8 +3988,8 @@ where
 
     /// The visitor of the module: one hook per rule, each descending through
     /// the walk of it unless a visitor says otherwise, and one hook for the
-    /// text every leaf ends with — the same shape the hand tree's visitor
-    /// has, built from the shapes the file declared and nothing else.
+    /// text every leaf ends with — the same shape the crate's own visitor is
+    /// built to, since this crate reads the tree a build of it writes.
     fn visit_items(&mut self) -> TokenStream {
         let input = self.input.clone();
         use quote::format_ident;
